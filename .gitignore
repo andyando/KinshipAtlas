@@ -1,0 +1,21 @@
+# Private genealogy records and working notes
+/private/
+!/private/
+/private/*
+!/private/README.md
+
+# Common genealogy exports and sensitive local databases
+*.ged
+*.gedcom
+*.gramps
+*.sqlite
+*.sqlite3
+*.db
+
+# Local secrets and operating-system files
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+Desktop.ini

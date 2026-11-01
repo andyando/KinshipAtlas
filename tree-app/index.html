@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Kinship Atlas</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="Kinship Atlas home">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      <span><span class="brand-kicker">LOCAL FAMILY ARCHIVE</span><strong>Kinship Atlas</strong></span>
+    </a>
+    <div class="topbar-meta"><span class="privacy-indicator"><span class="privacy-dot"></span> ON THIS DEVICE</span><span class="topbar-divider"></span><span id="treeLabel">No tree loaded</span></div>
+    <div class="topbar-actions">
+      <label class="button button-primary" for="gedcomInput">
+        <span class="button-plus" aria-hidden="true">+</span> Open GEDCOM
+        <input id="gedcomInput" type="file" accept=".ged,.gedcom,text/plain">
+      </label>
+      <button id="clearButton" class="button button-quiet" type="button" disabled>Clear</button>
+    </div>
+  </header>
+
+  <div class="app-shell">
+    <aside class="roster-panel" aria-label="People in tree">
+      <div class="panel-intro">
+        <div class="eyebrow">DIRECTORY <span class="eyebrow-rule"></span></div>
+        <div class="roster-count"><strong id="peopleCount">0</strong><span>people</span></div>
+      </div>
+      <label class="search-box" for="peopleSearch">
+        <span class="search-glyph" aria-hidden="true">⌕</span>
+        <input id="peopleSearch" type="search" placeholder="Find a person" autocomplete="off" disabled>
+        <kbd>/</kbd>
+      </label>
+      <div class="roster-filters" aria-hidden="true"><span>NAME</span><span>RECORD</span></div>
+      <div id="peopleList" class="people-list">
+        <div class="list-empty">Open a GEDCOM to see people here.</div>
+      </div>
+      <div class="roster-foot"><span class="status-pip"></span><span id="loadStatus">WAITING FOR FILE</span></div>
+    </aside>
+
+    <main class="main-panel">
+      <div class="main-heading">
+        <div class="heading-copy">
+          <div class="eyebrow">RELATIONSHIP MAP <span class="eyebrow-rule"></span><span id="generationLabel">FIVE GENERATIONS</span></div>
+          <h1 id="focusTitle">A family, in context.</h1>
+          <p id="focusSubtitle">Open a GEDCOM to explore recorded relationships.</p>
+        </div>
+        <div class="history-controls" aria-label="Navigation history">
+          <button id="backButton" class="icon-button" type="button" title="Back" aria-label="Back" disabled>←</button>
+          <button id="forwardButton" class="icon-button" type="button" title="Forward" aria-label="Forward" disabled>→</button>
+          <span class="history-divider"></span>
+          <button id="zoomOutButton" class="icon-button zoom-button" type="button" title="Zoom out" aria-label="Zoom out" disabled>−</button>
+          <span id="zoomLabel" class="zoom-label">100%</span>
+          <button id="zoomInButton" class="icon-button zoom-button" type="button" title="Zoom in" aria-label="Zoom in" disabled>+</button>
+        </div>
+      </div>
+      <div id="graphViewport" class="graph-viewport">
+        <div id="treeCanvas" class="tree-canvas">
+          <div class="welcome-state">
+            <div class="welcome-art" aria-hidden="true">
+              <span class="orbit orbit-a"></span><span class="orbit orbit-b"></span>
+              <span class="welcome-node node-a"></span><span class="welcome-node node-b"></span>
+              <span class="welcome-node node-c"></span><span class="welcome-node node-d"></span>
+              <span class="welcome-node node-e"></span><span class="welcome-stem stem-a"></span>
+              <span class="welcome-stem stem-b"></span><span class="welcome-stem stem-c"></span>
+              <span class="welcome-stem stem-d"></span>
+            </div>
+            <div class="eyebrow">YOUR ARCHIVE, CONNECTED</div>
+            <h2>Start with a person.</h2>
+            <p>Choose a local GEDCOM file to open its family relationships in this tab.</p>
+            <label class="button button-primary welcome-button" for="gedcomInput"><span class="button-plus" aria-hidden="true">+</span> Open GEDCOM</label>
+            <span class="welcome-note">Your file is read locally and is not uploaded or saved by this app.</span>
+          </div>
+        </div>
+      </div>
+      <footer class="graph-footer"><span id="graphSummary">NO TREE LOADED</span><span class="graph-footer-right">SELECT A PERSON TO RECENTER</span></footer>
+    </main>
+
+    <aside class="details-panel" aria-label="Selected person details">
+      <div id="detailsContent" class="details-content">
+        <div class="details-empty">
+          <div class="details-emblem" aria-hidden="true">K</div>
+          <div class="eyebrow">PERSON RECORD</div>
+          <h2>No person selected</h2>
+          <p>Details recorded in the source tree will appear here.</p>
+        </div>
+      </div>
+    </aside>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
