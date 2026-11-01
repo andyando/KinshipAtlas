@@ -13,12 +13,14 @@ Genealogy can expose sensitive information about people who are alive, including
 ## Storage and sharing
 
 - The canonical archive is `G:\Family`, outside this project workspace. Work there in place; do not copy, move, or reorganize existing archive files unless explicitly asked.
+- Kinship Atlas caches the active GEDCOM text, unsaved state, and supported media-folder handle in the browser tab's IndexedDB to restore across refresh/navigation. The top-level **Clear** action deletes this active session record. This local browser storage is not encrypted by the app and is separate from the GEDCOM file and archive.
 - Save new research notes and reports to `G:\Family\08_Research` by default. Use the existing `01_People`, `04_Records`, `05_Photos`, `06_DNA`, or other matching archive folders only when the requested output belongs there.
 - Do not overwrite or rename an existing archive file unless explicitly asked. Check the target folder and choose a distinct filename for new work.
 - Keep any temporary working files under this workspace's `private/`; that directory is excluded from this workspace's Git by default. Completed work should normally be saved in the canonical archive.
 - Do not commit private records, scans, GEDCOM files, exports, or notes. Inspect `git status` and review every staged file before any commit.
 - Git ignore applies only within this workspace; it does not cover `G:\Family`, provide encryption or access control, or protect against cloud synchronization, backups, malware, or accidental sharing. Use encrypted storage and review sync, backup, and device-sharing settings for both locations.
 - Before using an external website, AI service, or shared drive, check its privacy terms and whether you have permission to disclose the material. Prefer anonymized excerpts and omit unnecessary identifiers.
+- Kinship Atlas's Perplexity action is an explicit external-sharing step: it is available only for people with recorded death details, previews the exact prompt, requires consent, and copies the prompt for the user to paste and submit. It excludes relatives without recorded death details. Review and remove details that should not be shared before submission.
 - Remove identifying metadata from files intended for sharing and inspect the final export, not just the source document.
 
 ## Corrections and retention

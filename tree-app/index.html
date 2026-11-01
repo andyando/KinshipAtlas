@@ -20,8 +20,10 @@
         <span class="button-plus" aria-hidden="true">+</span> Open GEDCOM
         <input id="gedcomInput" type="file" accept=".ged,.gedcom,text/plain">
       </label>
-      <button id="mediaButton" class="button button-quiet media-button" type="button" disabled>Link media</button>
+      <button id="saveGedcomButton" class="button button-quiet save-gedcom-button" type="button" disabled>Save GEDCOM</button>
+      <button id="mediaButton" class="button button-quiet media-button" type="button" disabled>Select Media Folder</button>
       <input id="mediaInput" type="file" webkitdirectory directory multiple>
+      <input id="mediaUploadInput" type="file" accept="image/*,.pdf,application/pdf" multiple>
       <button id="clearButton" class="button button-quiet" type="button" disabled>Clear</button>
     </div>
   </header>
@@ -37,7 +39,18 @@
         <input id="peopleSearch" type="search" placeholder="Find a person" autocomplete="off" disabled>
         <kbd>/</kbd>
       </label>
-      <div class="roster-filters" aria-hidden="true"><span>NAME</span><span>RECORD</span></div>
+      <section id="directoryFilterPanel" class="directory-filter-panel" aria-label="Directory filters">
+        <label class="directory-filter-field" for="birthCountryFilter">Birth country<select id="birthCountryFilter" disabled><option value="">All countries</option></select></label>
+        <label class="directory-filter-field" for="deathCountryFilter">Death country<select id="deathCountryFilter" disabled><option value="">All countries</option></select></label>
+        <div class="directory-year-filter">
+          <div class="directory-year-heading"><label for="birthYearMin">Birth year</label><output id="birthYearLabel">All years</output></div>
+          <div class="directory-year-sliders"><input id="birthYearMin" type="range" disabled aria-label="Earliest birth year"><input id="birthYearMax" type="range" disabled aria-label="Latest birth year"></div>
+        </div>
+        <div class="directory-year-filter">
+          <div class="directory-year-heading"><label for="deathYearMin">Death year</label><output id="deathYearLabel">All years</output></div>
+          <div class="directory-year-sliders"><input id="deathYearMin" type="range" disabled aria-label="Earliest death year"><input id="deathYearMax" type="range" disabled aria-label="Latest death year"></div>
+        </div>
+      </section>
       <div id="peopleList" class="people-list">
         <div class="list-empty">Open a GEDCOM to see people here.</div>
       </div>
@@ -74,7 +87,10 @@
             <div class="eyebrow">YOUR ARCHIVE, CONNECTED</div>
             <h2>Start with a person.</h2>
             <p>Choose a local GEDCOM file to open its family relationships in this tab.</p>
-            <label class="button button-primary welcome-button" for="gedcomInput"><span class="button-plus" aria-hidden="true">+</span> Open GEDCOM</label>
+            <div class="welcome-actions">
+              <label class="button button-primary welcome-button" for="gedcomInput"><span class="button-plus" aria-hidden="true">+</span> Open GEDCOM</label>
+              <button class="button button-secondary" type="button" data-create-gedcom>Create new GEDCOM</button>
+            </div>
             <span class="welcome-note">Your file is read locally and is not uploaded or saved by this app.</span>
           </div>
         </div>
@@ -94,5 +110,84 @@
     </aside>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <dialog id="mediaFolderDialog" class="app-dialog" aria-labelledby="mediaFolderTitle">
+    <section class="dialog-panel">
+      <h2 id="mediaFolderTitle">Link media folder</h2>
+      <p>Choose an existing folder or create <strong id="newMediaFolderName">a GEDCOM media folder</strong> inside a parent folder you select.</p>
+      <div class="dialog-actions">
+        <button id="linkExistingMediaFolder" class="dialog-button" type="button">Link existing folder</button>
+        <button id="createMediaFolder" class="dialog-button dialog-button-primary" type="button">Create new media folder</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="mediaFolderDialog">Cancel</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="researchDialog" class="app-dialog" aria-labelledby="researchDialogTitle">
+    <section class="dialog-panel research-dialog-panel">
+      <h2 id="researchDialogTitle">Review Perplexity research prompt</h2>
+      <p class="privacy-warning">This prompt contains personal family-history details. Continuing copies it to your clipboard and opens Perplexity; it is shared only if you paste and submit it there. Only people with a recorded death event are included.</p>
+      <label class="research-prompt-label" for="researchPromptPreview">Prompt preview</label>
+      <textarea id="researchPromptPreview" readonly></textarea>
+      <label class="research-consent"><input id="researchConsent" type="checkbox"> I understand these details may be sent to Perplexity if I paste and submit the prompt.</label>
+      <div class="dialog-actions">
+        <button id="confirmPerplexityResearch" class="dialog-button dialog-button-primary" type="button" disabled>Open Perplexity &amp; copy prompt</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="researchDialog">Cancel</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="newGedcomDialog" class="app-dialog" aria-labelledby="newGedcomTitle">
+    <form id="createGedcomForm" class="dialog-panel new-gedcom-panel">
+      <h2 id="newGedcomTitle">Create a GEDCOM starter</h2>
+      <p>Enter the first person. The app creates and downloads a GEDCOM file, then opens it here.</p>
+      <div class="new-gedcom-fields">
+        <label class="new-gedcom-field" for="newGedcomFileName">File name<input id="newGedcomFileName" type="text" value="Family Tree" required maxlength="80"></label>
+        <label class="new-gedcom-field" for="newGedcomGivenName">Given name(s)<input id="newGedcomGivenName" type="text" required maxlength="120" autocomplete="given-name"></label>
+        <label class="new-gedcom-field" for="newGedcomSurname">Surname<input id="newGedcomSurname" type="text" maxlength="120" autocomplete="family-name"></label>
+        <label class="new-gedcom-field" for="newGedcomSex">Sex<select id="newGedcomSex"><option value="">Not recorded</option><option value="F">Female</option><option value="M">Male</option></select></label>
+        <label class="new-gedcom-field" for="newGedcomBirthDate">Birth date<input id="newGedcomBirthDate" type="date"></label>
+        <label class="new-gedcom-field" for="newGedcomBirthPlace">Birth place<input id="newGedcomBirthPlace" type="text" maxlength="200"></label>
+      </div>
+      <div class="dialog-actions">
+        <button class="dialog-button dialog-button-primary" type="submit">Create &amp; download</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="newGedcomDialog">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="personEditorDialog" class="app-dialog person-editor-dialog" aria-labelledby="personEditorTitle">
+    <form id="personEditorForm" class="dialog-panel person-editor-panel">
+      <h2 id="personEditorTitle">Edit GEDCOM fields</h2>
+      <p>Every field in this person record is listed by GEDCOM level, tag, and value. Custom tags are preserved.</p>
+    <div class="gedcom-field-heading" aria-hidden="true"><span>Level</span><span>Tag</span><span>Value</span><span></span></div>
+      <div id="personFieldsEditor" class="person-fields-editor"></div>
+      <button id="addGedcomFieldButton" class="dialog-button" type="button">Add field</button>
+      <p id="personEditorError" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="dialog-button dialog-button-primary" type="submit">Save changes</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="personEditorDialog">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="addRelativeDialog" class="app-dialog" aria-labelledby="addRelativeTitle">
+    <form id="addRelativeForm" class="dialog-panel new-gedcom-panel">
+      <h2 id="addRelativeTitle">Add a relative</h2>
+      <p>A new person and the required family links will be added to this GEDCOM.</p>
+      <div class="new-gedcom-fields">
+        <label class="new-gedcom-field" for="relativeType">Relationship<select id="relativeType"><option value="PARENT">Parent</option><option value="CHILD">Child</option><option value="SIBLING">Sibling</option><option value="PARTNER">Partner</option></select></label>
+        <label class="new-gedcom-field" for="relativeParentRole">Parent role<select id="relativeParentRole"><option value="HUSB">Father / HUSB</option><option value="WIFE">Mother / WIFE</option></select></label>
+        <label class="new-gedcom-field" for="relativeGivenName">Given name(s)<input id="relativeGivenName" type="text" required maxlength="120"></label>
+        <label class="new-gedcom-field" for="relativeSurname">Surname<input id="relativeSurname" type="text" maxlength="120"></label>
+        <label class="new-gedcom-field" for="relativeSex">Sex<select id="relativeSex"><option value="">Not recorded</option><option value="F">Female</option><option value="M">Male</option></select></label>
+        <label class="new-gedcom-field" for="relativeBirthDate">Birth date<input id="relativeBirthDate" type="date"></label>
+        <label class="new-gedcom-field" for="relativeBirthPlace">Birth place<input id="relativeBirthPlace" type="text" maxlength="200"></label>
+        <label class="new-gedcom-field" for="relativeDeathDate">Death date<input id="relativeDeathDate" type="date"></label>
+        <label class="new-gedcom-field" for="relativeDeathPlace">Death place<input id="relativeDeathPlace" type="text" maxlength="200"></label>
+      </div>
+      <p id="relativeDuplicateWarning" class="form-error" role="alert" hidden>A person with this name already exists. Confirm below only if this is a distinct individual.</p>
+      <label id="relativeDuplicateConfirmationLabel" class="research-consent" hidden><input id="relativeDuplicateConfirmed" type="checkbox"> This is a different person with the same name.</label>
+      <div class="dialog-actions">
+        <button class="dialog-button dialog-button-primary" type="submit">Add person</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="addRelativeDialog">Cancel</button>
+      </div>
+    </form>
+  </dialog>
 </body>
 </html>

@@ -37,13 +37,46 @@
   const state = {
     people: new Map(), families: new Map(), sources: new Map(), selectedId: null,
     fileName: '', searchText: '', history: [], historyIndex: -1, zoom: 1,
-    mediaIndex: null, mediaUrls: new Map()
+    mediaIndex: null, mediaUrls: new Map(), mediaRelativePaths: new WeakMap(), mediaDirectoryHandle: null,
+    rememberedMediaDirectoryHandle: null,
+    pendingUploadPersonId: null, pendingResearchPersonId: null,
+    primaryMediaKey: '', primaryMedia: new Map(), additionalMedia: new Map(),
+    gedcomRecords: [], gedcomDirty: false, gedcomText: '', sessionSaveQueue: Promise.resolve(),
+    directoryFilters: { birthCountry: '', deathCountry: '', birthMin: null, birthMax: null, deathMin: null, deathMax: null },
+    directoryYearBounds: { birth: null, death: null },
+    expandedSurnames: new Set()
   };
   const elements = {
     fileInput: document.querySelector('#gedcomInput'), mediaInput: document.querySelector('#mediaInput'),
-    mediaButton: document.querySelector('#mediaButton'), clear: document.querySelector('#clearButton'),
+    mediaUploadInput: document.querySelector('#mediaUploadInput'), mediaButton: document.querySelector('#mediaButton'),
+    mediaFolderDialog: document.querySelector('#mediaFolderDialog'),
+    linkExistingMediaFolder: document.querySelector('#linkExistingMediaFolder'),
+    createMediaFolder: document.querySelector('#createMediaFolder'),
+    personEditorDialog: document.querySelector('#personEditorDialog'),
+    personEditorForm: document.querySelector('#personEditorForm'),
+    personFieldsEditor: document.querySelector('#personFieldsEditor'),
+    personEditorError: document.querySelector('#personEditorError'),
+    addGedcomField: document.querySelector('#addGedcomFieldButton'),
+    addRelativeDialog: document.querySelector('#addRelativeDialog'),
+    addRelativeForm: document.querySelector('#addRelativeForm'),
+    relativeType: document.querySelector('#relativeType'),
+    relativeParentRole: document.querySelector('#relativeParentRole'),
+    relativeParentRoleField: document.querySelector('#relativeParentRole').closest('.new-gedcom-field'),
+    researchDialog: document.querySelector('#researchDialog'),
+    researchPromptPreview: document.querySelector('#researchPromptPreview'),
+    researchConsent: document.querySelector('#researchConsent'),
+    confirmPerplexityResearch: document.querySelector('#confirmPerplexityResearch'),
+    newGedcomDialog: document.querySelector('#newGedcomDialog'),
+    createGedcomForm: document.querySelector('#createGedcomForm'),
+    saveGedcom: document.querySelector('#saveGedcomButton'),
+    clear: document.querySelector('#clearButton'),
     treeLabel: document.querySelector('#treeLabel'), peopleCount: document.querySelector('#peopleCount'),
     search: document.querySelector('#peopleSearch'), peopleList: document.querySelector('#peopleList'),
+    birthCountryFilter: document.querySelector('#birthCountryFilter'),
+    deathCountryFilter: document.querySelector('#deathCountryFilter'),
+    birthYearMin: document.querySelector('#birthYearMin'), birthYearMax: document.querySelector('#birthYearMax'),
+    deathYearMin: document.querySelector('#deathYearMin'), deathYearMax: document.querySelector('#deathYearMax'),
+    birthYearLabel: document.querySelector('#birthYearLabel'), deathYearLabel: document.querySelector('#deathYearLabel'),
     loadStatus: document.querySelector('#loadStatus'), statusPip: document.querySelector('.status-pip'),
     title: document.querySelector('#focusTitle'), subtitle: document.querySelector('#focusSubtitle'),
     generationLabel: document.querySelector('#generationLabel'), graphSummary: document.querySelector('#graphSummary'),
@@ -63,12 +96,124 @@
     return { type, value: value || '', date: '', place: '', detail: '', notes: [], sources: [] };
   }
 
+  function cleanGedcomValue(value) {
+    return String(value || '').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function formatGedcomDate(value) {
+    const [year, month, day] = value.split('-');
+    const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+    return year && monthNames[Number(month) - 1] ? `${Number(day)} ${monthNames[Number(month) - 1]} ${year}` : '';
+  }
+
+  function splitGedcomRecords(text) {
+    const records = [];
+    let active = null;
+    for (const line of text.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+      const start = line.match(/^0\s+(?:(@[^@]+@)\s+)?([A-Za-z0-9_]+)(?:\s+(.*))?$/);
+      if (start) {
+        if (active) records.push(active);
+        active = { xref: splitXref(start[1]), tag: start[2].toUpperCase(), lines: [line] };
+      } else if (active) {
+        active.lines.push(line);
+      }
+    }
+    if (active) records.push(active);
+    return records;
+  }
+
+  function parseGedcomField(line) {
+    const match = line.match(/^(\d+)\s+([A-Za-z0-9_]+)(?:\s+(.*))?$/);
+    return match ? { level: Number(match[1]), tag: match[2].toUpperCase(), value: match[3] || '' } : null;
+  }
+
+  function serializeGedcomRecords(records) {
+    return `${records.flatMap((record) => record.lines).join('\r\n').replace(/\r?\n*$/, '')}\r\n`;
+  }
+
+  function getActiveSessionId() {
+    let sessionId = sessionStorage.getItem('kinship-atlas-session-id');
+    if (!sessionId) {
+      sessionId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      sessionStorage.setItem('kinship-atlas-session-id', sessionId);
+    }
+    return sessionId;
+  }
+
+  function openSessionDatabase() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open('kinship-atlas-session', 1);
+      request.onupgradeneeded = () => request.result.createObjectStore('sessions');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function readActiveSession() {
+    const database = await openSessionDatabase();
+    return new Promise((resolve, reject) => {
+      const request = database.transaction('sessions', 'readonly').objectStore('sessions').get(getActiveSessionId());
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function writeActiveSession(session) {
+    const database = await openSessionDatabase();
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction('sessions', 'readwrite');
+      transaction.objectStore('sessions').put(session, getActiveSessionId());
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error || new Error('Session write aborted.'));
+    });
+  }
+
+  async function persistActiveSession() {
+    if (!state.fileName || !state.gedcomText) return;
+    const snapshot = {
+      fileName: state.fileName,
+      gedcomText: state.gedcomText,
+      gedcomDirty: state.gedcomDirty,
+      selectedId: state.selectedId,
+      mediaDirectoryHandle: state.mediaDirectoryHandle
+    };
+    state.sessionSaveQueue = state.sessionSaveQueue.catch(() => {}).then(() => writeActiveSession(snapshot));
+    try {
+      await state.sessionSaveQueue;
+    } catch {
+      showToast('This browser could not retain the current session. Keep the GEDCOM saved to a file.');
+    }
+  }
+
+  async function clearActiveSession() {
+    const sessionId = sessionStorage.getItem('kinship-atlas-session-id');
+    sessionStorage.removeItem('kinship-atlas-session-id');
+    if (!sessionId) return;
+    await state.sessionSaveQueue.catch(() => {});
+    try {
+      const database = await openSessionDatabase();
+      await new Promise((resolve, reject) => {
+        const transaction = database.transaction('sessions', 'readwrite');
+        transaction.objectStore('sessions').delete(sessionId);
+        transaction.oncomplete = resolve;
+        transaction.onerror = () => reject(transaction.error);
+      });
+    } catch {
+      showToast('The saved browser session could not be cleared.');
+    }
+    state.sessionSaveQueue = Promise.resolve();
+  }
+
   function parseGedcom(text) {
     const people = new Map();
     const families = new Map();
     const sources = new Map();
+    const gedcomRecords = splitGedcomRecords(text);
+    const individualRecords = new Map(gedcomRecords.filter((entry) => entry.tag === 'INDI').map((entry) => [entry.xref, entry]));
     let record = null;
     let activeEvent = null;
+    let activeName = null;
 
     function finishRecord() {
       if (!record) return;
@@ -76,13 +221,16 @@
         const rawName = record.rawName || '';
         const parsedSurname = (rawName.match(/\/([^/]+)\//) || [])[1] || '';
         const fallbackName = rawName.replaceAll('/', '').replace(/\s+/g, ' ').trim();
+        const maidenName = record.nameEntries.find((entry) => ['BIRTH', 'MAIDEN'].includes(entry.type))?.value.replaceAll('/', '').replace(/\s+/g, ' ').trim() || '';
         const name = [record.givenName, record.surname || parsedSurname]
           .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim() || fallbackName || record.id;
+        const rawRecord = individualRecords.get(record.id);
         people.set(record.id, {
-          id: record.id, name, sex: record.sex, birthName: fallbackName,
+          id: record.id, name, surname: record.surname || parsedSurname, sex: record.sex, maidenName,
           parentFamilyIds: record.parentFamilyIds, spouseFamilyIds: record.spouseFamilyIds,
           events: record.events, sourceIds: [...new Set(record.sourceIds)],
-          mediaPaths: [...new Set(record.mediaPaths)]
+          mediaPaths: [...new Set(record.mediaPaths)],
+          fields: (rawRecord?.lines.slice(1) || []).map(parseGedcomField).filter(Boolean)
         });
       } else if (record.type === 'FAM') {
         families.set(record.id, {
@@ -95,6 +243,7 @@
       }
       record = null;
       activeEvent = null;
+      activeName = null;
     }
 
     const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
@@ -111,7 +260,7 @@
         finishRecord();
         if (!xref || !['INDI', 'FAM', 'SOUR'].includes(tag)) continue;
         if (tag === 'INDI') {
-          record = { id: xref, type: tag, rawName: '', givenName: '', surname: '', sex: '', parentFamilyIds: [], spouseFamilyIds: [], events: [], sourceIds: [], mediaPaths: [] };
+          record = { id: xref, type: tag, rawName: '', givenName: '', surname: '', sex: '', nameEntries: [], parentFamilyIds: [], spouseFamilyIds: [], events: [], sourceIds: [], mediaPaths: [] };
         } else if (tag === 'FAM') {
           record = { id: xref, type: tag, husbandId: '', wifeId: '', childIds: [], marriage: null, sourceIds: [] };
         } else {
@@ -122,6 +271,7 @@
       if (!record) continue;
 
       if (record.type === 'INDI') {
+        if (level === 1 && tag !== 'NAME') activeName = null;
         if (level === 1 && eventTags.has(tag)) {
           activeEvent = createEvent(tag, value);
           record.events.push(activeEvent);
@@ -132,11 +282,19 @@
           record.events.push(activeEvent);
           continue;
         }
-        if (level === 1 && tag === 'NAME') { record.rawName = value; activeEvent = null; continue; }
+        if (level === 1 && tag === 'NAME') {
+          const entry = { value, type: '' };
+          record.nameEntries.push(entry);
+          if (!record.rawName) record.rawName = value;
+          activeName = entry;
+          activeEvent = null;
+          continue;
+        }
         if (level === 1 && tag === 'SEX') { record.sex = value; activeEvent = null; continue; }
         if (level === 1 && tag === 'FAMC') { record.parentFamilyIds.push(splitXref(value)); activeEvent = null; continue; }
         if (level === 1 && tag === 'FAMS') { record.spouseFamilyIds.push(splitXref(value)); activeEvent = null; continue; }
         if (level === 1 && tag !== 'SOUR' && tag !== 'NOTE') activeEvent = null;
+        if (activeName && level === 2 && tag === 'TYPE') { activeName.type = value.trim().toUpperCase(); continue; }
         if (tag === 'GIVN' && level === 2) { record.givenName = value; continue; }
         if (tag === 'SURN' && level === 2) { record.surname = value; continue; }
         if (tag === 'FILE' && level >= 2) { record.mediaPaths.push(value.trim()); continue; }
@@ -178,7 +336,7 @@
     }
     finishRecord();
     if (!people.size) throw new Error('No individual records were found in this file.');
-    return { people, families, sources };
+    return { people, families, sources, gedcomRecords };
   }
 
   function personName(id) {
@@ -266,6 +424,37 @@
     return 'Dates not recorded';
   }
 
+  function isRecordedDeceased(person) {
+    return Boolean(person?.events.some((event) => event.type === 'DEAT' && (event.date || event.place || event.value)));
+  }
+
+  function researchEventSummary(event) {
+    return [event?.date, event?.place].filter(Boolean).join(' — ') || 'not recorded';
+  }
+
+  function buildPerplexityPrompt(person) {
+    const birth = person.events.find((event) => event.type === 'BIRT');
+    const death = person.events.find((event) => event.type === 'DEAT');
+    const deceasedParents = parentsOf(person.id).map((id) => state.people.get(id)).filter(isRecordedDeceased);
+    const deceasedChildren = childrenOf(person.id).map((id) => state.people.get(id)).filter(isRecordedDeceased);
+    const residences = [...new Set(person.events.filter((event) => event.type === 'RESI' && event.place)
+      .map((event) => researchEventSummary(event)))];
+    const lines = [
+      'Research this deceased individual in official, genealogical, and historical records.',
+      'Prioritize primary sources and reputable archives. Provide direct source links, repository/collection names, record dates, and a concise explanation of what each source supports.',
+      'Separate documented facts from hypotheses, preserve conflicting evidence, and do not invent missing details.',
+      '',
+      `Name: ${person.name}`,
+      `Birth date and location: ${researchEventSummary(birth)}`,
+      `Death date and location: ${researchEventSummary(death)}`
+    ];
+    if (person.maidenName) lines.push(`Explicitly recorded birth or maiden name: ${person.maidenName}`);
+    lines.push(`Parents with a recorded death: ${deceasedParents.map((parent) => `${parent.name} (${researchEventSummary(parent.events.find((event) => event.type === 'DEAT'))})`).join('; ') || 'None supplied; relatives without a recorded death are omitted.'}`);
+    lines.push(`Children with a recorded death: ${deceasedChildren.map((child) => `${child.name} (${researchEventSummary(child.events.find((event) => event.type === 'DEAT'))})`).join('; ') || 'None recorded.'}`);
+    lines.push(`Recorded places lived: ${residences.join('; ') || 'None recorded.'}`);
+    return lines.join('\n');
+  }
+
   function countryFlagForPlace(place) {
     const normalized = ` ${String(place || '').toLocaleLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
     const match = countryFlagAliases.find(([alias]) => normalized.includes(` ${alias} `));
@@ -312,7 +501,7 @@
     let bestScore = 0;
     let tied = false;
     for (const file of candidates) {
-      const fileSegments = normalizeMediaPath(file.webkitRelativePath || file.name).split('/').filter(Boolean);
+      const fileSegments = normalizeMediaPath(state.mediaRelativePaths.get(file) || file.webkitRelativePath || file.name).split('/').filter(Boolean);
       let score = 0;
       while (score < segments.length && score < fileSegments.length && segments.at(-1 - score) === fileSegments.at(-1 - score)) score += 1;
       if (score > bestScore) {
@@ -340,14 +529,319 @@
     state.mediaUrls.clear();
   }
 
-  function setLoaded(fileName, data) {
+  async function primaryMediaStorageKey(file, text) {
+    try {
+      if (globalThis.crypto?.subtle) {
+        const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+        const hash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+        return `kinship-atlas:primary-media:v1:${hash}`;
+      }
+    } catch { }
+    let hash = 2166136261;
+    for (let index = 0; index < text.length; index += 1) hash = Math.imul(hash ^ text.charCodeAt(index), 16777619);
+    return `kinship-atlas:primary-media:v1:${file.name}:${file.size}:${(hash >>> 0).toString(16)}`;
+  }
+
+  function loadPrimaryMedia(storageKey, people) {
+    const primaryMedia = new Map();
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
+      for (const [personId, path] of Object.entries(saved)) {
+        if (typeof path === 'string' && people.get(personId)?.mediaPaths.includes(path)) primaryMedia.set(personId, path);
+      }
+    } catch { }
+    return primaryMedia;
+  }
+
+  function savePrimaryMedia() {
+    if (!state.primaryMediaKey) return false;
+    try {
+      localStorage.setItem(state.primaryMediaKey, JSON.stringify(Object.fromEntries(state.primaryMedia)));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function loadAdditionalMedia(storageKey, people) {
+    const additionalMedia = new Map();
+    try {
+      const saved = JSON.parse(localStorage.getItem(`${storageKey}:additional-media:v1`) || '{}');
+      for (const [personId, paths] of Object.entries(saved)) {
+        const person = people.get(personId);
+        if (!person || !Array.isArray(paths)) continue;
+        const validPaths = [...new Set(paths.filter((path) => typeof path === 'string' && path && !/[\\/]/.test(path)))];
+        if (!validPaths.length) continue;
+        additionalMedia.set(personId, validPaths);
+        for (const path of validPaths) if (!person.mediaPaths.includes(path)) person.mediaPaths.push(path);
+      }
+    } catch { }
+    return additionalMedia;
+  }
+
+  function saveAdditionalMedia() {
+    if (!state.primaryMediaKey) return false;
+    try {
+      localStorage.setItem(`${state.primaryMediaKey}:additional-media:v1`, JSON.stringify(Object.fromEntries(state.additionalMedia)));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function addFileToMediaIndex(file, relativePath) {
+    if (!state.mediaIndex) state.mediaIndex = { byName: new Map() };
+    state.mediaRelativePaths.set(file, relativePath);
+    const key = normalizeMediaPath(file.name);
+    if (!state.mediaIndex.byName.has(key)) state.mediaIndex.byName.set(key, []);
+    state.mediaIndex.byName.get(key).push(file);
+  }
+
+  async function indexMediaDirectory(directoryHandle) {
+    const byName = new Map();
+    const relativePaths = new WeakMap();
+    async function visit(directory, prefix = '') {
+      for await (const [name, entry] of directory.entries()) {
+        const path = prefix ? `${prefix}/${name}` : name;
+        if (entry.kind === 'directory') {
+          await visit(entry, path);
+          continue;
+        }
+        const file = await entry.getFile();
+        relativePaths.set(file, path);
+        const key = normalizeMediaPath(file.name);
+        if (!byName.has(key)) byName.set(key, []);
+        byName.get(key).push(file);
+      }
+    }
+    await visit(directoryHandle);
+    state.mediaRelativePaths = relativePaths;
+    state.mediaIndex = { byName };
+  }
+
+  async function restoreMediaDirectoryHandle(directoryHandle) {
+    if (!directoryHandle) return false;
+    try {
+      const permission = await directoryHandle.queryPermission({ mode: 'readwrite' });
+      if (permission !== 'granted') {
+        state.rememberedMediaDirectoryHandle = directoryHandle;
+        syncMediaButton();
+        return false;
+      }
+      state.mediaDirectoryHandle = directoryHandle;
+      state.rememberedMediaDirectoryHandle = null;
+      syncMediaButton();
+      await indexMediaDirectory(directoryHandle);
+      render();
+      return true;
+    } catch {
+      state.mediaDirectoryHandle = null;
+      state.rememberedMediaDirectoryHandle = directoryHandle;
+      syncMediaButton();
+      return false;
+    }
+  }
+
+  async function uniqueMediaFileName(directoryHandle, fileName) {
+    const extensionIndex = fileName.lastIndexOf('.');
+    const baseName = extensionIndex > 0 ? fileName.slice(0, extensionIndex) : fileName;
+    const extension = extensionIndex > 0 ? fileName.slice(extensionIndex) : '';
+    for (let suffix = 0; suffix < 10000; suffix += 1) {
+      const candidate = suffix ? `${baseName} (${suffix + 1})${extension}` : fileName;
+      try {
+        await directoryHandle.getFileHandle(candidate);
+      } catch (error) {
+        if (error.name === 'NotFoundError' || error.name === 'TypeMismatchError') return candidate;
+        throw error;
+      }
+    }
+    throw new Error('Could not find an unused filename for this media item.');
+  }
+
+  function mediaFolderName() {
+    const baseName = state.fileName.replace(/\.[^.]+$/, '').trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[. ]+$/, '');
+    return `${baseName || 'Family Tree'}_media`;
+  }
+
+  function syncMediaButton() {
+    elements.mediaButton.textContent = state.mediaDirectoryHandle || state.rememberedMediaDirectoryHandle
+      ? 'Update Media Folder'
+      : 'Select Media Folder';
+  }
+
+  async function chooseMediaDirectory(createNew = false) {
+    if (typeof window.showDirectoryPicker !== 'function') {
+      showToast('Saving to a folder requires a browser with local directory access, such as Edge or Chrome.');
+      return;
+    }
+    try {
+      const selectedDirectory = await window.showDirectoryPicker({ mode: 'readwrite' });
+      const directoryHandle = createNew
+        ? await selectedDirectory.getDirectoryHandle(mediaFolderName(), { create: true })
+        : selectedDirectory;
+      state.mediaDirectoryHandle = directoryHandle;
+      state.rememberedMediaDirectoryHandle = null;
+      syncMediaButton();
+      await indexMediaDirectory(directoryHandle);
+      render();
+      await persistActiveSession();
+      showToast(createNew ? `Media folder ready: ${mediaFolderName()}.` : 'Media folder selected for this tab.');
+    } catch (error) {
+      if (error.name !== 'AbortError') showToast('The media folder could not be opened for writing.');
+    }
+  }
+
+  function showMediaFolderDialog() {
+    if (state.rememberedMediaDirectoryHandle?.requestPermission) {
+      const handle = state.rememberedMediaDirectoryHandle;
+      handle.requestPermission({ mode: 'readwrite' }).then(async (permission) => {
+        if (permission !== 'granted') {
+          document.querySelector('#newMediaFolderName').textContent = mediaFolderName();
+          elements.mediaFolderDialog.showModal();
+          return;
+        }
+        state.mediaDirectoryHandle = handle;
+        state.rememberedMediaDirectoryHandle = null;
+        syncMediaButton();
+        await indexMediaDirectory(handle);
+        render();
+        await persistActiveSession();
+        showToast('Media folder access restored.');
+      }).catch(() => {
+        document.querySelector('#newMediaFolderName').textContent = mediaFolderName();
+        elements.mediaFolderDialog.showModal();
+      });
+      return;
+    }
+    if (typeof window.showDirectoryPicker !== 'function') {
+      elements.mediaInput.click();
+      return;
+    }
+    document.querySelector('#newMediaFolderName').textContent = mediaFolderName();
+    elements.mediaFolderDialog.showModal();
+  }
+
+  async function saveUploadedMedia(files) {
+    const person = state.people.get(state.pendingUploadPersonId);
+    const directoryHandle = state.mediaDirectoryHandle;
+    state.pendingUploadPersonId = null;
+    elements.mediaUploadInput.value = '';
+    if (!person || !directoryHandle) return;
+
+    let savedCount = 0;
+    let failedCount = 0;
+    for (const file of files) {
+      if (!isImageFile(file) && file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) {
+        failedCount += 1;
+        continue;
+      }
+      try {
+        const fileName = await uniqueMediaFileName(directoryHandle, file.name);
+        const fileHandle = await directoryHandle.getFileHandle(fileName, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(file);
+        await writable.close();
+        const savedFile = await fileHandle.getFile();
+        addFileToMediaIndex(savedFile, fileName);
+        if (!person.mediaPaths.includes(fileName)) person.mediaPaths.push(fileName);
+        const paths = state.additionalMedia.get(person.id) || [];
+        if (!paths.includes(fileName)) paths.push(fileName);
+        state.additionalMedia.set(person.id, paths);
+        savedCount += 1;
+      } catch {
+        failedCount += 1;
+      }
+    }
+
+    if (savedCount) {
+      render();
+      const linked = saveAdditionalMedia();
+      await persistActiveSession();
+      const linkStatus = linked ? 'Person links saved in this browser.' : 'Links will last only for this tab because browser storage is unavailable.';
+      showToast(`${savedCount} media item${savedCount === 1 ? '' : 's'} saved to the selected folder. ${linkStatus}${failedCount ? ` ${failedCount} item${failedCount === 1 ? '' : 's'} could not be saved.` : ''}`);
+    } else if (failedCount) {
+      render();
+      showToast(`${failedCount} item${failedCount === 1 ? '' : 's'} could not be saved. Choose an image or PDF and try again.`);
+    }
+  }
+
+  function primaryImageFor(person) {
+    const preferredPath = state.primaryMedia.get(person.id);
+    if (preferredPath) {
+      const file = resolveMediaFile(preferredPath);
+      if (file && isImageFile(file)) return { path: preferredPath, file };
+    }
+    for (const path of person.mediaPaths) {
+      const file = resolveMediaFile(path);
+      if (file && isImageFile(file)) return { path, file };
+    }
+    return null;
+  }
+
+  function unlinkPersonMedia(personId, path) {
+    const person = state.people.get(personId);
+    if (!person) return;
+    let additionalChanged = false;
+    const addedPaths = state.additionalMedia.get(personId) || [];
+    if (addedPaths.includes(path)) {
+      const remaining = addedPaths.filter((item) => item !== path);
+      if (remaining.length) state.additionalMedia.set(personId, remaining);
+      else state.additionalMedia.delete(personId);
+      additionalChanged = true;
+    }
+
+    let recordChanged = false;
+    const personRecord = state.gedcomRecords.find((record) => record.tag === 'INDI' && record.xref === personId);
+    if (personRecord) {
+      for (let index = 1; index < personRecord.lines.length; index += 1) {
+        const field = parseGedcomField(personRecord.lines[index]);
+        if (field?.tag !== 'FILE' || normalizeMediaPath(field.value) !== normalizeMediaPath(path)) continue;
+        let end = index + 1;
+        while (end < personRecord.lines.length) {
+          const descendant = parseGedcomField(personRecord.lines[end]);
+          if (descendant && descendant.level <= field.level) break;
+          end += 1;
+        }
+        personRecord.lines.splice(index, end - index);
+        index -= 1;
+        recordChanged = true;
+      }
+    }
+
+    if (additionalChanged) saveAdditionalMedia();
+    if (state.primaryMedia.get(personId) === path) {
+      state.primaryMedia.delete(personId);
+      savePrimaryMedia();
+    }
+    if (recordChanged) {
+      refreshAfterGedcomMutation(personId);
+    } else {
+      person.mediaPaths = person.mediaPaths.filter((item) => item !== path);
+      render();
+    }
+    showToast('Media unlinked from this person. The file remains in the media folder.');
+  }
+
+  function setLoaded(fileName, data, storageKey, gedcomText = '') {
     releaseMediaUrls();
     state.mediaIndex = null;
+    state.mediaRelativePaths = new WeakMap();
+    state.mediaDirectoryHandle = null;
+    state.rememberedMediaDirectoryHandle = null;
     elements.mediaInput.value = '';
     elements.mediaButton.disabled = false;
+    syncMediaButton();
     state.people = data.people;
     state.families = data.families;
     state.sources = data.sources;
+    refreshDirectoryFilters(true);
+    state.gedcomRecords = data.gedcomRecords;
+    state.gedcomDirty = false;
+    state.gedcomText = gedcomText || serializeGedcomRecords(data.gedcomRecords);
+    elements.saveGedcom.disabled = true;
+    state.primaryMediaKey = storageKey;
+    state.additionalMedia = loadAdditionalMedia(storageKey, state.people);
+    state.primaryMedia = loadPrimaryMedia(storageKey, state.people);
     state.fileName = fileName;
     state.searchText = '';
     state.history = [];
@@ -366,6 +860,69 @@
     const firstPerson = state.people.values().next().value;
     setFocus(firstPerson.id, true);
     renderRoster();
+  }
+
+  async function restoreActiveSession() {
+    let session;
+    try {
+      session = await readActiveSession();
+    } catch {
+      return;
+    }
+    if (!session?.fileName || !session.gedcomText) return;
+    try {
+      const file = new File([session.gedcomText], session.fileName, { type: 'text/plain' });
+      const parsed = parseGedcom(session.gedcomText);
+      const storageKey = await primaryMediaStorageKey(file, session.gedcomText);
+      setLoaded(session.fileName, parsed, storageKey, session.gedcomText);
+      state.gedcomDirty = Boolean(session.gedcomDirty);
+      elements.saveGedcom.disabled = !state.gedcomDirty;
+      if (state.gedcomDirty) elements.loadStatus.textContent = 'UNSAVED CHANGES';
+      await restoreMediaDirectoryHandle(session.mediaDirectoryHandle);
+      if (session.selectedId && state.people.has(session.selectedId)) setFocus(session.selectedId, true);
+    } catch {
+      showToast('The saved browser session could not be restored. Choose the GEDCOM file again.');
+    }
+  }
+
+  function markGedcomDirty() {
+    state.gedcomDirty = true;
+    state.gedcomText = serializeGedcomRecords(state.gedcomRecords);
+    elements.saveGedcom.disabled = false;
+    elements.loadStatus.textContent = 'UNSAVED CHANGES';
+    persistActiveSession();
+  }
+
+  async function saveGedcomToFile() {
+    if (!state.gedcomDirty) return;
+    const text = serializeGedcomRecords(state.gedcomRecords);
+    const suggestedName = state.fileName.toLowerCase().endsWith('.ged') ? state.fileName : `${state.fileName || 'Family Tree'}.ged`;
+    try {
+      if (typeof window.showSaveFilePicker === 'function') {
+        const handle = await window.showSaveFilePicker({
+          suggestedName,
+          types: [{ description: 'GEDCOM file', accept: { 'text/plain': ['.ged'] } }]
+        });
+        const writable = await handle.createWritable();
+        await writable.write(text);
+        await writable.close();
+      } else {
+        const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = suggestedName;
+        link.click();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+      state.gedcomDirty = false;
+      elements.saveGedcom.disabled = true;
+      elements.loadStatus.textContent = 'TREE SAVED LOCALLY';
+      state.gedcomText = text;
+      await persistActiveSession();
+      showToast('GEDCOM saved.');
+    } catch (error) {
+      if (error.name !== 'AbortError') showToast('The GEDCOM could not be saved.');
+    }
   }
 
   function setFocus(personId, replaceHistory = false) {
@@ -396,12 +953,12 @@
     const canShiftUp = navigation.up && parentsOf(personId).length > 0;
     const canShiftDown = navigation.down && childrenOf(personId).length > 0;
     if (canShiftUp || canShiftDown) button.classList.add('has-generation-shifts');
-    const photoFile = person.mediaPaths.map(resolveMediaFile).find((file) => file && isImageFile(file));
-    if (photoFile) {
+    const primaryImage = primaryImageFor(person);
+    if (primaryImage) {
       button.classList.add('has-photo');
       const photo = document.createElement('img');
       photo.className = 'card-photo';
-      photo.src = mediaUrl(photoFile);
+      photo.src = mediaUrl(primaryImage.file);
       photo.alt = `${person.name} photo`;
       button.append(photo);
     }
@@ -554,41 +1111,172 @@
 
   function renderRoster() {
     const query = state.searchText.trim().toLocaleLowerCase();
-    const matches = [...state.people.values()]
-      .filter((person) => !query || person.name.toLocaleLowerCase().includes(query))
-      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    const matches = [...state.people.values()].filter((person) => {
+      if (query && !person.name.toLocaleLowerCase().includes(query)) return false;
+      for (const [eventType, countryFilter, minFilter, maxFilter] of [
+        ['BIRT', 'birthCountry', 'birthMin', 'birthMax'], ['DEAT', 'deathCountry', 'deathMin', 'deathMax']
+      ]) {
+        const event = person.events.find((item) => item.type === eventType);
+        const country = countryFlagForPlace(event?.place || '')?.country || '';
+        const year = Number(yearFrom(event?.date || '')) || null;
+        const selectedCountry = state.directoryFilters[countryFilter];
+        if (selectedCountry && country !== selectedCountry) return false;
+        const rangePrefix = eventType === 'BIRT' ? 'birth' : 'death';
+        const bounds = state.directoryYearBounds[rangePrefix];
+        const rangeActive = bounds && (state.directoryFilters[minFilter] > bounds.min || state.directoryFilters[maxFilter] < bounds.max);
+        if (rangeActive && (!year || year < state.directoryFilters[minFilter] || year > state.directoryFilters[maxFilter])) return false;
+      }
+      return true;
+    }).sort((a, b) => {
+      const surnameOrder = (a.surname || '').localeCompare(b.surname || '', undefined, { sensitivity: 'base' });
+      return surnameOrder || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+    });
     elements.peopleList.replaceChildren();
     if (!matches.length) {
       const empty = document.createElement('div');
       empty.className = 'list-empty';
-      empty.textContent = query ? 'No names match this search.' : state.people.size ? 'No individuals in this file.' : 'Open a GEDCOM to see people here.';
+      empty.textContent = state.people.size ? 'No people match these filters.' : 'Open a GEDCOM to see people here.';
       elements.peopleList.append(empty);
       return;
     }
     const fragment = document.createDocumentFragment();
-    for (const person of matches.slice(0, 120)) {
-      const button = makeButton('', 'person-list-button');
-      button.dataset.personId = person.id;
-      button.setAttribute('aria-current', String(person.id === state.selectedId));
-      const avatar = document.createElement('span');
-      avatar.className = `roster-avatar${person.sex === 'F' ? ' female' : person.sex ? '' : ' unknown'}`;
-      avatar.textContent = initials(person.name);
-      const name = document.createElement('span');
-      name.className = 'roster-name';
-      name.textContent = person.name;
-      const dates = document.createElement('span');
-      dates.className = 'roster-years';
-      dates.textContent = lifespan(person).replace(' — ', '–');
-      button.append(avatar, name, dates);
-      fragment.append(button);
+    const groups = new Map();
+    for (const person of matches) {
+      const surname = person.surname || 'Unknown surname';
+      if (!groups.has(surname)) groups.set(surname, []);
+      groups.get(surname).push(person);
+    }
+    for (const [surname, people] of groups) {
+      const group = document.createElement('section');
+      group.className = 'surname-group';
+      const expanded = state.expandedSurnames.has(surname) || Boolean(query);
+      const toggle = makeButton('', 'surname-group-toggle');
+      toggle.dataset.surnameToggle = surname;
+      toggle.setAttribute('aria-expanded', String(expanded));
+      const indicator = document.createElement('span');
+      indicator.className = 'surname-group-indicator';
+      indicator.textContent = expanded ? '−' : '+';
+      const label = document.createElement('span');
+      label.className = 'surname-group-name';
+      label.textContent = surname;
+      const count = document.createElement('span');
+      count.className = 'surname-group-count';
+      count.textContent = String(people.length);
+      toggle.append(indicator, label, count);
+      group.append(toggle);
+      const groupedPeople = document.createElement('div');
+      groupedPeople.className = 'surname-group-people';
+      groupedPeople.hidden = !expanded;
+      for (const person of people) {
+        const button = makeButton('', 'person-list-button');
+        button.dataset.personId = person.id;
+        button.setAttribute('aria-current', String(person.id === state.selectedId));
+        const avatar = document.createElement('span');
+        avatar.className = `roster-avatar${person.sex === 'F' ? ' female' : person.sex ? '' : ' unknown'}`;
+        avatar.textContent = initials(person.name);
+        const name = document.createElement('span');
+        name.className = 'roster-name';
+        name.textContent = person.name;
+        const dates = document.createElement('span');
+        dates.className = 'roster-years';
+        dates.textContent = lifespan(person).replace(' — ', '–');
+        button.append(avatar, name, dates);
+        groupedPeople.append(button);
+      }
+      group.append(groupedPeople);
+      fragment.append(group);
     }
     elements.peopleList.append(fragment);
-    if (matches.length > 120) {
-      const note = document.createElement('div');
-      note.className = 'list-empty list-cap';
-      note.textContent = `Showing first 120 of ${matches.length.toLocaleString()} matches.`;
-      elements.peopleList.append(note);
+  }
+
+  function countryOptionsFor(eventType) {
+    return [...new Set([...state.people.values()].map((person) => {
+      const place = person.events.find((event) => event.type === eventType)?.place || '';
+      return countryFlagForPlace(place)?.country || '';
+    }).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  }
+
+  function yearsFor(eventType) {
+    return [...new Set([...state.people.values()].map((person) => {
+      const year = Number(yearFrom(person.events.find((event) => event.type === eventType)?.date || ''));
+      return year || null;
+    }).filter(Boolean))].sort((a, b) => a - b);
+  }
+
+  function populateCountryFilter(select, eventType) {
+    const selected = select.value;
+    select.replaceChildren(new Option('All countries', ''));
+    for (const country of countryOptionsFor(eventType)) select.add(new Option(country, country));
+    select.disabled = !state.people.size;
+    select.value = [...select.options].some((option) => option.value === selected) ? selected : '';
+    state.directoryFilters[eventType === 'BIRT' ? 'birthCountry' : 'deathCountry'] = select.value;
+  }
+
+  function updateYearFilterLabel(prefix) {
+    const min = state.directoryFilters[`${prefix}Min`];
+    const max = state.directoryFilters[`${prefix}Max`];
+    const years = yearsFor(prefix === 'birth' ? 'BIRT' : 'DEAT');
+    elements[`${prefix}YearLabel`].textContent = min === years[0] && max === years.at(-1) ? 'All years' : `${min}–${max}`;
+  }
+
+  function handleYearFilterInput(prefix, changedEdge) {
+    const minInput = elements[`${prefix}YearMin`];
+    const maxInput = elements[`${prefix}YearMax`];
+    let min = Number(minInput.value);
+    let max = Number(maxInput.value);
+    if (min > max) {
+      if (changedEdge === 'min') max = min;
+      else min = max;
     }
+    minInput.value = String(min);
+    maxInput.value = String(max);
+    state.directoryFilters[`${prefix}Min`] = min;
+    state.directoryFilters[`${prefix}Max`] = max;
+    updateYearFilterLabel(prefix);
+    renderRoster();
+  }
+
+  function setupYearFilter(eventType) {
+    const prefix = eventType === 'BIRT' ? 'birth' : 'death';
+    const minInput = elements[`${prefix}YearMin`];
+    const maxInput = elements[`${prefix}YearMax`];
+    const years = yearsFor(eventType);
+    if (!years.length) {
+      state.directoryYearBounds[prefix] = null;
+      minInput.disabled = true;
+      maxInput.disabled = true;
+      state.directoryFilters[`${prefix}Min`] = null;
+      state.directoryFilters[`${prefix}Max`] = null;
+      elements[`${prefix}YearLabel`].textContent = 'No years recorded';
+      return;
+    }
+    const min = years[0];
+    const max = years.at(-1);
+    state.directoryYearBounds[prefix] = { min, max };
+    minInput.min = maxInput.min = String(min);
+    minInput.max = maxInput.max = String(max);
+    if (state.directoryFilters[`${prefix}Min`] === null) state.directoryFilters[`${prefix}Min`] = min;
+    if (state.directoryFilters[`${prefix}Max`] === null) state.directoryFilters[`${prefix}Max`] = max;
+    state.directoryFilters[`${prefix}Min`] = Math.max(min, Math.min(max, state.directoryFilters[`${prefix}Min`]));
+    state.directoryFilters[`${prefix}Max`] = Math.max(state.directoryFilters[`${prefix}Min`], Math.min(max, state.directoryFilters[`${prefix}Max`]));
+    minInput.value = String(state.directoryFilters[`${prefix}Min`]);
+    maxInput.value = String(state.directoryFilters[`${prefix}Max`]);
+    minInput.disabled = false;
+    maxInput.disabled = false;
+    updateYearFilterLabel(prefix);
+  }
+
+  function refreshDirectoryFilters(reset = false) {
+    if (reset) {
+      state.directoryFilters = { birthCountry: '', deathCountry: '', birthMin: null, birthMax: null, deathMin: null, deathMax: null };
+      state.expandedSurnames.clear();
+      elements.birthCountryFilter.value = '';
+      elements.deathCountryFilter.value = '';
+    }
+    populateCountryFilter(elements.birthCountryFilter, 'BIRT');
+    populateCountryFilter(elements.deathCountryFilter, 'DEAT');
+    setupYearFilter('BIRT');
+    setupYearFilter('DEAT');
   }
 
   function section(title) {
@@ -729,6 +1417,19 @@
     const life = document.createElement('p'); life.className = 'detail-life'; life.textContent = lifespan(person);
     const id = document.createElement('span'); id.className = 'detail-id'; id.textContent = `GEDCOM @${person.id}@`;
     hero.append(monogram, kicker, title, life, id);
+    const personActions = document.createElement('div');
+    personActions.className = 'person-action-row';
+    const editButton = makeButton('Edit GEDCOM fields', 'research-button');
+    editButton.dataset.editPerson = person.id;
+    const addRelativeButton = makeButton('Add relative', 'research-button');
+    addRelativeButton.dataset.addRelative = person.id;
+    personActions.append(editButton, addRelativeButton);
+    if (isRecordedDeceased(person)) {
+      const researchButton = makeButton('Research with Perplexity', 'research-button');
+      researchButton.dataset.perplexityResearch = person.id;
+      personActions.append(researchButton);
+    }
+    hero.append(personActions);
     elements.details.append(hero);
     const media = renderMedia(person);
     if (media) elements.details.append(media);
@@ -755,13 +1456,29 @@
   }
 
   function renderMedia(person) {
-    if (!person.mediaPaths.length) return null;
     const mediaSection = document.createElement('section');
     mediaSection.className = 'detail-section';
     const heading = document.createElement('h3');
     heading.className = 'detail-section-title';
     heading.textContent = `Attached media (${person.mediaPaths.length})`;
     mediaSection.append(heading);
+
+    const actions = document.createElement('div');
+    actions.className = 'media-actions';
+    const addButton = makeButton('Add photo or PDF', 'media-add-button');
+    addButton.dataset.addMediaFor = person.id;
+    addButton.disabled = !state.mediaDirectoryHandle;
+    addButton.title = state.mediaDirectoryHandle ? 'Add photo or PDF to the selected folder' : 'Select a media folder before adding files';
+    actions.append(addButton);
+    mediaSection.append(actions);
+
+    if (!person.mediaPaths.length) {
+      const note = document.createElement('div');
+      note.className = 'event-detail';
+      note.textContent = 'No media attached yet.';
+      mediaSection.append(note);
+      return mediaSection;
+    }
 
     if (!state.mediaIndex) {
       const note = document.createElement('div');
@@ -774,6 +1491,7 @@
     const grid = document.createElement('div');
     grid.className = 'media-grid';
     mediaSection.append(grid);
+    const primaryImage = primaryImageFor(person);
     let missing = 0;
     for (const path of person.mediaPaths) {
       const file = resolveMediaFile(path);
@@ -781,21 +1499,49 @@
         missing += 1;
         continue;
       }
-      const link = document.createElement('a');
-      link.href = mediaUrl(file);
-      link.target = '_blank';
-      link.rel = 'noopener';
       if (isImageFile(file)) {
+        const item = document.createElement('div');
+        item.className = 'media-image-item';
+        const link = document.createElement('a');
         link.className = 'media-image-link';
+        link.href = mediaUrl(file);
+        link.target = '_blank';
+        link.rel = 'noopener';
         const image = document.createElement('img');
         image.src = mediaUrl(file);
         image.alt = file.name;
         link.append(image);
+        const isPrimary = primaryImage?.path === path;
+        const primaryButton = makeButton(isPrimary ? '★' : '☆', `media-primary-button${isPrimary ? ' is-primary' : ''}`);
+        primaryButton.dataset.personId = person.id;
+        primaryButton.dataset.primaryMedia = path;
+        primaryButton.setAttribute('aria-pressed', String(isPrimary));
+        primaryButton.setAttribute('aria-label', isPrimary ? 'Primary card image' : 'Set as primary card image');
+        primaryButton.title = isPrimary ? 'Primary card image' : 'Set as primary card image';
+        const unlinkButton = makeButton('🗑', 'media-remove-button');
+        unlinkButton.dataset.personId = person.id;
+        unlinkButton.dataset.unlinkMedia = path;
+        unlinkButton.setAttribute('aria-label', 'Unlink image from this person; file will remain in the media folder');
+        unlinkButton.title = 'Unlink from person (file remains in folder)';
+        item.append(link, primaryButton, unlinkButton);
+        grid.append(item);
       } else {
+        const item = document.createElement('div');
+        item.className = 'media-file-item';
+        const link = document.createElement('a');
         link.className = 'media-file-link';
+        link.href = mediaUrl(file);
+        link.target = '_blank';
+        link.rel = 'noopener';
         link.textContent = file.name;
+        const unlinkButton = makeButton('🗑', 'media-remove-button');
+        unlinkButton.dataset.personId = person.id;
+        unlinkButton.dataset.unlinkMedia = path;
+        unlinkButton.setAttribute('aria-label', 'Unlink media from this person; file will remain in the media folder');
+        unlinkButton.title = 'Unlink from person (file remains in folder)';
+        item.append(link, unlinkButton);
+        grid.append(item);
       }
-      grid.append(link);
     }
     if (missing === person.mediaPaths.length) {
       const note = document.createElement('div');
@@ -825,6 +1571,198 @@
     renderGraph();
     renderDetails();
   }
+  function appendGedcomFieldRow(field = { level: 1, tag: 'NOTE', value: '' }) {
+    const row = document.createElement('div');
+    row.className = 'gedcom-field-row';
+    const level = document.createElement('input');
+    level.className = 'gedcom-level-input';
+    level.type = 'number';
+    level.min = '1';
+    level.max = '99';
+    level.value = String(field.level);
+    level.setAttribute('aria-label', 'GEDCOM level');
+    const tag = document.createElement('input');
+    tag.className = 'gedcom-tag-input';
+    tag.type = 'text';
+    tag.maxLength = 32;
+    tag.value = field.tag;
+    tag.setAttribute('aria-label', 'GEDCOM tag');
+    const value = document.createElement('textarea');
+    value.className = 'gedcom-value-input';
+    value.rows = 1;
+    value.value = field.value;
+    value.setAttribute('aria-label', 'GEDCOM field value');
+    const remove = makeButton('×', 'gedcom-field-remove');
+    remove.setAttribute('aria-label', 'Remove GEDCOM field');
+    row.append(level, tag, value, remove);
+    elements.personFieldsEditor.append(row);
+    return row;
+  }
+
+  function openPersonEditor(person) {
+    state.pendingEditPersonId = person.id;
+    elements.personEditorError.hidden = true;
+    elements.personFieldsEditor.replaceChildren();
+    for (const field of person.fields) appendGedcomFieldRow(field);
+    elements.personEditorDialog.showModal();
+  }
+
+  function refreshAfterGedcomMutation(personId) {
+    const parsed = parseGedcom(serializeGedcomRecords(state.gedcomRecords));
+    state.people = parsed.people;
+    state.families = parsed.families;
+    state.sources = parsed.sources;
+    state.gedcomRecords = parsed.gedcomRecords;
+    refreshDirectoryFilters(false);
+    for (const [id, paths] of state.additionalMedia) {
+      const person = state.people.get(id);
+      if (person) for (const path of paths) if (!person.mediaPaths.includes(path)) person.mediaPaths.push(path);
+    }
+    for (const id of state.primaryMedia.keys()) {
+      if (!state.people.get(id)?.mediaPaths.includes(state.primaryMedia.get(id))) state.primaryMedia.delete(id);
+    }
+    elements.peopleCount.textContent = state.people.size.toLocaleString();
+    state.history = [];
+    state.historyIndex = -1;
+    markGedcomDirty();
+    setFocus(state.people.has(personId) ? personId : state.people.keys().next().value, true);
+  }
+
+  function savePersonFields() {
+    const personId = state.pendingEditPersonId;
+    const personRecord = state.gedcomRecords.find((record) => record.tag === 'INDI' && record.xref === personId);
+    if (!personRecord) return false;
+    const fields = [];
+    let previousLevel = 0;
+    for (const row of elements.personFieldsEditor.querySelectorAll('.gedcom-field-row')) {
+      const level = Number(row.querySelector('.gedcom-level-input').value);
+      const tag = row.querySelector('.gedcom-tag-input').value.trim().toUpperCase();
+      const value = row.querySelector('.gedcom-value-input').value.replace(/[\r\n]+/g, ' ');
+      if (!Number.isInteger(level) || level < 1 || level > 99 || level > previousLevel + 1 || !/^[A-Z0-9_]+$/.test(tag)) {
+        elements.personEditorError.textContent = 'Check field levels and tags. Levels must start at 1 and cannot skip a nesting level; tags may contain letters, numbers, and underscores.';
+        elements.personEditorError.hidden = false;
+        return false;
+      }
+      fields.push({ level, tag, value });
+      previousLevel = level;
+    }
+    personRecord.lines = [personRecord.lines[0], ...fields.map((field) => `${field.level} ${field.tag}${field.value ? ` ${field.value}` : ''}`)];
+    refreshAfterGedcomMutation(personId);
+    state.pendingEditPersonId = null;
+    elements.personEditorDialog.close();
+    return true;
+  }
+
+  function nextGedcomXref(prefix, tag) {
+    const existing = new Set(state.gedcomRecords.filter((record) => record.tag === tag).map((record) => record.xref));
+    let number = 1;
+    while (existing.has(`${prefix}${number}`)) number += 1;
+    return `${prefix}${number}`;
+  }
+
+  function addRecordBeforeTrailer(record) {
+    const trailerIndex = state.gedcomRecords.findIndex((entry) => entry.tag === 'TRLR');
+    state.gedcomRecords.splice(trailerIndex < 0 ? state.gedcomRecords.length : trailerIndex, 0, record);
+  }
+
+  function createRelativeRecord() {
+    const selected = state.people.get(state.selectedId);
+    if (!selected) return false;
+    const givenName = cleanGedcomValue(document.querySelector('#relativeGivenName').value).replaceAll('/', ' ').trim();
+    const surname = cleanGedcomValue(document.querySelector('#relativeSurname').value).replaceAll('/', ' ').trim();
+    if (!givenName) {
+      document.querySelector('#relativeGivenName').focus();
+      return false;
+    }
+    const fullName = `${givenName} ${surname}`.trim().toLocaleLowerCase();
+    const duplicateName = [...state.people.values()].some((person) => person.name.trim().toLocaleLowerCase() === fullName);
+    const duplicateWarning = document.querySelector('#relativeDuplicateWarning');
+    const duplicateConfirmation = document.querySelector('#relativeDuplicateConfirmationLabel');
+    const duplicateConfirmed = document.querySelector('#relativeDuplicateConfirmed');
+    if (duplicateName && !duplicateConfirmed.checked) {
+      duplicateWarning.hidden = false;
+      duplicateConfirmation.hidden = false;
+      duplicateConfirmed.focus();
+      return false;
+    }
+    duplicateWarning.hidden = true;
+    duplicateConfirmation.hidden = true;
+    const sex = document.querySelector('#relativeSex').value;
+    const birthDate = formatGedcomDate(document.querySelector('#relativeBirthDate').value);
+    const birthPlace = cleanGedcomValue(document.querySelector('#relativeBirthPlace').value);
+    const deathDate = formatGedcomDate(document.querySelector('#relativeDeathDate').value);
+    const deathPlace = cleanGedcomValue(document.querySelector('#relativeDeathPlace').value);
+    const relation = elements.relativeType.value;
+    const personId = nextGedcomXref('I', 'INDI');
+    const familyId = nextGedcomXref('F', 'FAM');
+    const newPersonLines = [
+      `0 @${personId}@ INDI`, `1 NAME ${givenName}${surname ? ` /${surname}/` : ''}`, `2 GIVN ${givenName}`
+    ];
+    if (surname) newPersonLines.push(`2 SURN ${surname}`);
+    if (sex) newPersonLines.push(`1 SEX ${sex}`);
+    if (birthDate || birthPlace) {
+      newPersonLines.push('1 BIRT');
+      if (birthDate) newPersonLines.push(`2 DATE ${birthDate}`);
+      if (birthPlace) newPersonLines.push(`2 PLAC ${birthPlace}`);
+    }
+    if (deathDate || deathPlace) {
+      newPersonLines.push('1 DEAT');
+      if (deathDate) newPersonLines.push(`2 DATE ${deathDate}`);
+      if (deathPlace) newPersonLines.push(`2 PLAC ${deathPlace}`);
+    }
+
+    const familyLines = [`0 @${familyId}@ FAM`];
+    let addFamilyRecord = true;
+    const selectedRecord = state.gedcomRecords.find((record) => record.tag === 'INDI' && record.xref === selected.id);
+    if (!selectedRecord) return false;
+    if (relation === 'PARENT') {
+      const parentRole = elements.relativeParentRole.value;
+      familyLines.push(`1 ${parentRole} @${personId}@`, `1 CHIL @${selected.id}@`);
+      newPersonLines.push(`1 FAMS @${familyId}@`);
+      selectedRecord.lines.push(`1 FAMC @${familyId}@`);
+    } else if (relation === 'CHILD') {
+      const selectedRole = selected.sex === 'F' ? 'WIFE' : 'HUSB';
+      familyLines.push(`1 ${selectedRole} @${selected.id}@`, `1 CHIL @${personId}@`);
+      newPersonLines.push(`1 FAMC @${familyId}@`);
+      selectedRecord.lines.push(`1 FAMS @${familyId}@`);
+    } else if (relation === 'SIBLING') {
+      const existingParentFamilyId = selected.parentFamilyIds.find((id) => state.families.has(id));
+      const existingParentFamilyRecord = state.gedcomRecords.find((record) => record.tag === 'FAM' && record.xref === existingParentFamilyId);
+      if (existingParentFamilyId && existingParentFamilyRecord) {
+        existingParentFamilyRecord.lines.push(`1 CHIL @${personId}@`);
+        newPersonLines.push(`1 FAMC @${existingParentFamilyId}@`);
+        addFamilyRecord = false;
+      } else {
+        familyLines.push(`1 CHIL @${selected.id}@`, `1 CHIL @${personId}@`);
+        selectedRecord.lines.push(`1 FAMC @${familyId}@`);
+        newPersonLines.push(`1 FAMC @${familyId}@`);
+      }
+    } else {
+      const selectedRole = selected.sex === 'F' ? 'WIFE' : 'HUSB';
+      const newRole = selectedRole === 'HUSB' ? 'WIFE' : 'HUSB';
+      familyLines.push(`1 ${selectedRole} @${selected.id}@`, `1 ${newRole} @${personId}@`);
+      newPersonLines.push(`1 FAMS @${familyId}@`);
+      selectedRecord.lines.push(`1 FAMS @${familyId}@`);
+    }
+    addRecordBeforeTrailer({ xref: personId, tag: 'INDI', lines: newPersonLines });
+    if (addFamilyRecord) addRecordBeforeTrailer({ xref: familyId, tag: 'FAM', lines: familyLines });
+    refreshAfterGedcomMutation(personId);
+    elements.addRelativeDialog.close();
+    elements.addRelativeForm.reset();
+    elements.relativeParentRoleField.hidden = false;
+    return true;
+  }
+
+  function ensureCreateGedcomWelcomeAction() {
+    const welcomeButton = elements.canvas.querySelector('.welcome-button');
+    if (!welcomeButton || elements.canvas.querySelector('[data-create-gedcom]')) return;
+    const actions = document.createElement('div');
+    actions.className = 'welcome-actions';
+    welcomeButton.replaceWith(actions);
+    const createButton = makeButton('Create new GEDCOM', 'button button-secondary');
+    createButton.dataset.createGedcom = 'true';
+    actions.append(welcomeButton, createButton);
+  }
 
   elements.fileInput.addEventListener('change', async (event) => {
     const file = event.target.files?.[0];
@@ -836,20 +1774,102 @@
     }
     try {
       elements.loadStatus.textContent = 'READING LOCALLY…';
-      const parsed = parseGedcom(await file.text());
-      setLoaded(file.name, parsed);
+      const text = await file.text();
+      const parsed = parseGedcom(text);
+      const storageKey = await primaryMediaStorageKey(file, text);
+      setLoaded(file.name, parsed, storageKey, text);
+      await persistActiveSession();
       showToast(`Loaded ${parsed.people.size.toLocaleString()} individuals. The data remains in this tab.`);
     } catch (error) {
       elements.loadStatus.textContent = 'IMPORT FAILED';
       showToast(error instanceof Error ? error.message : 'The GEDCOM could not be read.');
     }
   });
+  elements.saveGedcom.addEventListener('click', saveGedcomToFile);
+  elements.createGedcomForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const fileNameInput = document.querySelector('#newGedcomFileName');
+    const givenName = cleanGedcomValue(document.querySelector('#newGedcomGivenName').value).replaceAll('/', ' ').trim();
+    const surname = cleanGedcomValue(document.querySelector('#newGedcomSurname').value).replaceAll('/', ' ').trim();
+    const sex = document.querySelector('#newGedcomSex').value;
+    const birthDate = formatGedcomDate(document.querySelector('#newGedcomBirthDate').value);
+    const birthPlace = cleanGedcomValue(document.querySelector('#newGedcomBirthPlace').value);
+    if (!givenName) {
+      showToast('Enter at least one given name to create the GEDCOM.');
+      document.querySelector('#newGedcomGivenName').focus();
+      return;
+    }
 
-  elements.mediaButton.addEventListener('click', () => elements.mediaInput.click());
+    const requestedBase = cleanGedcomValue(fileNameInput.value).replace(/\.(?:ged|gedcom)$/i, '');
+    const safeBase = requestedBase.replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[. ]+$/, '') || 'Family Tree';
+    const fileName = `${safeBase}.ged`;
+    const lines = [
+      '0 HEAD', '1 SOUR KINSHIP ATLAS', '2 VERS 1.0', '1 GEDC', '2 VERS 5.5.1',
+      '2 FORM LINEAGE-LINKED', '1 CHAR UTF-8', `1 FILE ${fileName}`,
+      '0 @I1@ INDI', `1 NAME ${givenName}${surname ? ` /${surname}/` : ''}`,
+      `2 GIVN ${givenName}`
+    ];
+    if (surname) lines.push(`2 SURN ${surname}`);
+    if (sex) lines.push(`1 SEX ${sex}`);
+    if (birthDate || birthPlace) {
+      lines.push('1 BIRT');
+      if (birthDate) lines.push(`2 DATE ${birthDate}`);
+      if (birthPlace) lines.push(`2 PLAC ${birthPlace}`);
+    }
+    lines.push('0 TRLR');
+    const gedcomText = `${lines.join('\r\n')}\r\n`;
+    const file = new File([gedcomText], fileName, { type: 'text/plain' });
+    const parsed = parseGedcom(gedcomText);
+    let saveAction = 'downloaded';
+    try {
+      if (typeof window.showSaveFilePicker === 'function') {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: fileName,
+          types: [{ description: 'GEDCOM file', accept: { 'text/plain': ['.ged'] } }]
+        });
+        const writable = await handle.createWritable();
+        await writable.write(gedcomText);
+        await writable.close();
+        saveAction = 'saved';
+      } else {
+        const downloadUrl = URL.createObjectURL(file);
+        const downloadLink = document.createElement('a');
+        downloadLink.href = downloadUrl;
+        downloadLink.download = fileName;
+        downloadLink.click();
+        window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+      }
+    } catch (error) {
+      if (error.name !== 'AbortError') showToast('The GEDCOM file could not be saved.');
+      return;
+    }
+
+    const storageKey = await primaryMediaStorageKey(file, gedcomText);
+    setLoaded(fileName, parsed, storageKey, gedcomText);
+    await persistActiveSession();
+    elements.newGedcomDialog.close();
+    showToast(`Created a new GEDCOM starter with one person and ${saveAction} the file.`);
+  });
+  ensureCreateGedcomWelcomeAction();
+
+  elements.mediaButton.addEventListener('click', showMediaFolderDialog);
+  elements.linkExistingMediaFolder.addEventListener('click', () => {
+    chooseMediaDirectory(false).finally(() => elements.mediaFolderDialog.close());
+  });
+  elements.createMediaFolder.addEventListener('click', () => {
+    chooseMediaDirectory(true).finally(() => elements.mediaFolderDialog.close());
+  });
+  document.querySelectorAll('button[data-close-dialog]').forEach((button) => {
+    button.addEventListener('click', () => document.querySelector(`#${button.dataset.closeDialog}`).close());
+  });
   elements.mediaInput.addEventListener('change', (event) => {
     const files = [...(event.target.files || [])];
     elements.mediaInput.value = '';
     if (!files.length) return;
+    state.mediaDirectoryHandle = null;
+    state.rememberedMediaDirectoryHandle = null;
+    syncMediaButton();
+    state.mediaRelativePaths = new WeakMap();
     releaseMediaUrls();
     const byName = new Map();
     for (const file of files) {
@@ -872,26 +1892,59 @@
 
   elements.clear.addEventListener('click', () => {
     releaseMediaUrls(); state.mediaIndex = null;
+    state.mediaRelativePaths = new WeakMap(); state.mediaDirectoryHandle = null; state.pendingUploadPersonId = null;
+    syncMediaButton();
+    state.primaryMediaKey = ''; state.primaryMedia.clear();
+    state.additionalMedia.clear();
+    state.gedcomRecords = []; state.gedcomDirty = false; elements.saveGedcom.disabled = true;
     state.people.clear(); state.families.clear(); state.sources.clear(); state.selectedId = null;
-    state.fileName = ''; state.history = []; state.historyIndex = -1; state.searchText = '';
+    refreshDirectoryFilters(true);
+    state.fileName = ''; state.gedcomText = ''; state.history = []; state.historyIndex = -1; state.searchText = '';
+    state.rememberedMediaDirectoryHandle = null;
     elements.fileInput.value = ''; elements.mediaInput.value = ''; elements.mediaButton.disabled = true; elements.search.value = ''; elements.search.disabled = true;
     elements.clear.disabled = true; elements.back.disabled = true; elements.forward.disabled = true;
     elements.zoomIn.disabled = true; elements.zoomOut.disabled = true;
     elements.treeLabel.textContent = 'No tree loaded'; elements.peopleCount.textContent = '0';
     elements.loadStatus.textContent = 'WAITING FOR FILE'; elements.statusPip.classList.remove('ready');
     elements.canvas.innerHTML = '<div class="welcome-state"><div class="welcome-art" aria-hidden="true"><span class="orbit orbit-a"></span><span class="orbit orbit-b"></span><span class="welcome-node node-a"></span><span class="welcome-node node-b"></span><span class="welcome-node node-c"></span><span class="welcome-node node-d"></span><span class="welcome-node node-e"></span><span class="welcome-stem stem-a"></span><span class="welcome-stem stem-b"></span><span class="welcome-stem stem-c"></span><span class="welcome-stem stem-d"></span></div><div class="eyebrow">YOUR ARCHIVE, CONNECTED</div><h2>Start with a person.</h2><p>Choose a local GEDCOM file to open its family relationships in this tab.</p><label class="button button-primary welcome-button" for="gedcomInput"><span class="button-plus" aria-hidden="true">+</span> Open GEDCOM</label><span class="welcome-note">Your file is read locally and is not uploaded or saved by this app.</span></div>';
+    ensureCreateGedcomWelcomeAction();
     elements.title.textContent = 'A family, in context.'; elements.subtitle.textContent = 'Open a GEDCOM to explore recorded relationships.';
     elements.graphSummary.textContent = 'NO TREE LOADED'; elements.generationLabel.textContent = 'FIVE GENERATIONS';
     state.zoom = 1; elements.canvas.style.zoom = '1'; elements.zoomLabel.textContent = '100%';
     renderRoster(); renderDetails();
+    clearActiveSession();
   });
 
   elements.search.addEventListener('input', () => { state.searchText = elements.search.value; renderRoster(); });
+  elements.birthCountryFilter.addEventListener('change', () => {
+    state.directoryFilters.birthCountry = elements.birthCountryFilter.value;
+    renderRoster();
+  });
+  elements.deathCountryFilter.addEventListener('change', () => {
+    state.directoryFilters.deathCountry = elements.deathCountryFilter.value;
+    renderRoster();
+  });
+  elements.birthYearMin.addEventListener('input', () => handleYearFilterInput('birth', 'min'));
+  elements.birthYearMax.addEventListener('input', () => handleYearFilterInput('birth', 'max'));
+  elements.deathYearMin.addEventListener('input', () => handleYearFilterInput('death', 'min'));
+  elements.deathYearMax.addEventListener('input', () => handleYearFilterInput('death', 'max'));
   elements.peopleList.addEventListener('click', (event) => {
+    const groupToggle = event.target.closest('button[data-surname-toggle]');
+    if (groupToggle) {
+      const surname = groupToggle.dataset.surnameToggle;
+      if (state.expandedSurnames.has(surname)) state.expandedSurnames.delete(surname);
+      else state.expandedSurnames.add(surname);
+      renderRoster();
+      return;
+    }
     const button = event.target.closest('button[data-person-id]');
     if (button) setFocus(button.dataset.personId);
   });
   elements.canvas.addEventListener('click', (event) => {
+    if (event.target.closest('button[data-create-gedcom]')) {
+      elements.newGedcomDialog.showModal();
+      return;
+    }
     const shiftButton = event.target.closest('button[data-tree-shift]');
     if (shiftButton) {
       setFocus(shiftButton.dataset.personId);
@@ -901,8 +1954,104 @@
     if (personButton) setFocus(personButton.dataset.personId);
   });
   elements.details.addEventListener('click', (event) => {
+    const editButton = event.target.closest('button[data-edit-person]');
+    if (editButton) {
+      const person = state.people.get(editButton.dataset.editPerson);
+      if (person) openPersonEditor(person);
+      return;
+    }
+    const relativeButton = event.target.closest('button[data-add-relative]');
+    if (relativeButton) {
+      state.selectedId = relativeButton.dataset.addRelative;
+      elements.addRelativeForm.reset();
+      document.querySelector('#relativeDuplicateWarning').hidden = true;
+      document.querySelector('#relativeDuplicateConfirmationLabel').hidden = true;
+      elements.relativeParentRoleField.hidden = elements.relativeType.value !== 'PARENT';
+      elements.addRelativeDialog.showModal();
+      return;
+    }
+    const addButton = event.target.closest('button[data-add-media-for]');
+    if (addButton) {
+      state.pendingUploadPersonId = addButton.dataset.addMediaFor;
+      elements.mediaUploadInput.click();
+      return;
+    }
+    const researchButton = event.target.closest('button[data-perplexity-research]');
+    if (researchButton) {
+      const person = state.people.get(researchButton.dataset.perplexityResearch);
+      if (!isRecordedDeceased(person)) return;
+      state.pendingResearchPersonId = person.id;
+      elements.researchPromptPreview.value = buildPerplexityPrompt(person);
+      elements.researchConsent.checked = false;
+      elements.confirmPerplexityResearch.disabled = true;
+      elements.researchDialog.showModal();
+      return;
+    }
+    const primaryButton = event.target.closest('button[data-primary-media]');
+    if (primaryButton) {
+      state.primaryMedia.set(primaryButton.dataset.personId, primaryButton.dataset.primaryMedia);
+      render();
+      const saved = savePrimaryMedia();
+      showToast(saved ? 'Primary card image saved for this tree.' : 'Primary image selected for this tab; browser storage is unavailable.');
+      return;
+    }
+    const unlinkButton = event.target.closest('button[data-unlink-media]');
+    if (unlinkButton) {
+      unlinkPersonMedia(unlinkButton.dataset.personId, unlinkButton.dataset.unlinkMedia);
+      return;
+    }
     const button = event.target.closest('button[data-person-id]');
     if (button) setFocus(button.dataset.personId);
+  });
+  elements.mediaUploadInput.addEventListener('change', (event) => {
+    saveUploadedMedia([...(event.target.files || [])]);
+  });
+  elements.addGedcomField.addEventListener('click', () => appendGedcomFieldRow());
+  elements.personFieldsEditor.addEventListener('click', (event) => {
+    const removeButton = event.target.closest('.gedcom-field-remove');
+    if (removeButton) removeButton.closest('.gedcom-field-row').remove();
+  });
+  elements.personEditorForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    savePersonFields();
+  });
+  elements.personEditorDialog.addEventListener('close', () => {
+    state.pendingEditPersonId = null;
+  });
+  elements.addRelativeForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (!createRelativeRecord() && document.querySelector('#relativeDuplicateWarning').hidden) {
+      showToast('Enter a given name and ensure a person record is selected.');
+    }
+  });
+  elements.relativeType.addEventListener('change', () => {
+    elements.relativeParentRoleField.hidden = elements.relativeType.value !== 'PARENT';
+  });
+  elements.researchConsent.addEventListener('change', () => {
+    elements.confirmPerplexityResearch.disabled = !elements.researchConsent.checked;
+  });
+  elements.confirmPerplexityResearch.addEventListener('click', async () => {
+    const person = state.people.get(state.pendingResearchPersonId);
+    if (!elements.researchConsent.checked || !isRecordedDeceased(person)) return;
+    window.open('https://www.perplexity.ai/', '_blank', 'noopener,noreferrer');
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(elements.researchPromptPreview.value);
+      copied = true;
+    } catch {
+      elements.researchPromptPreview.focus();
+      elements.researchPromptPreview.select();
+      try { copied = document.execCommand('copy'); } catch { copied = false; }
+    }
+    if (copied) {
+      elements.researchDialog.close();
+      showToast('Prompt copied. Paste and submit it in the Perplexity tab; allow popups if no tab opened.');
+    } else {
+      elements.researchPromptPreview.focus();
+      elements.researchPromptPreview.select();
+      showToast('Perplexity opened. Copy the selected prompt and paste it into a new chat.');
+    }
+    state.pendingResearchPersonId = null;
   });
   elements.back.addEventListener('click', () => {
     if (state.historyIndex > 0) { state.historyIndex -= 1; state.selectedId = state.history[state.historyIndex]; render(); }
@@ -931,4 +2080,6 @@
       if (!elements.search.disabled) elements.search.focus();
     }
   });
+  window.addEventListener('pagehide', () => { persistActiveSession(); });
+  restoreActiveSession();
 })();
