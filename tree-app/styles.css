@@ -110,6 +110,7 @@ button { color: inherit; }
 .graph-viewport { flex: 1; min-height: 0; overflow: auto; padding: 16px 22px 24px; }
 .tree-canvas { position: relative; min-width: 660px; min-height: 100%; transform-origin: top center; }
 .connector-layer { position: absolute; z-index: 0; inset: 0; overflow: visible; pointer-events: none; }
+.connector-layer path { fill: none; stroke: #c8cfcb; stroke-width: 1; }
 .tree-generation { position: relative; z-index: 1; padding: 8px 0 17px; }
 .generation-heading { display: flex; align-items: center; justify-content: center; gap: 9px; margin: 1px 0 9px; color: #89978f; font-size: 8px; font-weight: 800; letter-spacing: 1.1px; text-transform: uppercase; }
 .generation-heading::before, .generation-heading::after { width: 22px; height: 1px; content: ""; background: #cfd9d3; }
