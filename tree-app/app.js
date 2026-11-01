@@ -8,12 +8,40 @@
     MARR: 'Marriage', DIV: 'Divorce', OCCU: 'Occupation', EDUC: 'Education', EVEN: 'Event'
   };
   const eventTags = new Set(Object.keys(eventNames));
+  const countryFlagAliases = [
+    ['new england', 'US', 'United States'], ['united states of america', 'US', 'United States'],
+    ['northern ireland', 'gb-nir', 'Northern Ireland'], ['united kingdom', 'GB', 'United Kingdom'],
+    ['great britain', 'GB', 'United Kingdom'], ['new zealand', 'NZ', 'New Zealand'],
+    ['south africa', 'ZA', 'South Africa'], ['czech republic', 'CZ', 'Czech Republic'],
+    ['saint helena', 'sh-hl', 'Saint Helena'], ['st helena', 'sh-hl', 'Saint Helena'],
+    ['u s a', 'US', 'United States'], ['u k', 'GB', 'United Kingdom'],
+    ['australia', 'AU', 'Australia'], ['canada', 'CA', 'Canada'],
+    ['germany', 'DE', 'Germany'], ['deutschland', 'DE', 'Germany'],
+    ['france', 'FR', 'France'], ['switzerland', 'CH', 'Switzerland'],
+    ['ireland', 'IE', 'Ireland'], ['scotland', 'gb-sct', 'Scotland'],
+    ['england', 'gb-eng', 'England'], ['wales', 'gb-wls', 'Wales'],
+    ['united states', 'US', 'United States'], ['usa', 'US', 'United States'],
+    ['britain', 'GB', 'United Kingdom'],
+    ['uk', 'GB', 'United Kingdom'], ['denmark', 'DK', 'Denmark'],
+    ['poland', 'PL', 'Poland'], ['italy', 'IT', 'Italy'], ['czechia', 'CZ', 'Czechia'],
+    ['sweden', 'SE', 'Sweden'], ['egypt', 'EG', 'Egypt'], ['hungary', 'HU', 'Hungary'],
+    ['russia', 'RU', 'Russia'], ['el salvador', 'SV', 'El Salvador'], ['brazil', 'BR', 'Brazil'],
+    ['norway', 'NO', 'Norway'], ['netherlands', 'NL', 'Netherlands'], ['belgium', 'BE', 'Belgium'],
+    ['spain', 'ES', 'Spain'], ['portugal', 'PT', 'Portugal'], ['austria', 'AT', 'Austria'],
+    ['finland', 'FI', 'Finland'], ['india', 'IN', 'India'], ['japan', 'JP', 'Japan'],
+    ['china', 'CN', 'China'], ['mexico', 'MX', 'Mexico'], ['argentina', 'AR', 'Argentina'],
+    ['iceland', 'IS', 'Iceland'], ['greece', 'GR', 'Greece'], ['ukraine', 'UA', 'Ukraine'],
+    ['croatia', 'HR', 'Croatia'], ['slovakia', 'SK', 'Slovakia'], ['slovenia', 'SI', 'Slovenia'],
+    ['turkiye', 'TR', 'Turkiye'], ['turkey', 'TR', 'Turkey']
+  ].sort((a, b) => b[0].length - a[0].length);
   const state = {
     people: new Map(), families: new Map(), sources: new Map(), selectedId: null,
-    fileName: '', searchText: '', history: [], historyIndex: -1, zoom: 1
+    fileName: '', searchText: '', history: [], historyIndex: -1, zoom: 1,
+    mediaIndex: null, mediaUrls: new Map()
   };
   const elements = {
-    fileInput: document.querySelector('#gedcomInput'), clear: document.querySelector('#clearButton'),
+    fileInput: document.querySelector('#gedcomInput'), mediaInput: document.querySelector('#mediaInput'),
+    mediaButton: document.querySelector('#mediaButton'), clear: document.querySelector('#clearButton'),
     treeLabel: document.querySelector('#treeLabel'), peopleCount: document.querySelector('#peopleCount'),
     search: document.querySelector('#peopleSearch'), peopleList: document.querySelector('#peopleList'),
     loadStatus: document.querySelector('#loadStatus'), statusPip: document.querySelector('.status-pip'),
@@ -53,7 +81,8 @@
         people.set(record.id, {
           id: record.id, name, sex: record.sex, birthName: fallbackName,
           parentFamilyIds: record.parentFamilyIds, spouseFamilyIds: record.spouseFamilyIds,
-          events: record.events, sourceIds: [...new Set(record.sourceIds)]
+          events: record.events, sourceIds: [...new Set(record.sourceIds)],
+          mediaPaths: [...new Set(record.mediaPaths)]
         });
       } else if (record.type === 'FAM') {
         families.set(record.id, {
@@ -82,7 +111,7 @@
         finishRecord();
         if (!xref || !['INDI', 'FAM', 'SOUR'].includes(tag)) continue;
         if (tag === 'INDI') {
-          record = { id: xref, type: tag, rawName: '', givenName: '', surname: '', sex: '', parentFamilyIds: [], spouseFamilyIds: [], events: [], sourceIds: [] };
+          record = { id: xref, type: tag, rawName: '', givenName: '', surname: '', sex: '', parentFamilyIds: [], spouseFamilyIds: [], events: [], sourceIds: [], mediaPaths: [] };
         } else if (tag === 'FAM') {
           record = { id: xref, type: tag, husbandId: '', wifeId: '', childIds: [], marriage: null, sourceIds: [] };
         } else {
@@ -110,6 +139,7 @@
         if (level === 1 && tag !== 'SOUR' && tag !== 'NOTE') activeEvent = null;
         if (tag === 'GIVN' && level === 2) { record.givenName = value; continue; }
         if (tag === 'SURN' && level === 2) { record.surname = value; continue; }
+        if (tag === 'FILE' && level >= 2) { record.mediaPaths.push(value.trim()); continue; }
         if (tag === 'SOUR') {
           const sourceId = splitXref(value);
           if (sourceId) {
@@ -236,6 +266,14 @@
     return 'Dates not recorded';
   }
 
+  function countryFlagForPlace(place) {
+    const normalized = ` ${String(place || '').toLocaleLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
+    const match = countryFlagAliases.find(([alias]) => normalized.includes(` ${alias} `));
+    if (!match) return null;
+    const [, code, country] = match;
+    return { code: code.toLocaleLowerCase(), country };
+  }
+
   function initials(name) {
     return (name || '?').trim().split(/\s+/).slice(0, 2).map((part) => part[0] || '').join('').toUpperCase();
   }
@@ -260,7 +298,53 @@
     toastTimer = window.setTimeout(() => elements.toast.classList.remove('visible'), 4200);
   }
 
+  function normalizeMediaPath(path) {
+    return String(path || '').trim().replace(/^['"]|['"]$/g, '').replaceAll('\\', '/').replace(/\/+/g, '/').toLocaleLowerCase();
+  }
+
+  function resolveMediaFile(path) {
+    if (!state.mediaIndex) return null;
+    const segments = normalizeMediaPath(path).split('/').filter(Boolean);
+    const candidates = state.mediaIndex.byName.get(segments.at(-1)) || [];
+    if (candidates.length === 1) return candidates[0];
+
+    let bestFile = null;
+    let bestScore = 0;
+    let tied = false;
+    for (const file of candidates) {
+      const fileSegments = normalizeMediaPath(file.webkitRelativePath || file.name).split('/').filter(Boolean);
+      let score = 0;
+      while (score < segments.length && score < fileSegments.length && segments.at(-1 - score) === fileSegments.at(-1 - score)) score += 1;
+      if (score > bestScore) {
+        bestFile = file;
+        bestScore = score;
+        tied = false;
+      } else if (score > 0 && score === bestScore) {
+        tied = true;
+      }
+    }
+    return bestScore && !tied ? bestFile : null;
+  }
+
+  function isImageFile(file) {
+    return file.type.startsWith('image/') || /\.(avif|bmp|gif|jpe?g|png|webp)$/i.test(file.name);
+  }
+
+  function mediaUrl(file) {
+    if (!state.mediaUrls.has(file)) state.mediaUrls.set(file, URL.createObjectURL(file));
+    return state.mediaUrls.get(file);
+  }
+
+  function releaseMediaUrls() {
+    for (const url of state.mediaUrls.values()) URL.revokeObjectURL(url);
+    state.mediaUrls.clear();
+  }
+
   function setLoaded(fileName, data) {
+    releaseMediaUrls();
+    state.mediaIndex = null;
+    elements.mediaInput.value = '';
+    elements.mediaButton.disabled = false;
     state.people = data.people;
     state.families = data.families;
     state.sources = data.sources;
@@ -300,28 +384,66 @@
     elements.viewport.scrollTop = 0;
   }
 
-  function addPersonControl(container, personId, relation = '') {
+  function addPersonControl(container, personId, relation = '', navigation = {}) {
     const person = state.people.get(personId);
     if (!person) return;
+    const node = document.createElement('div');
+    node.className = 'person-node';
     const button = makeButton('', `person-card${person.sex === 'F' ? ' female' : ''}${relation === 'Partner' ? ' partner' : ''}`);
     button.dataset.personId = personId;
     button.dataset.generation = container.dataset.generation;
     button.setAttribute('aria-current', String(personId === state.selectedId));
+    const canShiftUp = navigation.up && parentsOf(personId).length > 0;
+    const canShiftDown = navigation.down && childrenOf(personId).length > 0;
+    if (canShiftUp || canShiftDown) button.classList.add('has-generation-shifts');
+    const photoFile = person.mediaPaths.map(resolveMediaFile).find((file) => file && isImageFile(file));
+    if (photoFile) {
+      button.classList.add('has-photo');
+      const photo = document.createElement('img');
+      photo.className = 'card-photo';
+      photo.src = mediaUrl(photoFile);
+      photo.alt = `${person.name} photo`;
+      button.append(photo);
+    }
     const relationLabel = document.createElement('span');
     relationLabel.className = 'card-relation';
     relationLabel.textContent = relation || (personId === state.selectedId ? 'Selected person' : 'Family member');
+    const birthPlace = person.events.find((event) => event.type === 'BIRT')?.place || '';
+    const nameLine = document.createElement('span');
+    nameLine.className = 'card-name-line';
     const name = document.createElement('span');
     name.className = 'card-name';
     name.textContent = person.name;
+    nameLine.append(name);
+    const birthCountry = countryFlagForPlace(birthPlace);
+    if (birthCountry) {
+      const flag = document.createElement('span');
+      flag.className = 'card-country-flag';
+      const image = document.createElement('img');
+      image.src = `flags/4x3/${birthCountry.code}.svg`;
+      image.alt = `Birth country: ${birthCountry.country}`;
+      flag.title = birthCountry.country;
+      flag.append(image);
+      nameLine.append(flag);
+    }
     const years = document.createElement('span');
     years.className = 'card-years';
-    const birthPlace = person.events.find((event) => event.type === 'BIRT')?.place || '';
     years.textContent = [lifespan(person), birthPlace].filter(Boolean).join(' · ');
-    button.append(relationLabel, name, years);
-    container.append(button);
+    button.append(relationLabel, nameLine, years);
+    node.append(button);
+    for (const [direction, enabled] of [['up', canShiftUp], ['down', canShiftDown]]) {
+      if (!enabled) continue;
+      const shiftButton = makeButton(direction === 'up' ? '↑' : '↓', `generation-shift generation-shift-${direction}`);
+      shiftButton.dataset.personId = personId;
+      shiftButton.dataset.treeShift = direction;
+      shiftButton.setAttribute('aria-label', `Show one generation ${direction === 'up' ? 'above' : 'below'} through ${person.name}`);
+      shiftButton.title = shiftButton.getAttribute('aria-label');
+      node.append(shiftButton);
+    }
+    container.append(node);
   }
 
-  function appendGeneration(canvas, label, generation, people, relation = '') {
+  function appendGeneration(canvas, label, generation, people, relation = '', navigation = {}) {
     if (!people.length) return null;
     const section = document.createElement('section');
     section.className = 'tree-generation';
@@ -332,7 +454,7 @@
     const nodes = document.createElement('div');
     nodes.className = 'generation-nodes';
     nodes.dataset.generation = String(generation);
-    for (const person of people) addPersonControl(nodes, person.id, relation || '');
+    for (const person of people) addPersonControl(nodes, person.id, relation || '', navigation);
     section.append(heading, nodes);
     canvas.append(section);
     return nodes;
@@ -356,18 +478,25 @@
       { generation: 1, label: 'Children', ids: descendants.get(1) || new Set() },
       { generation: 2, label: 'Grandchildren', ids: descendants.get(2) || new Set() }
     ];
-    for (const row of rows) {
-      const sorted = sortedPeople(row.ids);
-      if (!sorted.length && row.generation === 0) sorted.push(selected);
-      if (!sorted.length) continue;
-      appendGeneration(elements.canvas, row.label, row.generation, sorted);
-      for (const person of sorted) nodeKeys.add(`${row.generation}|${person.id}`);
+    const visibleRows = rows.map((row) => {
+      const people = sortedPeople(row.ids);
+      if (!people.length && row.generation === 0) people.push(selected);
+      return { ...row, people };
+    }).filter((row) => row.people.length);
+    const topGeneration = visibleRows[0].generation;
+    const bottomGeneration = visibleRows.at(-1).generation;
+    for (const row of visibleRows) {
+      appendGeneration(elements.canvas, row.label, row.generation, row.people, '', {
+        up: row.generation === topGeneration,
+        down: row.generation === bottomGeneration
+      });
+      for (const person of row.people) nodeKeys.add(`${row.generation}|${person.id}`);
     }
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.classList.add('connector-layer');
     svg.setAttribute('aria-hidden', 'true');
     elements.canvas.prepend(svg);
-    elements.generationLabel.textContent = `${rows.filter((row) => row.ids.size || row.generation === 0).length} GENERATIONS`;
+    elements.generationLabel.textContent = `${visibleRows.length} GENERATIONS`;
     elements.graphSummary.textContent = `${allIds.size} PEOPLE IN VIEW · ${state.people.size.toLocaleString()} IN TREE`;
     requestAnimationFrame(() => drawConnectors(svg, nodeKeys, selected.id, partners));
   }
@@ -601,6 +730,8 @@
     const id = document.createElement('span'); id.className = 'detail-id'; id.textContent = `GEDCOM @${person.id}@`;
     hero.append(monogram, kicker, title, life, id);
     elements.details.append(hero);
+    const media = renderMedia(person);
+    if (media) elements.details.append(media);
     elements.details.append(renderEvents(person));
     const relationSection = section('Relationships');
     for (const [label, items] of relationshipGroups(person)) addRelationGroup(relationSection, label, items);
@@ -621,6 +752,63 @@
       sourceSection.append(list);
     }
     elements.details.append(sourceSection);
+  }
+
+  function renderMedia(person) {
+    if (!person.mediaPaths.length) return null;
+    const mediaSection = document.createElement('section');
+    mediaSection.className = 'detail-section';
+    const heading = document.createElement('h3');
+    heading.className = 'detail-section-title';
+    heading.textContent = `Attached media (${person.mediaPaths.length})`;
+    mediaSection.append(heading);
+
+    if (!state.mediaIndex) {
+      const note = document.createElement('div');
+      note.className = 'event-detail';
+      note.textContent = 'Link the media folder to view these files.';
+      mediaSection.append(note);
+      return mediaSection;
+    }
+
+    const grid = document.createElement('div');
+    grid.className = 'media-grid';
+    mediaSection.append(grid);
+    let missing = 0;
+    for (const path of person.mediaPaths) {
+      const file = resolveMediaFile(path);
+      if (!file) {
+        missing += 1;
+        continue;
+      }
+      const link = document.createElement('a');
+      link.href = mediaUrl(file);
+      link.target = '_blank';
+      link.rel = 'noopener';
+      if (isImageFile(file)) {
+        link.className = 'media-image-link';
+        const image = document.createElement('img');
+        image.src = mediaUrl(file);
+        image.alt = file.name;
+        link.append(image);
+      } else {
+        link.className = 'media-file-link';
+        link.textContent = file.name;
+      }
+      grid.append(link);
+    }
+    if (missing === person.mediaPaths.length) {
+      const note = document.createElement('div');
+      note.className = 'event-detail';
+      note.textContent = 'No referenced files were found in the selected folder.';
+      mediaSection.append(note);
+    } else if (missing) {
+      const note = document.createElement('div');
+      note.className = 'event-source';
+      note.textContent = `${missing} referenced file${missing === 1 ? '' : 's'} not found.`;
+      mediaSection.append(note);
+    }
+    return mediaSection;
   }
 
   function render() {
@@ -657,10 +845,36 @@
     }
   });
 
+  elements.mediaButton.addEventListener('click', () => elements.mediaInput.click());
+  elements.mediaInput.addEventListener('change', (event) => {
+    const files = [...(event.target.files || [])];
+    elements.mediaInput.value = '';
+    if (!files.length) return;
+    releaseMediaUrls();
+    const byName = new Map();
+    for (const file of files) {
+      const name = normalizeMediaPath(file.name);
+      if (!byName.has(name)) byName.set(name, []);
+      byName.get(name).push(file);
+    }
+    state.mediaIndex = { byName };
+    let references = 0;
+    let matched = 0;
+    for (const person of state.people.values()) {
+      for (const path of person.mediaPaths) {
+        references += 1;
+        if (resolveMediaFile(path)) matched += 1;
+      }
+    }
+    render();
+    showToast(`Matched ${matched.toLocaleString()} of ${references.toLocaleString()} media references. Files remain in this tab.`);
+  });
+
   elements.clear.addEventListener('click', () => {
+    releaseMediaUrls(); state.mediaIndex = null;
     state.people.clear(); state.families.clear(); state.sources.clear(); state.selectedId = null;
     state.fileName = ''; state.history = []; state.historyIndex = -1; state.searchText = '';
-    elements.fileInput.value = ''; elements.search.value = ''; elements.search.disabled = true;
+    elements.fileInput.value = ''; elements.mediaInput.value = ''; elements.mediaButton.disabled = true; elements.search.value = ''; elements.search.disabled = true;
     elements.clear.disabled = true; elements.back.disabled = true; elements.forward.disabled = true;
     elements.zoomIn.disabled = true; elements.zoomOut.disabled = true;
     elements.treeLabel.textContent = 'No tree loaded'; elements.peopleCount.textContent = '0';
@@ -678,8 +892,13 @@
     if (button) setFocus(button.dataset.personId);
   });
   elements.canvas.addEventListener('click', (event) => {
-    const button = event.target.closest('button[data-person-id]');
-    if (button) setFocus(button.dataset.personId);
+    const shiftButton = event.target.closest('button[data-tree-shift]');
+    if (shiftButton) {
+      setFocus(shiftButton.dataset.personId);
+      return;
+    }
+    const personButton = event.target.closest('.person-card[data-person-id]');
+    if (personButton) setFocus(personButton.dataset.personId);
   });
   elements.details.addEventListener('click', (event) => {
     const button = event.target.closest('button[data-person-id]');

@@ -21,9 +21,11 @@ A private, evidence-led workspace for documenting family history. No family fact
 
 ## Local Tree App
 
-Open [Kinship Atlas](tree-app/index.html) directly in a browser; no server or installation is required. Choose **Open GEDCOM** and select the archive file, normally `G:\Family\07_Trees_and_Databases\GEDCOM\Anderson Family Tree.ged`.
+Open [Kinship Atlas](tree-app/index.html) directly in a browser; no server or installation is required. Choose **Open GEDCOM** and select the GEDCOM export from RootsMagic. After it loads, choose **Link media** and select the matching media folder. The app matches GEDCOM file references to files in that folder, displays the first matched image on each person card, and lists attached images and documents in the person details. Unmatched files are reported in the app.
 
-The app reads the selected file in the browser tab only. It does not upload the file or save imported data. Use the directory search or click a person/relationship to recenter the map; recorded life events, places, occupations, partners, parents, siblings, and children appear in the detail panel. The view reflects GEDCOM entries and is not an independent verification of them.
+The app reads the selected GEDCOM and media files in the browser tab only. It does not upload the files or save imported data. Use the directory search or click a person/relationship to recenter the map; recorded life events, places, occupations, partners, parents, siblings, children, and linked media appear in the detail panel. The view reflects GEDCOM entries and is not an independent verification of them.
+
+Country flags use locally stored SVGs from [flag-icons](https://github.com/lipis/flag-icons), released under the MIT license included in `tree-app/flags/LICENSE`; the app makes no remote requests to render them.
 
 ## Suggested private folders
 
