@@ -123,14 +123,15 @@
   </dialog>
   <dialog id="researchDialog" class="app-dialog" aria-labelledby="researchDialogTitle">
     <section class="dialog-panel research-dialog-panel">
-      <h2 id="researchDialogTitle">Review Perplexity research prompt</h2>
-      <p class="privacy-warning">This prompt contains personal family-history details. Continuing copies it to your clipboard and opens Perplexity; it is shared only if you paste and submit it there. Only people with a recorded death event are included.</p>
-      <label class="research-prompt-label" for="researchPromptPreview">Prompt preview</label>
-      <textarea id="researchPromptPreview" readonly></textarea>
-      <label class="research-consent"><input id="researchConsent" type="checkbox"> I understand these details may be sent to Perplexity if I paste and submit the prompt.</label>
+      <h2 id="researchDialogTitle">Search WikiTree</h2>
+      <p class="privacy-warning">This search sends the recorded first name, last name, birth year, death year, and birth and death countries below to WikiTree. It is available only for people with a recorded death event.</p>
+      <dl id="wikiTreeQueryPreview" class="wikitree-query"></dl>
+      <p id="wikiTreeSearchStatus" class="wikitree-status" role="status" aria-live="polite" hidden></p>
+      <div id="wikiTreeResults" class="wikitree-results" hidden></div>
+      <label class="research-consent"><input id="researchConsent" type="checkbox"> I understand these details will be sent to WikiTree.</label>
       <div class="dialog-actions">
-        <button id="confirmPerplexityResearch" class="dialog-button dialog-button-primary" type="button" disabled>Open Perplexity &amp; copy prompt</button>
-        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="researchDialog">Cancel</button>
+        <button id="confirmWikiTreeSearch" class="dialog-button dialog-button-primary" type="button" disabled>Search WikiTree</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="researchDialog">Close</button>
       </div>
     </section>
   </dialog>
@@ -163,6 +164,26 @@
       <div class="dialog-actions">
         <button class="dialog-button dialog-button-primary" type="submit">Save changes</button>
         <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="personEditorDialog">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="personSummaryDialog" class="app-dialog" aria-labelledby="personSummaryTitle">
+    <form id="personSummaryForm" class="dialog-panel new-gedcom-panel">
+      <h2 id="personSummaryTitle">Edit person details</h2>
+      <p>Update the name, sex, and life dates shown in this Person Record. Enter GEDCOM dates such as ABT 1883, or use the calendar for an exact date.</p>
+      <div class="new-gedcom-fields">
+        <label class="new-gedcom-field" for="personSummaryGivenName">Given name(s)<input id="personSummaryGivenName" type="text" maxlength="120" autocomplete="given-name"></label>
+        <label class="new-gedcom-field" for="personSummarySurname">Surname<input id="personSummarySurname" type="text" maxlength="120" autocomplete="family-name"></label>
+        <label class="new-gedcom-field" for="personSummarySex">Sex<select id="personSummarySex"><option value="">Not recorded</option><option value="F">Female / F</option><option value="M">Male / M</option><option value="X">Other / X</option><option value="U">Unknown / U</option></select></label>
+        <label class="new-gedcom-field" for="personSummaryBirthDate">Birth date (GEDCOM)<input id="personSummaryBirthDate" type="text" maxlength="40" placeholder="e.g. ABT 1883"><input id="personSummaryBirthDatePicker" type="date" aria-label="Choose exact birth date"></label>
+        <label class="new-gedcom-field" for="personSummaryBirthPlace">Birth location<input id="personSummaryBirthPlace" type="text" maxlength="200" autocomplete="off"></label>
+        <label class="new-gedcom-field" for="personSummaryDeathDate">Death date (GEDCOM)<input id="personSummaryDeathDate" type="text" maxlength="40" placeholder="e.g. ABT 1883"><input id="personSummaryDeathDatePicker" type="date" aria-label="Choose exact death date"></label>
+        <label class="new-gedcom-field" for="personSummaryDeathPlace">Death location<input id="personSummaryDeathPlace" type="text" maxlength="200" autocomplete="off"></label>
+      </div>
+      <p id="personSummaryError" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="dialog-button dialog-button-primary" type="submit">Save changes</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="personSummaryDialog">Cancel</button>
       </div>
     </form>
   </dialog>

@@ -20,7 +20,7 @@ Genealogy can expose sensitive information about people who are alive, including
 - Do not commit private records, scans, GEDCOM files, exports, or notes. Inspect `git status` and review every staged file before any commit.
 - Git ignore applies only within this workspace; it does not cover `G:\Family`, provide encryption or access control, or protect against cloud synchronization, backups, malware, or accidental sharing. Use encrypted storage and review sync, backup, and device-sharing settings for both locations.
 - Before using an external website, AI service, or shared drive, check its privacy terms and whether you have permission to disclose the material. Prefer anonymized excerpts and omit unnecessary identifiers.
-- Kinship Atlas's Perplexity action is an explicit external-sharing step: it is available only for people with recorded death details, previews the exact prompt, requires consent, and copies the prompt for the user to paste and submit. It excludes relatives without recorded death details. Review and remove details that should not be shared before submission.
+- Kinship Atlas's WikiTree search is an explicit external-sharing step: it is available only for people with recorded death details, previews the name, years, and countries that will be sent, and requires consent. The search is sent to WikiTree. Review those details before continuing.
 - Remove identifying metadata from files intended for sharing and inspect the final export, not just the source document.
 
 ## Corrections and retention

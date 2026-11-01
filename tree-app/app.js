@@ -40,6 +40,7 @@
     mediaIndex: null, mediaUrls: new Map(), mediaRelativePaths: new WeakMap(), mediaDirectoryHandle: null,
     rememberedMediaDirectoryHandle: null,
     pendingUploadPersonId: null, pendingResearchPersonId: null,
+    pendingPersonSummaryId: null,
     primaryMediaKey: '', primaryMedia: new Map(), additionalMedia: new Map(),
     gedcomRecords: [], gedcomDirty: false, gedcomText: '', sessionSaveQueue: Promise.resolve(),
     directoryFilters: { birthCountry: '', deathCountry: '', birthMin: null, birthMax: null, deathMin: null, deathMax: null },
@@ -57,15 +58,29 @@
     personFieldsEditor: document.querySelector('#personFieldsEditor'),
     personEditorError: document.querySelector('#personEditorError'),
     addGedcomField: document.querySelector('#addGedcomFieldButton'),
+    personSummaryDialog: document.querySelector('#personSummaryDialog'),
+    personSummaryForm: document.querySelector('#personSummaryForm'),
+    personSummaryGivenName: document.querySelector('#personSummaryGivenName'),
+    personSummarySurname: document.querySelector('#personSummarySurname'),
+    personSummarySex: document.querySelector('#personSummarySex'),
+    personSummaryBirthDate: document.querySelector('#personSummaryBirthDate'),
+    personSummaryBirthDatePicker: document.querySelector('#personSummaryBirthDatePicker'),
+    personSummaryBirthPlace: document.querySelector('#personSummaryBirthPlace'),
+    personSummaryDeathDate: document.querySelector('#personSummaryDeathDate'),
+    personSummaryDeathDatePicker: document.querySelector('#personSummaryDeathDatePicker'),
+    personSummaryDeathPlace: document.querySelector('#personSummaryDeathPlace'),
+    personSummaryError: document.querySelector('#personSummaryError'),
     addRelativeDialog: document.querySelector('#addRelativeDialog'),
     addRelativeForm: document.querySelector('#addRelativeForm'),
     relativeType: document.querySelector('#relativeType'),
     relativeParentRole: document.querySelector('#relativeParentRole'),
     relativeParentRoleField: document.querySelector('#relativeParentRole').closest('.new-gedcom-field'),
     researchDialog: document.querySelector('#researchDialog'),
-    researchPromptPreview: document.querySelector('#researchPromptPreview'),
+    wikiTreeQueryPreview: document.querySelector('#wikiTreeQueryPreview'),
+    wikiTreeSearchStatus: document.querySelector('#wikiTreeSearchStatus'),
+    wikiTreeResults: document.querySelector('#wikiTreeResults'),
     researchConsent: document.querySelector('#researchConsent'),
-    confirmPerplexityResearch: document.querySelector('#confirmPerplexityResearch'),
+    confirmWikiTreeSearch: document.querySelector('#confirmWikiTreeSearch'),
     newGedcomDialog: document.querySelector('#newGedcomDialog'),
     createGedcomForm: document.querySelector('#createGedcomForm'),
     saveGedcom: document.querySelector('#saveGedcomButton'),
@@ -87,23 +102,76 @@
     toast: document.querySelector('#toast')
   };
   let toastTimer = 0;
+  let wikiTreeSearchAbort = null;
 
   function splitXref(value) {
     return value ? value.replace(/^@|@$/g, '') : '';
   }
 
   function createEvent(type, value = '') {
-    return { type, value: value || '', date: '', place: '', detail: '', notes: [], sources: [] };
+    return { type, value: cleanEventDisplayText(value), date: '', place: '', detail: '', notes: [], sources: [] };
   }
 
   function cleanGedcomValue(value) {
     return String(value || '').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
   }
 
+  function cleanEventDisplayText(value) {
+    const decodeEntities = (text) => text.replace(/&(#(?:x[\da-f]+|\d+)|amp|lt|gt|quot|apos|nbsp);/gi, (entity, value) => {
+      const normalized = value.toLowerCase();
+      if (normalized === 'amp') return '&';
+      if (normalized === 'lt') return '<';
+      if (normalized === 'gt') return '>';
+      if (normalized === 'quot') return '"';
+      if (normalized === 'apos') return "'";
+      if (normalized === 'nbsp') return ' ';
+      const codePoint = normalized.startsWith('#x')
+        ? Number.parseInt(normalized.slice(2), 16)
+        : Number.parseInt(normalized.slice(1), 10);
+      return Number.isInteger(codePoint) && codePoint > 0 && codePoint <= 0x10ffff &&
+        !(codePoint >= 0xd800 && codePoint <= 0xdfff)
+        ? String.fromCodePoint(codePoint)
+        : entity;
+    });
+    const decoded = decodeEntities(decodeEntities(String(value || '')));
+    return decoded
+      .replace(/<\?[^>]*\?>|<!--[\s\S]*?-->|<\/?[a-z][^>]*>/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
   function formatGedcomDate(value) {
     const [year, month, day] = value.split('-');
     const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
     return year && monthNames[Number(month) - 1] ? `${Number(day)} ${monthNames[Number(month) - 1]} ${year}` : '';
+  }
+
+  function datePickerValue(gedcomDate) {
+    const value = String(gedcomDate || '').trim();
+    const isoDate = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const gedcomDateMatch = value.match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/);
+    let year;
+    let month;
+    let day;
+    if (isoDate) {
+      [, year, month, day] = isoDate;
+    } else if (gedcomDateMatch) {
+      const monthIndex = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+        .indexOf(gedcomDateMatch[2].toUpperCase());
+      if (monthIndex < 0) return '';
+      day = gedcomDateMatch[1].padStart(2, '0');
+      month = String(monthIndex + 1).padStart(2, '0');
+      year = gedcomDateMatch[3];
+    } else {
+      return '';
+    }
+
+    const date = new Date(0);
+    date.setUTCHours(0, 0, 0, 0);
+    date.setUTCFullYear(Number(year), Number(month) - 1, Number(day));
+    if (date.getUTCFullYear() !== Number(year) || date.getUTCMonth() !== Number(month) - 1 ||
+        date.getUTCDate() !== Number(day)) return '';
+    return `${year}-${month}-${day}`;
   }
 
   function splitGedcomRecords(text) {
@@ -222,11 +290,17 @@
         const parsedSurname = (rawName.match(/\/([^/]+)\//) || [])[1] || '';
         const fallbackName = rawName.replaceAll('/', '').replace(/\s+/g, ' ').trim();
         const maidenName = record.nameEntries.find((entry) => ['BIRTH', 'MAIDEN'].includes(entry.type))?.value.replaceAll('/', '').replace(/\s+/g, ' ').trim() || '';
-        const name = [record.givenName, record.surname || parsedSurname]
+        const surname = record.surname || parsedSurname;
+        let fallbackGivenName = (rawName.split('/')[0] || '').trim();
+        if (!rawName.includes('/') && surname && fallbackGivenName.toLocaleLowerCase().endsWith(surname.toLocaleLowerCase())) {
+          fallbackGivenName = fallbackGivenName.slice(0, -surname.length).trim();
+        }
+        const givenName = record.givenName || fallbackGivenName;
+        const name = [givenName, surname]
           .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim() || fallbackName || record.id;
         const rawRecord = individualRecords.get(record.id);
         people.set(record.id, {
-          id: record.id, name, surname: record.surname || parsedSurname, sex: record.sex, maidenName,
+          id: record.id, name, givenName, surname, sex: record.sex, maidenName,
           parentFamilyIds: record.parentFamilyIds, spouseFamilyIds: record.spouseFamilyIds,
           events: record.events, sourceIds: [...new Set(record.sourceIds)],
           mediaPaths: [...new Set(record.mediaPaths)],
@@ -295,8 +369,14 @@
         if (level === 1 && tag === 'FAMS') { record.spouseFamilyIds.push(splitXref(value)); activeEvent = null; continue; }
         if (level === 1 && tag !== 'SOUR' && tag !== 'NOTE') activeEvent = null;
         if (activeName && level === 2 && tag === 'TYPE') { activeName.type = value.trim().toUpperCase(); continue; }
-        if (tag === 'GIVN' && level === 2) { record.givenName = value; continue; }
-        if (tag === 'SURN' && level === 2) { record.surname = value; continue; }
+        if (tag === 'GIVN' && level === 2) {
+          if (!activeName || activeName === record.nameEntries[0]) record.givenName = value;
+          continue;
+        }
+        if (tag === 'SURN' && level === 2) {
+          if (!activeName || activeName === record.nameEntries[0]) record.surname = value;
+          continue;
+        }
         if (tag === 'FILE' && level >= 2) { record.mediaPaths.push(value.trim()); continue; }
         if (tag === 'SOUR') {
           const sourceId = splitXref(value);
@@ -307,10 +387,10 @@
           continue;
         }
         if (activeEvent && level >= 2) {
-          if (tag === 'DATE') activeEvent.date = value;
-          else if (tag === 'PLAC') activeEvent.place = value;
-          else if (tag === 'TYPE') activeEvent.detail = value;
-          else if (tag === 'NOTE' || tag === 'CONT') activeEvent.notes.push(value);
+          if (tag === 'DATE') activeEvent.date = cleanEventDisplayText(value);
+          else if (tag === 'PLAC') activeEvent.place = cleanEventDisplayText(value);
+          else if (tag === 'TYPE') activeEvent.detail = cleanEventDisplayText(value);
+          else if (tag === 'NOTE' || tag === 'CONT') activeEvent.notes.push(cleanEventDisplayText(value));
         }
       } else if (record.type === 'FAM') {
         if (level === 1 && tag === 'MARR') {
@@ -324,14 +404,14 @@
         if (level === 1 && tag !== 'SOUR' && tag !== 'NOTE') activeEvent = null;
         if (tag === 'SOUR') { const sourceId = splitXref(value); if (sourceId) record.sourceIds.push(sourceId); continue; }
         if (activeEvent && level >= 2) {
-          if (tag === 'DATE') activeEvent.date = value;
-          else if (tag === 'PLAC') activeEvent.place = value;
-          else if (tag === 'NOTE' || tag === 'CONT') activeEvent.notes.push(value);
+          if (tag === 'DATE') activeEvent.date = cleanEventDisplayText(value);
+          else if (tag === 'PLAC') activeEvent.place = cleanEventDisplayText(value);
+          else if (tag === 'NOTE' || tag === 'CONT') activeEvent.notes.push(cleanEventDisplayText(value));
           else if (tag === 'SOUR') activeEvent.sources.push(splitXref(value));
         }
       } else if (record.type === 'SOUR') {
-        if (level === 1 && tag === 'TITL') record.title = value;
-        else if (level === 1 && tag === 'AUTH') record.author = value;
+        if (level === 1 && tag === 'TITL') record.title = cleanEventDisplayText(value);
+        else if (level === 1 && tag === 'AUTH') record.author = cleanEventDisplayText(value);
       }
     }
     finishRecord();
@@ -428,31 +508,245 @@
     return Boolean(person?.events.some((event) => event.type === 'DEAT' && (event.date || event.place || event.value)));
   }
 
-  function researchEventSummary(event) {
-    return [event?.date, event?.place].filter(Boolean).join(' — ') || 'not recorded';
-  }
-
-  function buildPerplexityPrompt(person) {
+  function buildWikiTreeQuery(person) {
     const birth = person.events.find((event) => event.type === 'BIRT');
     const death = person.events.find((event) => event.type === 'DEAT');
-    const deceasedParents = parentsOf(person.id).map((id) => state.people.get(id)).filter(isRecordedDeceased);
-    const deceasedChildren = childrenOf(person.id).map((id) => state.people.get(id)).filter(isRecordedDeceased);
-    const residences = [...new Set(person.events.filter((event) => event.type === 'RESI' && event.place)
-      .map((event) => researchEventSummary(event)))];
-    const lines = [
-      'Research this deceased individual in official, genealogical, and historical records.',
-      'Prioritize primary sources and reputable archives. Provide direct source links, repository/collection names, record dates, and a concise explanation of what each source supports.',
-      'Separate documented facts from hypotheses, preserve conflicting evidence, and do not invent missing details.',
-      '',
-      `Name: ${person.name}`,
-      `Birth date and location: ${researchEventSummary(birth)}`,
-      `Death date and location: ${researchEventSummary(death)}`
+    const surname = (person.surname || '').trim();
+    const fullName = (person.name || '').trim();
+    const firstName = fullName.toLocaleLowerCase().endsWith(` ${surname.toLocaleLowerCase()}`)
+      ? fullName.slice(0, -(surname.length + 1)).trim()
+      : fullName;
+    return {
+      firstName: firstName.slice(0, 120),
+      lastName: surname.slice(0, 120),
+      birthYear: yearFrom(birth?.date),
+      deathYear: yearFrom(death?.date),
+      birthCountry: countryFlagForPlace(birth?.place)?.country || '',
+      deathCountry: countryFlagForPlace(death?.place)?.country || ''
+    };
+  }
+
+  function renderWikiTreeQueryPreview(query) {
+    const fields = [
+      ['First name', query.firstName],
+      ['Last name', query.lastName],
+      ['Year born', query.birthYear],
+      ['Year died', query.deathYear],
+      ['Country born', query.birthCountry],
+      ['Country died', query.deathCountry]
     ];
-    if (person.maidenName) lines.push(`Explicitly recorded birth or maiden name: ${person.maidenName}`);
-    lines.push(`Parents with a recorded death: ${deceasedParents.map((parent) => `${parent.name} (${researchEventSummary(parent.events.find((event) => event.type === 'DEAT'))})`).join('; ') || 'None supplied; relatives without a recorded death are omitted.'}`);
-    lines.push(`Children with a recorded death: ${deceasedChildren.map((child) => `${child.name} (${researchEventSummary(child.events.find((event) => event.type === 'DEAT'))})`).join('; ') || 'None recorded.'}`);
-    lines.push(`Recorded places lived: ${residences.join('; ') || 'None recorded.'}`);
-    return lines.join('\n');
+    elements.wikiTreeQueryPreview.replaceChildren();
+    for (const [label, value] of fields) {
+      const term = document.createElement('dt');
+      term.textContent = label;
+      const description = document.createElement('dd');
+      description.textContent = value || 'Not recorded';
+      if (!value) description.classList.add('is-missing');
+      elements.wikiTreeQueryPreview.append(term, description);
+    }
+  }
+
+  function setWikiTreeSearchStatus(message) {
+    elements.wikiTreeSearchStatus.textContent = message;
+    elements.wikiTreeSearchStatus.hidden = !message;
+  }
+
+  function wikiTreeSearchParameters(query) {
+    const parameters = new URLSearchParams();
+    if (query.firstName) parameters.set('FirstName', query.firstName);
+    if (query.lastName) parameters.set('LastName', query.lastName);
+    if (query.birthYear) parameters.set('BirthDate', query.birthYear);
+    if (query.deathYear) parameters.set('DeathDate', query.deathYear);
+    if (query.birthCountry) parameters.set('BirthLocation', query.birthCountry);
+    if (query.deathCountry) parameters.set('DeathLocation', query.deathCountry);
+    return parameters;
+  }
+
+  function submitWikiTreeSearch(query) {
+    const form = document.createElement('form');
+    form.method = 'post';
+    form.action = 'https://www.wikitree.com/wiki/Special:SearchPerson';
+    form.target = '_blank';
+    form.rel = 'noopener noreferrer';
+    form.referrerPolicy = 'no-referrer';
+    form.hidden = true;
+
+    const fields = [
+      ['wpSearch', '1'],
+      ['wpFirst', query.firstName],
+      ['wpLast', query.lastName],
+      ['wpBirthDate', query.birthYear],
+      ['wpDeathDate', query.deathYear],
+      ['birth_location', query.birthCountry],
+      ['death_location', query.deathCountry]
+    ];
+    for (const [name, value] of fields) {
+      if (!value) continue;
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      input.value = value;
+      form.append(input);
+    }
+
+    document.body.append(form);
+    form.submit();
+    window.setTimeout(() => form.remove(), 0);
+  }
+
+  function renderWikiTreeFallback(query) {
+    const link = document.createElement('a');
+    link.className = 'wikitree-site-link';
+    link.href = 'https://www.wikitree.com/wiki/Special:SearchPerson';
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = 'Open this search directly on WikiTree';
+    link.addEventListener('click', (event) => {
+      event.preventDefault();
+      submitWikiTreeSearch(query);
+    });
+    elements.wikiTreeResults.append(link);
+  }
+
+  async function readWikiTreeResponse(response) {
+    const maximumResponseLength = 256 * 1024;
+    if (!response.body?.getReader) {
+      const text = await response.text();
+      if (text.length > maximumResponseLength) throw new Error('WikiTree returned an unexpectedly large response.');
+      return JSON.parse(text);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let text = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+      if (text.length > maximumResponseLength) {
+        await reader.cancel();
+        throw new Error('WikiTree returned an unexpectedly large response.');
+      }
+    }
+    text += decoder.decode();
+    return JSON.parse(text);
+  }
+
+  function extractWikiTreePeople(payload) {
+    const entries = Array.isArray(payload) ? payload : [payload];
+    const failures = entries.filter((entry) => entry?.status && entry.status !== 'OK');
+    if (failures.length) throw new Error('WikiTree reported that the search could not be completed.');
+    const hasPeopleList = entries.some((entry) => Array.isArray(entry?.people));
+    if (!hasPeopleList) throw new Error('WikiTree returned an unexpected response.');
+    return entries.flatMap((entry) => Array.isArray(entry.people) ? entry.people : []);
+  }
+
+  function renderWikiTreeResults(people, query) {
+    const deceasedMatches = people
+      .filter((person) => typeof person?.Name === 'string' && person.Name.trim() && (person.DeathDate || person.DeathYear))
+      .slice(0, 20);
+    elements.wikiTreeResults.replaceChildren();
+    elements.wikiTreeResults.hidden = false;
+    const heading = document.createElement('p');
+    heading.className = 'wikitree-results-heading';
+    heading.textContent = deceasedMatches.length
+      ? `${deceasedMatches.length} deceased ${deceasedMatches.length === 1 ? 'match' : 'matches'}`
+      : 'No deceased matches were returned.';
+    elements.wikiTreeResults.append(heading);
+
+    if (deceasedMatches.length) {
+      const list = document.createElement('ul');
+      list.className = 'wikitree-match-list';
+      for (const person of deceasedMatches) {
+        const item = document.createElement('li');
+        const link = document.createElement('a');
+        link.className = 'wikitree-match';
+        link.href = `https://www.wikitree.com/wiki/${encodeURIComponent(person.Name)}`;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        const name = document.createElement('strong');
+        name.textContent = person.FirstName && person.LastName
+          ? `${person.FirstName} ${person.LastName}`
+          : person.Name;
+        const profileId = document.createElement('span');
+        profileId.className = 'wikitree-match-id';
+        profileId.textContent = person.Name;
+        const life = document.createElement('span');
+        life.className = 'wikitree-match-life';
+        life.textContent = [
+          person.BirthDate || person.BirthYear ? `b. ${person.BirthDate || person.BirthYear}` : '',
+          person.DeathDate || person.DeathYear ? `d. ${person.DeathDate || person.DeathYear}` : ''
+        ].filter(Boolean).join(' · ');
+        link.append(name, profileId, life);
+        item.append(link);
+        list.append(item);
+      }
+      elements.wikiTreeResults.append(list);
+    }
+    renderWikiTreeFallback(query);
+  }
+
+  async function searchWikiTree() {
+    const person = state.people.get(state.pendingResearchPersonId);
+    if (!elements.researchConsent.checked || !isRecordedDeceased(person) || wikiTreeSearchAbort) return;
+
+    const query = buildWikiTreeQuery(person);
+    if (window.location.protocol === 'file:') {
+      elements.wikiTreeResults.replaceChildren();
+      elements.wikiTreeResults.hidden = false;
+      renderWikiTreeFallback(query);
+      setWikiTreeSearchStatus('Opening WikiTree in a new tab. If it does not open, use the link below.');
+      submitWikiTreeSearch(query);
+      return;
+    }
+
+    const controller = new AbortController();
+    let timedOut = false;
+    wikiTreeSearchAbort = controller;
+    elements.confirmWikiTreeSearch.disabled = true;
+    elements.wikiTreeResults.replaceChildren();
+    elements.wikiTreeResults.hidden = true;
+    setWikiTreeSearchStatus('Searching WikiTree…');
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 15000);
+
+    try {
+      const parameters = new URLSearchParams({
+        action: 'searchPerson',
+        Query: wikiTreeSearchParameters(query).toString(),
+        Fields: 'Id,Name,FirstName,LastName,BirthDate,DeathDate',
+        Limit: '20'
+      });
+      const response = await fetch('https://api.wikitree.com/api.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+        body: parameters,
+        credentials: 'omit',
+        referrerPolicy: 'no-referrer',
+        signal: controller.signal
+      });
+      if (!response.ok) throw new Error(`WikiTree returned HTTP ${response.status}.`);
+      const payload = await readWikiTreeResponse(response);
+      if (wikiTreeSearchAbort !== controller) return;
+      renderWikiTreeResults(extractWikiTreePeople(payload), query);
+      setWikiTreeSearchStatus('');
+    } catch (error) {
+      if (wikiTreeSearchAbort !== controller || (controller.signal.aborted && !timedOut)) return;
+      setWikiTreeSearchStatus(timedOut
+        ? 'WikiTree did not respond in time. You can open the same search directly on WikiTree.'
+        : `The WikiTree API could not complete this search${error instanceof Error ? `: ${error.message}` : '.'}`);
+      elements.wikiTreeResults.replaceChildren();
+      elements.wikiTreeResults.hidden = false;
+      renderWikiTreeFallback(query);
+    } finally {
+      clearTimeout(timeout);
+      if (wikiTreeSearchAbort === controller) {
+        wikiTreeSearchAbort = null;
+        elements.confirmWikiTreeSearch.disabled = !elements.researchConsent.checked;
+      }
+    }
   }
 
   function countryFlagForPlace(place) {
@@ -1348,8 +1642,8 @@
   }
 
   function eventTitle(event) {
-    if (event.type === 'EVEN' && event.detail) return event.detail;
-    return eventNames[event.type] || event.type;
+    if (event.type === 'EVEN' && event.detail) return cleanEventDisplayText(event.detail);
+    return cleanEventDisplayText(eventNames[event.type] || event.type);
   }
 
   function renderEvents(person) {
@@ -1378,13 +1672,17 @@
         label.textContent = eventTitle(event);
         const detail = document.createElement('div');
         detail.className = 'event-detail';
-        detail.textContent = [event.date, event.place, event.value, ...event.notes].filter(Boolean).join(' · ') || 'Details not recorded';
+        detail.textContent = [event.date, event.place, event.value, ...event.notes]
+          .map(cleanEventDisplayText).filter(Boolean).join(' · ') || 'Details not recorded';
         body.append(label, detail);
         const sourceIds = [...new Set(event.sources)];
         if (sourceIds.length) {
           const source = document.createElement('span');
           source.className = 'event-source';
-          source.textContent = sourceIds.map((id) => state.sources.get(id)?.title ? `${id}: ${state.sources.get(id).title}` : id).join(' · ');
+          source.textContent = sourceIds.map((id) => {
+            const title = cleanEventDisplayText(state.sources.get(id)?.title);
+            return title ? `${id}: ${title}` : id;
+          }).join(' · ');
           body.append(source);
         }
         item.append(marker, body);
@@ -1419,14 +1717,16 @@
     hero.append(monogram, kicker, title, life, id);
     const personActions = document.createElement('div');
     personActions.className = 'person-action-row';
+    const summaryEditButton = makeButton('Edit person details', 'research-button');
+    summaryEditButton.dataset.editPersonSummary = person.id;
     const editButton = makeButton('Edit GEDCOM fields', 'research-button');
     editButton.dataset.editPerson = person.id;
     const addRelativeButton = makeButton('Add relative', 'research-button');
     addRelativeButton.dataset.addRelative = person.id;
-    personActions.append(editButton, addRelativeButton);
+    personActions.append(summaryEditButton, editButton, addRelativeButton);
     if (isRecordedDeceased(person)) {
-      const researchButton = makeButton('Research with Perplexity', 'research-button');
-      researchButton.dataset.perplexityResearch = person.id;
+      const researchButton = makeButton('Search WikiTree', 'research-button');
+      researchButton.dataset.wikitreeSearch = person.id;
       personActions.append(researchButton);
     }
     hero.append(personActions);
@@ -1605,6 +1905,139 @@
     elements.personFieldsEditor.replaceChildren();
     for (const field of person.fields) appendGedcomFieldRow(field);
     elements.personEditorDialog.showModal();
+  }
+
+  function openPersonSummaryEditor(person) {
+    state.pendingPersonSummaryId = person.id;
+    elements.personSummaryError.hidden = true;
+    elements.personSummaryGivenName.value = person.givenName;
+    elements.personSummarySurname.value = person.surname;
+    elements.personSummarySex.querySelector('[data-custom-sex]')?.remove();
+    if (person.sex && !['F', 'M', 'X', 'U'].includes(person.sex)) {
+      const option = document.createElement('option');
+      option.value = person.sex;
+      option.textContent = `Recorded value · ${person.sex}`;
+      option.dataset.customSex = 'true';
+      elements.personSummarySex.append(option);
+    }
+    elements.personSummarySex.value = person.sex;
+    elements.personSummaryBirthDate.value = person.events.find((event) => event.type === 'BIRT')?.date || '';
+    elements.personSummaryBirthDatePicker.value = datePickerValue(elements.personSummaryBirthDate.value);
+    elements.personSummaryBirthPlace.value = person.events.find((event) => event.type === 'BIRT')?.place || '';
+    elements.personSummaryDeathDate.value = person.events.find((event) => event.type === 'DEAT')?.date || '';
+    elements.personSummaryDeathDatePicker.value = datePickerValue(elements.personSummaryDeathDate.value);
+    elements.personSummaryDeathPlace.value = person.events.find((event) => event.type === 'DEAT')?.place || '';
+    elements.personSummaryDialog.showModal();
+  }
+
+  function updatePrimaryName(lines, givenName, surname) {
+    const nameIndex = lines.findIndex((line, index) => index > 0 && parseGedcomField(line)?.level === 1 && parseGedcomField(line)?.tag === 'NAME');
+    const nameValue = `${givenName}${surname ? `${givenName ? ' ' : ''}/${surname}/` : ''}`;
+    if (nameIndex < 0) {
+      lines.push(`1 NAME ${nameValue}`);
+      if (givenName) lines.push(`2 GIVN ${givenName}`);
+      if (surname) lines.push(`2 SURN ${surname}`);
+      return;
+    }
+
+    lines[nameIndex] = `1 NAME${nameValue ? ` ${nameValue}` : ''}`;
+    let end = nameIndex + 1;
+    while (end < lines.length) {
+      const field = parseGedcomField(lines[end]);
+      if (field && field.level <= 1) break;
+      end += 1;
+    }
+    let hasGivenName = false;
+    let hasSurname = false;
+    for (let index = nameIndex + 1; index < end; index += 1) {
+      const field = parseGedcomField(lines[index]);
+      if (field?.level !== 2) continue;
+      if (field.tag === 'GIVN') {
+        lines[index] = `2 GIVN${givenName ? ` ${givenName}` : ''}`;
+        hasGivenName = true;
+      } else if (field.tag === 'SURN') {
+        lines[index] = `2 SURN${surname ? ` ${surname}` : ''}`;
+        hasSurname = true;
+      }
+    }
+    let insertAt = nameIndex + 1;
+    if (givenName && !hasGivenName) {
+      lines.splice(insertAt, 0, `2 GIVN ${givenName}`);
+      insertAt += 1;
+      end += 1;
+    }
+    if (surname && !hasSurname) lines.splice(Math.min(insertAt, end), 0, `2 SURN ${surname}`);
+  }
+
+  function updateEventField(lines, eventTag, fieldTag, value) {
+    let eventIndex = lines.findIndex((line, index) => index > 0 &&
+      parseGedcomField(line)?.level === 1 && parseGedcomField(line)?.tag === eventTag);
+    if (eventIndex < 0) {
+      if (!value) return;
+      lines.push(`1 ${eventTag}`, `2 ${fieldTag} ${value}`);
+      return;
+    }
+
+    let eventEnd = eventIndex + 1;
+    while (eventEnd < lines.length) {
+      const field = parseGedcomField(lines[eventEnd]);
+      if (field && field.level <= 1) break;
+      eventEnd += 1;
+    }
+    const fieldIndexes = [];
+    for (let index = eventIndex + 1; index < eventEnd; index += 1) {
+      const eventField = parseGedcomField(lines[index]);
+      if (eventField?.level === 2 && eventField.tag === fieldTag) fieldIndexes.push(index);
+    }
+    if (fieldIndexes.length) {
+      if (value) {
+        lines[fieldIndexes[0]] = `2 ${fieldTag} ${value}`;
+        for (const index of fieldIndexes.slice(1).reverse()) lines.splice(index, 1);
+      } else {
+        for (const index of fieldIndexes.reverse()) lines.splice(index, 1);
+      }
+    } else if (value) {
+      lines.splice(eventIndex + 1, 0, `2 ${fieldTag} ${value}`);
+    }
+  }
+
+  function savePersonSummary() {
+    const personId = state.pendingPersonSummaryId;
+    const personRecord = state.gedcomRecords.find((record) => record.tag === 'INDI' && record.xref === personId);
+    if (!personRecord) {
+      elements.personSummaryError.textContent = 'This person record could not be found in the current GEDCOM.';
+      elements.personSummaryError.hidden = false;
+      return false;
+    }
+    const givenName = elements.personSummaryGivenName.value.replace(/[\/\r\n]+/g, ' ').trim();
+    const surname = elements.personSummarySurname.value.replace(/[\/\r\n]+/g, ' ').trim();
+    const birthDate = elements.personSummaryBirthDate.value.replace(/[\r\n]+/g, ' ').trim();
+    const birthPlace = elements.personSummaryBirthPlace.value.replace(/[\r\n]+/g, ' ').trim();
+    const deathDate = elements.personSummaryDeathDate.value.replace(/[\r\n]+/g, ' ').trim();
+    const deathPlace = elements.personSummaryDeathPlace.value.replace(/[\r\n]+/g, ' ').trim();
+    const sex = elements.personSummarySex.value;
+    const lines = [...personRecord.lines];
+    updatePrimaryName(lines, givenName, surname);
+    const sexIndexes = [];
+    for (let index = 1; index < lines.length; index += 1) {
+      const field = parseGedcomField(lines[index]);
+      if (field?.level === 1 && field.tag === 'SEX') sexIndexes.push(index);
+    }
+    if (sexIndexes.length) {
+      if (sex) lines[sexIndexes[0]] = `1 SEX ${sex}`;
+      for (const index of sexIndexes.slice(sex ? 1 : 0).reverse()) lines.splice(index, 1);
+    } else if (sex) {
+      lines.push(`1 SEX ${sex}`);
+    }
+    updateEventField(lines, 'BIRT', 'DATE', birthDate);
+    updateEventField(lines, 'BIRT', 'PLAC', birthPlace);
+    updateEventField(lines, 'DEAT', 'DATE', deathDate);
+    updateEventField(lines, 'DEAT', 'PLAC', deathPlace);
+    personRecord.lines = lines;
+    refreshAfterGedcomMutation(personId);
+    state.pendingPersonSummaryId = null;
+    elements.personSummaryDialog.close();
+    return true;
   }
 
   function refreshAfterGedcomMutation(personId) {
@@ -1954,6 +2387,12 @@
     if (personButton) setFocus(personButton.dataset.personId);
   });
   elements.details.addEventListener('click', (event) => {
+    const summaryEditButton = event.target.closest('button[data-edit-person-summary]');
+    if (summaryEditButton) {
+      const person = state.people.get(summaryEditButton.dataset.editPersonSummary);
+      if (person) openPersonSummaryEditor(person);
+      return;
+    }
     const editButton = event.target.closest('button[data-edit-person]');
     if (editButton) {
       const person = state.people.get(editButton.dataset.editPerson);
@@ -1976,14 +2415,20 @@
       elements.mediaUploadInput.click();
       return;
     }
-    const researchButton = event.target.closest('button[data-perplexity-research]');
+    const researchButton = event.target.closest('button[data-wikitree-search]');
     if (researchButton) {
-      const person = state.people.get(researchButton.dataset.perplexityResearch);
+      const person = state.people.get(researchButton.dataset.wikitreeSearch);
       if (!isRecordedDeceased(person)) return;
+      wikiTreeSearchAbort?.abort();
+      wikiTreeSearchAbort = null;
       state.pendingResearchPersonId = person.id;
-      elements.researchPromptPreview.value = buildPerplexityPrompt(person);
+      renderWikiTreeQueryPreview(buildWikiTreeQuery(person));
+      elements.wikiTreeSearchStatus.hidden = true;
+      elements.wikiTreeSearchStatus.textContent = '';
+      elements.wikiTreeResults.replaceChildren();
+      elements.wikiTreeResults.hidden = true;
       elements.researchConsent.checked = false;
-      elements.confirmPerplexityResearch.disabled = true;
+      elements.confirmWikiTreeSearch.disabled = true;
       elements.researchDialog.showModal();
       return;
     }
@@ -2015,6 +2460,29 @@
     event.preventDefault();
     savePersonFields();
   });
+  elements.personSummaryForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    savePersonSummary();
+  });
+  elements.personSummaryBirthDate.addEventListener('input', () => {
+    elements.personSummaryBirthDatePicker.value = datePickerValue(elements.personSummaryBirthDate.value);
+  });
+  elements.personSummaryBirthDatePicker.addEventListener('change', () => {
+    if (elements.personSummaryBirthDatePicker.value) {
+      elements.personSummaryBirthDate.value = formatGedcomDate(elements.personSummaryBirthDatePicker.value);
+    }
+  });
+  elements.personSummaryDeathDate.addEventListener('input', () => {
+    elements.personSummaryDeathDatePicker.value = datePickerValue(elements.personSummaryDeathDate.value);
+  });
+  elements.personSummaryDeathDatePicker.addEventListener('change', () => {
+    if (elements.personSummaryDeathDatePicker.value) {
+      elements.personSummaryDeathDate.value = formatGedcomDate(elements.personSummaryDeathDatePicker.value);
+    }
+  });
+  elements.personSummaryDialog.addEventListener('close', () => {
+    state.pendingPersonSummaryId = null;
+  });
   elements.personEditorDialog.addEventListener('close', () => {
     state.pendingEditPersonId = null;
   });
@@ -2028,29 +2496,12 @@
     elements.relativeParentRoleField.hidden = elements.relativeType.value !== 'PARENT';
   });
   elements.researchConsent.addEventListener('change', () => {
-    elements.confirmPerplexityResearch.disabled = !elements.researchConsent.checked;
+    elements.confirmWikiTreeSearch.disabled = !elements.researchConsent.checked || Boolean(wikiTreeSearchAbort);
   });
-  elements.confirmPerplexityResearch.addEventListener('click', async () => {
-    const person = state.people.get(state.pendingResearchPersonId);
-    if (!elements.researchConsent.checked || !isRecordedDeceased(person)) return;
-    window.open('https://www.perplexity.ai/', '_blank', 'noopener,noreferrer');
-    let copied = false;
-    try {
-      await navigator.clipboard.writeText(elements.researchPromptPreview.value);
-      copied = true;
-    } catch {
-      elements.researchPromptPreview.focus();
-      elements.researchPromptPreview.select();
-      try { copied = document.execCommand('copy'); } catch { copied = false; }
-    }
-    if (copied) {
-      elements.researchDialog.close();
-      showToast('Prompt copied. Paste and submit it in the Perplexity tab; allow popups if no tab opened.');
-    } else {
-      elements.researchPromptPreview.focus();
-      elements.researchPromptPreview.select();
-      showToast('Perplexity opened. Copy the selected prompt and paste it into a new chat.');
-    }
+  elements.confirmWikiTreeSearch.addEventListener('click', searchWikiTree);
+  elements.researchDialog.addEventListener('close', () => {
+    wikiTreeSearchAbort?.abort();
+    wikiTreeSearchAbort = null;
     state.pendingResearchPersonId = null;
   });
   elements.back.addEventListener('click', () => {
