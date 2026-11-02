@@ -45,6 +45,8 @@
     pendingLifeEvent: null,
     primaryMediaKey: '', primaryMedia: new Map(), additionalMedia: new Map(), primaryPersonId: '',
     gedcomRecords: [], gedcomDirty: false, gedcomText: '', sessionSaveQueue: Promise.resolve(),
+    gedcomSource: '', gedcomFileHandle: null, gedcomBaseHash: '', gedcomSaving: false,
+    gedcomSaveQueue: Promise.resolve(), gedcomPickerDeclined: false,
     directoryFilters: { birthCountry: '', deathCountry: '', birthMin: null, birthMax: null, deathMin: null, deathMax: null },
     directoryYearBounds: { birth: null, death: null },
     expandedSurnames: new Set(), surnameFilter: new Set()
@@ -266,6 +268,10 @@
       fileName: state.fileName,
       gedcomText: state.gedcomText,
       gedcomDirty: state.gedcomDirty,
+      gedcomSource: state.gedcomSource,
+      gedcomBaseHash: state.gedcomBaseHash,
+      gedcomFileHandle: state.gedcomFileHandle,
+      primaryMediaKey: state.primaryMediaKey,
       selectedId: state.selectedId,
       mediaDirectoryHandle: state.mediaDirectoryHandle
     };
@@ -1085,7 +1091,10 @@
     try {
       const response = await fetch('/api/media-info', { cache: 'no-store' });
       const info = response.ok ? await response.json() : null;
-      state.mediaHelper = info?.available ? { folder: info.folder, deletePaths: info.deletePaths === true } : null;
+      state.mediaHelper = info?.available ? {
+        folder: info.folder, deletePaths: info.deletePaths === true,
+        saveGedcom: info.saveGedcom === true, gedcomName: typeof info.gedcom === 'string' ? info.gedcom : ''
+      } : null;
     } catch {
       state.mediaHelper = null;
     }
@@ -1483,6 +1492,10 @@
     state.gedcomRecords = data.gedcomRecords;
     state.gedcomDirty = false;
     state.gedcomText = gedcomText || serializeGedcomRecords(data.gedcomRecords);
+    state.gedcomSource = 'file';
+    state.gedcomFileHandle = null;
+    state.gedcomBaseHash = '';
+    state.gedcomPickerDeclined = false;
     state.primaryMediaKey = storageKey;
     state.additionalMedia = loadAdditionalMedia(storageKey, state.people);
     state.primaryMedia = loadPrimaryMedia(storageKey, state.people);
@@ -1494,6 +1507,7 @@
     elements.search.value = '';
     elements.search.disabled = false;
     elements.clear.disabled = false;
+    document.querySelector('#importGedcomButton').disabled = false;
     elements.mapViewButton.disabled = false;
     elements.printMapButton.disabled = false;
     document.querySelector('#openGedcomLabel').hidden = true;
@@ -1505,6 +1519,7 @@
     elements.peopleCount.textContent = state.people.size.toLocaleString();
     elements.loadStatus.textContent = 'TREE LOADED LOCALLY';
     elements.statusPip.classList.add('ready');
+    syncGedcomSaveUi();
     const firstPerson = state.people.values().next().value;
     setFocus(firstPerson.id, true);
     renderRoster();
@@ -1519,12 +1534,20 @@
     }
     if (!session?.fileName || !session.gedcomText) return;
     try {
-      const file = new File([session.gedcomText], session.fileName, { type: 'text/plain' });
       const parsed = parseGedcom(session.gedcomText);
-      const storageKey = await primaryMediaStorageKey(file, session.gedcomText);
+      const bundle = window.KINSHIP_PRIMARY;
+      // Sessions saved before file saving existed did not record where the tree came from.
+      const legacyPrimary = !session.gedcomSource && typeof bundle?.gedcomText === 'string' && bundle.gedcomName === session.fileName;
+      const originalText = legacyPrimary ? bundle.gedcomText : session.gedcomText;
+      const storageKey = session.primaryMediaKey
+        || await primaryMediaStorageKey(new File([originalText], session.fileName, { type: 'text/plain' }), originalText);
       setLoaded(session.fileName, parsed, storageKey, session.gedcomText);
+      state.gedcomSource = legacyPrimary ? 'primary' : session.gedcomSource || 'file';
+      state.gedcomFileHandle = session.gedcomFileHandle || null;
+      state.gedcomBaseHash = session.gedcomBaseHash || (legacyPrimary ? await sha256Hex(bundle.gedcomText) : '');
       state.gedcomDirty = Boolean(session.gedcomDirty);
       if (state.gedcomDirty) elements.loadStatus.textContent = 'UNSAVED CHANGES';
+      syncGedcomSaveUi();
       await restoreMediaDirectoryHandle(session.mediaDirectoryHandle);
       if (session.selectedId && state.people.has(session.selectedId)) setFocus(session.selectedId, true);
     } catch {
@@ -1537,6 +1560,173 @@
     state.gedcomText = serializeGedcomRecords(state.gedcomRecords);
     elements.loadStatus.textContent = 'UNSAVED CHANGES';
     persistActiveSession();
+    syncGedcomSaveUi();
+    // Edits come from a click, so the browser may still allow a permission or save-location prompt.
+    saveGedcomFile({ interactive: Boolean(navigator.userActivation?.isActive), automatic: true });
+  }
+
+  async function sha256Hex(text) {
+    if (!globalThis.crypto?.subtle) return '';
+    const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  function gedcomSaveTarget() {
+    if (state.gedcomSource === 'primary' && state.mediaHelper?.saveGedcom && state.mediaHelper.gedcomName === state.fileName) return 'primary';
+    if (state.gedcomFileHandle && typeof state.gedcomFileHandle.createWritable === 'function') return 'handle';
+    return typeof window.showSaveFilePicker === 'function' ? 'picker' : 'download';
+  }
+
+  function syncGedcomSaveUi() {
+    const button = document.querySelector('#saveGedcomButton');
+    const label = state.gedcomSaving ? 'Saving…' : state.gedcomDirty ? 'Save to GEDCOM' : 'Saved';
+    if (button) {
+      button.hidden = !state.fileName;
+      button.disabled = state.gedcomSaving || !state.gedcomDirty;
+      button.classList.toggle('is-dirty', state.gedcomDirty && !state.gedcomSaving);
+      setButtonContent(button, state.gedcomDirty || state.gedcomSaving ? 'save' : 'saved', label);
+      button.title = state.gedcomDirty ? `Write the unsaved changes to ${state.fileName}` : `All changes are saved to ${state.fileName}`;
+    }
+    for (const recordButton of document.querySelectorAll('[data-save-gedcom]')) {
+      recordButton.hidden = !state.gedcomDirty;
+      recordButton.disabled = state.gedcomSaving;
+    }
+  }
+
+  function saveGedcomFile(options = {}) {
+    const run = () => saveGedcomOnce(options);
+    const result = state.gedcomSaveQueue.then(run, run);
+    state.gedcomSaveQueue = result.catch(() => false);
+    return result;
+  }
+
+  async function saveGedcomOnce({ interactive = false, automatic = false } = {}) {
+    if (!state.fileName || !state.gedcomDirty || !state.gedcomRecords.length) return !state.gedcomDirty;
+    const target = gedcomSaveTarget();
+    if (automatic && (target === 'download' || (target === 'picker' && (!interactive || state.gedcomPickerDeclined)))) {
+      showToast('Changes are not yet in a file. Click "Save to GEDCOM" at the top of the screen to save them.');
+      return false;
+    }
+    const text = state.gedcomText || serializeGedcomRecords(state.gedcomRecords);
+    state.gedcomSaving = true;
+    syncGedcomSaveUi();
+    let result = null;
+    try {
+      if (target === 'primary') result = await saveGedcomViaHelper(text, false);
+      else if (target === 'handle') result = await saveGedcomViaHandle(state.gedcomFileHandle, text, interactive, false);
+      else if (target === 'picker') result = await saveGedcomViaPicker(text);
+      else result = saveGedcomViaDownload(text);
+    } catch (error) {
+      result = null;
+      showToast(error?.message
+        ? `The GEDCOM file could not be saved: ${error.message}`
+        : 'The GEDCOM file could not be saved. Your changes are still kept in this browser.');
+    } finally {
+      state.gedcomSaving = false;
+    }
+    if (!result) {
+      syncGedcomSaveUi();
+      return false;
+    }
+    await finishGedcomSave(text);
+    if (!automatic) showToast(result);
+    return true;
+  }
+
+  async function saveGedcomViaHelper(text, overwrite) {
+    const headers = { 'Content-Type': 'text/plain; charset=utf-8', 'X-Gedcom-Name': encodeURIComponent(state.fileName) };
+    if (state.gedcomBaseHash) headers['X-Base-Sha256'] = state.gedcomBaseHash;
+    if (overwrite) headers['X-Overwrite'] = '1';
+    let response;
+    try {
+      response = await fetch('/api/gedcom-save', { method: 'POST', headers, body: text });
+    } catch {
+      throw new Error('Kinship Atlas.exe is not responding. Open it again, then click "Save to GEDCOM".');
+    }
+    if (response.status === 409 || (response.status === 400 && !state.gedcomBaseHash)) {
+      const replace = window.confirm(`"${state.fileName}" in the Primary GEDCOM folder has been changed outside this tab since it was opened.\n\nReplace it with the tree shown here? The current file will be kept in Primary GEDCOM\\Backups.`);
+      return replace ? saveGedcomViaHelper(text, true) : null;
+    }
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || `the helper returned ${response.status}.`);
+    return `Saved to ${state.fileName}.${body.backup ? ` The previous version was kept in Primary GEDCOM\\Backups\\${body.backup}.` : ''}`;
+  }
+
+  async function saveGedcomViaHandle(handle, text, interactive, fresh) {
+    let permission = await handle.queryPermission({ mode: 'readwrite' });
+    if (permission !== 'granted' && interactive) permission = await handle.requestPermission({ mode: 'readwrite' }).catch(() => 'denied');
+    if (permission !== 'granted') {
+      showToast(`Changes are not yet saved. Click "Save to GEDCOM" and allow access to ${handle.name}.`);
+      return null;
+    }
+    if (!fresh && state.gedcomBaseHash) {
+      let current = null;
+      try { current = await (await handle.getFile()).text(); } catch { }
+      if (current !== null && await sha256Hex(current) !== state.gedcomBaseHash
+        && !window.confirm(`"${handle.name}" has been changed outside this tab since it was opened.\n\nReplace it with the tree shown here?`)) return null;
+    }
+    const writable = await handle.createWritable();
+    try {
+      await writable.write(text);
+      await writable.close();
+    } catch (error) {
+      await writable.abort().catch(() => {});
+      throw error;
+    }
+    return `Saved to ${handle.name}.`;
+  }
+
+  async function saveGedcomViaPicker(text) {
+    let handle;
+    try {
+      handle = await window.showSaveFilePicker({
+        suggestedName: state.fileName,
+        types: [{ description: 'GEDCOM', accept: { 'text/plain': ['.ged', '.gedcom'] } }]
+      });
+    } catch (error) {
+      if (error?.name !== 'AbortError') throw error;
+      state.gedcomPickerDeclined = true;
+      showToast('Not saved. Click "Save to GEDCOM" when you are ready to choose the file.');
+      return null;
+    }
+    const message = await saveGedcomViaHandle(handle, text, true, true);
+    if (message) {
+      state.gedcomFileHandle = handle;
+      state.gedcomSource = 'handle';
+      state.gedcomPickerDeclined = false;
+    }
+    return message;
+  }
+
+  function saveGedcomViaDownload(text) {
+    const url = URL.createObjectURL(new File([text], state.fileName, { type: 'text/plain' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = state.fileName;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return `Downloaded ${state.fileName}. This browser cannot write to files directly, so replace your original GEDCOM with the downloaded copy.`;
+  }
+
+  async function finishGedcomSave(text) {
+    state.gedcomBaseHash = await sha256Hex(text);
+    if (state.gedcomText === text) {
+      state.gedcomDirty = false;
+      elements.loadStatus.textContent = 'SAVED TO FILE';
+    }
+    // Card images and extra media links are stored under a key derived from the file contents.
+    const newKey = await primaryMediaStorageKey(new File([text], state.fileName, { type: 'text/plain' }), text);
+    if (state.primaryMediaKey && newKey !== state.primaryMediaKey) {
+      try {
+        for (const suffix of ['', ':additional-media:v1']) {
+          const value = localStorage.getItem(state.primaryMediaKey + suffix);
+          if (value !== null) localStorage.setItem(newKey + suffix, value);
+        }
+      } catch { }
+      state.primaryMediaKey = newKey;
+    }
+    syncGedcomSaveUi();
+    await persistActiveSession();
   }
 
   function setFocus(personId, replaceHistory = false) {
@@ -2405,6 +2595,12 @@
     printButton.dataset.printPerson = person.id;
     printButton.title = 'Print this person record on A4 (attached media is left out)';
     personActions.append(printButton);
+    const saveRecordButton = iconButton('save', 'Save to GEDCOM', 'research-button gedcom-save-record');
+    saveRecordButton.dataset.saveGedcom = 'true';
+    saveRecordButton.title = `Write the unsaved changes to ${state.fileName}`;
+    saveRecordButton.hidden = !state.gedcomDirty;
+    saveRecordButton.disabled = state.gedcomSaving;
+    personActions.append(saveRecordButton);
     if (state.defaultRecord?.gedcomHandle && state.defaultRecord.gedcomName === state.fileName) {
       const isHome = state.defaultRecord.homePersonId === person.id;
       const homeButton = makeButton(isHome ? '★ Home person' : '☆ Set as home person', 'research-button');
@@ -2417,6 +2613,13 @@
       researchButton.dataset.wikitreeSearch = person.id;
       personActions.append(researchButton);
     }
+    const deletePersonButton = iconButton('trash', 'Delete person', 'research-button person-delete-button');
+    deletePersonButton.dataset.deletePerson = person.id;
+    deletePersonButton.disabled = state.people.size < 2 || state.gedcomSaving;
+    deletePersonButton.title = state.people.size < 2
+      ? 'The only person in a tree cannot be deleted'
+      : 'Remove this person and all links to them from the GEDCOM file';
+    personActions.append(deletePersonButton);
     hero.append(personActions);
     elements.details.append(hero);
     const kinship = renderKinship(person);
@@ -2652,13 +2855,17 @@
     map: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.4 4 5.6 4 9s-1.4 6.6-4 9c-2.6-2.4-4-5.6-4-9s1.4-6.6 4-9z"/>',
     tree: '<rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/>',
     restart: '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>',
+    import: '<path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 17v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>',
+    save: '<path d="M5 3h11l5 5v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M7 3v5h8V3"/><rect x="7" y="13" width="10" height="8"/>',
+    saved: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
     edit: '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
     calendarPlus: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4M12 13v5M9.5 15.5h5"/>',
     userPlus: '<circle cx="9" cy="8" r="4"/><path d="M2 21v-1a6 6 0 0 1 6-6h2a6 6 0 0 1 6 6v1"/><path d="M19 8v6M16 11h6"/>',
     target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/>',
     targetClear: '<circle cx="12" cy="12" r="9"/><path d="M8.5 8.5l7 7M15.5 8.5l-7 7"/>',
     print: '<path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v7H6z"/>',
-    search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>'
+    search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
+    trash: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M9 7V4h6v3"/>'
   };
 
   function setButtonContent(button, icon, text) {
@@ -3067,6 +3274,7 @@
   }
 
   let pendingEventMediaDelete = null;
+  let pendingPersonDelete = null;
 
   function openEventMediaRemoveDialog(path) {
     if (!path || !state.pendingLifeEvent) return;
@@ -3503,6 +3711,182 @@
     state.gedcomRecords.splice(trailerIndex < 0 ? state.gedcomRecords.length : trailerIndex, 0, record);
   }
 
+  // People only match when first given name, surname and birth date text are the same (ignoring case and spacing).
+  function importMatchKey(person) {
+    const birthDate = person.events.find((event) => event.type === 'BIRT' && event.date)?.date || '';
+    if (!birthDate) return '';
+    const normalize = (value) => String(value || '').normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim();
+    const firstName = String(person.givenName || '').trim().split(/\s+/)[0] || '';
+    return [normalize(firstName), normalize(person.surname), normalize(birthDate)].join('|');
+  }
+
+  // Works out which people in an import file are new and connected to the open tree, without changing anything.
+  function planGedcomImport(text) {
+    const incoming = parseGedcom(text);
+    const existingByKey = new Map();
+    for (const person of state.people.values()) {
+      const key = importMatchKey(person);
+      if (!key) continue;
+      if (!existingByKey.has(key)) existingByKey.set(key, []);
+      existingByKey.get(key).push(person.id);
+    }
+    // anchors: people in the file who match exactly one existing person; links to them become links into the tree.
+    const anchors = new Map();
+    const candidates = new Set();
+    let noBirthDate = 0;
+    let alreadyInTree = 0;
+    for (const person of incoming.people.values()) {
+      const key = importMatchKey(person);
+      if (!key) { noBirthDate += 1; continue; }
+      const matches = existingByKey.get(key);
+      if (matches) {
+        alreadyInTree += 1;
+        if (matches.length === 1) anchors.set(person.id, matches[0]);
+        continue;
+      }
+      candidates.add(person.id);
+    }
+    const neighbours = new Map();
+    for (const family of incoming.families.values()) {
+      const members = [...new Set([family.husbandId, family.wifeId, ...family.childIds])].filter((id) => incoming.people.has(id));
+      for (const id of members) {
+        if (!neighbours.has(id)) neighbours.set(id, new Set());
+        for (const other of members) if (other !== id) neighbours.get(id).add(other);
+      }
+    }
+    const importIds = new Set();
+    const queue = [];
+    for (const id of candidates) {
+      if ([...(neighbours.get(id) || [])].some((other) => anchors.has(other))) { importIds.add(id); queue.push(id); }
+    }
+    while (queue.length) {
+      for (const other of neighbours.get(queue.shift()) || []) {
+        if (candidates.has(other) && !importIds.has(other)) { importIds.add(other); queue.push(other); }
+      }
+    }
+    return {
+      incoming, anchors, importIds, noBirthDate, alreadyInTree,
+      total: incoming.people.size, newPeople: candidates.size, unconnected: candidates.size - importIds.size
+    };
+  }
+
+  function appendRecordLine(record, line) {
+    if (record.lines.some((entry) => entry.trim() === line)) return;
+    let index = record.lines.length;
+    while (index > 1 && !record.lines[index - 1].trim()) index -= 1;
+    record.lines.splice(index, 0, line);
+  }
+
+  // Appends the planned people with their life events, families and cited records, re-numbering every xref.
+  function applyGedcomImport(plan) {
+    const { incoming, anchors, importIds } = plan;
+    const incomingRecords = new Map(incoming.gedcomRecords.filter((record) => record.xref).map((record) => [record.xref, record]));
+    const existingRecords = new Map(state.gedcomRecords.filter((record) => record.xref).map((record) => [record.xref, record]));
+    const usedXrefs = new Set(existingRecords.keys());
+    const prefixes = { INDI: 'I', FAM: 'F', SOUR: 'S', OBJE: 'O', NOTE: 'N', REPO: 'R' };
+    const counters = new Map();
+    const allocate = (tag) => {
+      const prefix = prefixes[tag] || 'X';
+      let number = counters.get(prefix) || 1;
+      while (usedXrefs.has(`${prefix}${number}`)) number += 1;
+      counters.set(prefix, number + 1);
+      usedXrefs.add(`${prefix}${number}`);
+      return `${prefix}${number}`;
+    };
+    const lineMatch = (line) => line.match(/^(\d+)\s+(?:(@[^@]+@)\s+)?([A-Za-z0-9_]+)(?:\s+(.*))?$/);
+    const isPointer = (value) => /^@[^@#][^@]*@$/.test(String(value || '').trim());
+
+    const personMap = new Map([...importIds].map((id) => [id, allocate('INDI')]));
+    const mapPerson = (id) => personMap.get(id) || anchors.get(id) || '';
+    const familyMap = new Map();
+    const mergedFamilies = [];
+    for (const family of incoming.families.values()) {
+      if (![family.husbandId, family.wifeId, ...family.childIds].some((id) => importIds.has(id))) continue;
+      const husband = anchors.get(family.husbandId);
+      const wife = anchors.get(family.wifeId);
+      const existing = husband && wife ? [...state.families.values()].find((entry) =>
+        (entry.husbandId === husband && entry.wifeId === wife) || (entry.husbandId === wife && entry.wifeId === husband)) : null;
+      if (existing) {
+        familyMap.set(family.id, existing.id);
+        mergedFamilies.push({ family, targetId: existing.id });
+      } else {
+        familyMap.set(family.id, allocate('FAM'));
+      }
+    }
+
+    const copiedRecords = new Map();
+    const newRecords = [];
+    const existingBodies = new Map();
+    for (const record of state.gedcomRecords) {
+      if (record.xref && !['INDI', 'FAM'].includes(record.tag)) existingBodies.set(`${record.tag}\n${record.lines.slice(1).join('\n').trim()}`, record.xref);
+    }
+    function copyLinkedRecord(xref) {
+      if (copiedRecords.has(xref)) return copiedRecords.get(xref);
+      const record = incomingRecords.get(xref);
+      if (!record || ['HEAD', 'TRLR', 'INDI', 'FAM'].includes(record.tag)) return '';
+      const hasPointers = record.lines.slice(1).some((line) => isPointer(lineMatch(line)?.[4]));
+      const reuse = hasPointers ? '' : existingBodies.get(`${record.tag}\n${record.lines.slice(1).join('\n').trim()}`);
+      if (reuse) { copiedRecords.set(xref, reuse); return reuse; }
+      const newXref = allocate(record.tag);
+      copiedRecords.set(xref, newXref);
+      newRecords.push({ xref: newXref, tag: record.tag, lines: remapLines(record.lines, newXref) });
+      return newXref;
+    }
+    function remapPointer(target) {
+      if (incoming.people.has(target)) return mapPerson(target);
+      if (incoming.families.has(target)) return familyMap.get(target) || '';
+      return copyLinkedRecord(target);
+    }
+    // Pointers to people, families or records that are not imported are dropped with their sub-lines.
+    function remapLines(lines, newXref) {
+      const output = [];
+      let skipAbove = Infinity;
+      for (const line of lines) {
+        const match = lineMatch(line);
+        if (!match) { if (skipAbove === Infinity && line.trim()) output.push(line); continue; }
+        const level = Number(match[1]);
+        if (level > skipAbove) continue;
+        skipAbove = Infinity;
+        if (level === 0) { output.push(`0 @${newXref}@ ${match[3]}${match[4] ? ` ${match[4]}` : ''}`); continue; }
+        if (!isPointer(match[4])) { output.push(line); continue; }
+        const target = remapPointer(splitXref(match[4].trim()));
+        if (!target) { skipAbove = level; continue; }
+        output.push(`${level} ${match[3]} @${target}@`);
+      }
+      return output;
+    }
+
+    const personRecords = [];
+    for (const id of importIds) {
+      const record = incomingRecords.get(id);
+      if (record) personRecords.push({ xref: personMap.get(id), tag: 'INDI', lines: remapLines(record.lines, personMap.get(id)) });
+    }
+    const familyRecords = [];
+    const backLinks = [];
+    for (const family of incoming.families.values()) {
+      const targetId = familyMap.get(family.id);
+      if (!targetId || mergedFamilies.some((entry) => entry.family === family)) continue;
+      const record = incomingRecords.get(family.id);
+      if (!record) continue;
+      familyRecords.push({ xref: targetId, tag: 'FAM', lines: remapLines(record.lines, targetId) });
+      for (const [role, ids] of [['FAMS', [family.husbandId, family.wifeId]], ['FAMC', family.childIds]]) {
+        for (const id of ids) if (anchors.has(id)) backLinks.push({ personId: anchors.get(id), line: `1 ${role} @${targetId}@` });
+      }
+    }
+    for (const { family, targetId } of mergedFamilies) {
+      const familyRecord = existingRecords.get(targetId);
+      for (const childId of family.childIds) {
+        if (importIds.has(childId) && familyRecord) appendRecordLine(familyRecord, `1 CHIL @${personMap.get(childId)}@`);
+      }
+    }
+    for (const { personId, line } of backLinks) {
+      const record = existingRecords.get(personId);
+      if (record) appendRecordLine(record, line);
+    }
+    for (const record of [...personRecords, ...familyRecords, ...newRecords]) addRecordBeforeTrailer(record);
+    return { people: personRecords.length, families: familyRecords.length, joinedFamilies: mergedFamilies.length, linkedRecords: newRecords.length };
+  }
+
   function createRelativeRecord() {
     const selected = state.people.get(state.selectedId);
     if (!selected) return false;
@@ -3763,6 +4147,122 @@
     return true;
   }
 
+  // Works out everything a person deletion touches. Families left with one member or none are removed too,
+  // as are NOTE/OBJE records used only by removed records. Sources, repositories and media files are kept.
+  function gedcomPointer(value) {
+    return /^@[^@\s]+@$/.test(value.trim()) ? value.trim().slice(1, -1) : '';
+  }
+
+  function planPersonDeletion(personId) {
+    const person = state.people.get(personId);
+    const personRecord = findGedcomRecord('INDI', personId);
+    if (!person || !personRecord) return null;
+    const removedFamilyIds = [];
+    const keptFamilies = [];
+    for (const family of state.families.values()) {
+      const members = [family.husbandId, family.wifeId, ...family.childIds].filter(Boolean);
+      if (!members.includes(personId)) continue;
+      const remaining = [...new Set(members.filter((id) => id !== personId && state.people.has(id)))];
+      if (remaining.length <= 1) removedFamilyIds.push(family.id);
+      else keptFamilies.push(family.id);
+    }
+    const removedRecords = new Set([personRecord, ...removedFamilyIds.map((id) => findGedcomRecord('FAM', id)).filter(Boolean)]);
+    const pointersIn = (record) => record.lines.slice(1).map(parseGedcomField)
+      .map((field) => field && gedcomPointer(field.value)).filter(Boolean);
+    const candidateIds = new Set([...removedRecords].flatMap(pointersIn));
+    const ownedRecords = [];
+    for (const record of state.gedcomRecords) {
+      if (!['NOTE', 'OBJE'].includes(record.tag) || !record.xref || !candidateIds.has(record.xref)) continue;
+      const usedElsewhere = state.gedcomRecords.some((other) => other !== record && !removedRecords.has(other) && pointersIn(other).includes(record.xref));
+      if (!usedElsewhere) ownedRecords.push(record);
+    }
+    for (const record of ownedRecords) removedRecords.add(record);
+    const removedIds = new Set([...removedRecords].map((record) => record.xref).filter(Boolean));
+    const groups = relationshipGroups(person);
+    const count = (label) => groups.find(([name]) => name === label)?.[1].filter((item) => item.id).length || 0;
+    return {
+      personId, name: person.name, removedRecords, removedIds, removedFamilyIds, keptFamilies,
+      notes: ownedRecords.filter((record) => record.tag === 'NOTE').length,
+      mediaRecords: ownedRecords.filter((record) => record.tag === 'OBJE').length,
+      events: person.events.length,
+      parents: count('Parents'), partners: count('Partners / spouses'), children: count('Children'),
+      fallbackId: [...groups.flatMap(([, items]) => items.map((item) => item.id)), state.primaryPersonId]
+        .find((id) => id && id !== personId && state.people.has(id)) || ''
+    };
+  }
+
+  function deletePersonRecord(plan) {
+    const removedIds = plan.removedIds;
+    const kept = state.gedcomRecords.filter((record) => !plan.removedRecords.has(record));
+    let removedLinks = 0;
+    for (const record of kept) {
+      const lines = [];
+      let skipBelow = Infinity;
+      for (const [index, line] of record.lines.entries()) {
+        const field = index ? parseGedcomField(line) : null;
+        if (field && field.level > skipBelow) continue;
+        skipBelow = Infinity;
+        if (field && removedIds.has(gedcomPointer(field.value))) {
+          skipBelow = field.level;
+          removedLinks += 1;
+          continue;
+        }
+        lines.push(line);
+      }
+      if (lines.length !== record.lines.length) record.lines = lines;
+    }
+    state.gedcomRecords = kept;
+    if (state.additionalMedia.delete(plan.personId)) saveAdditionalMedia();
+    if (state.primaryMedia.delete(plan.personId)) savePrimaryMedia();
+    if (state.primaryPersonId === plan.personId) {
+      state.primaryPersonId = '';
+      try { localStorage.removeItem(primaryPersonStorageKey()); } catch { }
+    }
+    if (state.defaultRecord?.homePersonId === plan.personId && state.defaultRecord.gedcomName === state.fileName) {
+      const updated = { ...state.defaultRecord, homePersonId: '', homePersonName: '' };
+      state.defaultRecord = updated;
+      writeDefaultRecord(updated).catch(() => { });
+    }
+    refreshAfterGedcomMutation(plan.fallbackId);
+    syncPrimaryPersonBar();
+    return { removedLinks };
+  }
+
+  function openPersonDeleteDialog(personId) {
+    if (state.people.size < 2) {
+      showToast('The only person in a tree cannot be deleted. Use "Start Again" instead.');
+      return;
+    }
+    const plan = planPersonDeletion(personId);
+    if (!plan) {
+      showToast('This person could not be found in the GEDCOM file.');
+      return;
+    }
+    const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+    const items = [
+      `The person record (@${personId}@) and ${plural(plan.events, 'life event')}`,
+      plan.parents && `Links to ${plural(plan.parents, 'parent')}`,
+      plan.partners && `Links to ${plural(plan.partners, 'partner')}`,
+      plan.children && `Links to ${plural(plan.children, 'child', 'children')}`,
+      plan.removedFamilyIds.length && `${plural(plan.removedFamilyIds.length, 'family record')} that would be left with only one person (including any marriage details)`,
+      plan.notes && `${plural(plan.notes, 'note')} used only by this person`,
+      plan.mediaRecords && `${plural(plan.mediaRecords, 'media record')} used only by this person (the files stay in the media folder)`
+    ].filter(Boolean);
+    document.querySelector('#personDeleteName').textContent = plan.name;
+    document.querySelector('#personDeleteSummary').replaceChildren(...items.map((text) => {
+      const item = document.createElement('li');
+      item.textContent = text;
+      return item;
+    }));
+    document.querySelector('#personDeleteKept').textContent =
+      'Relatives stay in the tree. Sources, repositories and media files are kept.' +
+      (plan.keptFamilies.length ? ` ${plural(plan.keptFamilies.length, 'family', 'families')} with other members will keep their remaining people.` : '');
+    pendingPersonDelete = plan;
+    const dialog = document.querySelector('#personDeleteDialog');
+    dialog.showModal();
+    dialog.querySelector('.dialog-button-quiet').focus();
+  }
+
   function ensureCreateGedcomWelcomeAction() {
     const welcomeButton = elements.canvas.querySelector('.welcome-button');
     if (!welcomeButton || elements.canvas.querySelector('[data-create-gedcom]')) return;
@@ -3777,7 +4277,7 @@
     actions.append(welcomeButton, orLabel, createButton);
   }
 
-  async function loadGedcomFile(file) {
+  async function loadGedcomFile(file, { source = 'file', handle = null } = {}) {
     if (file.size > 100 * 1024 * 1024) {
       showToast('This file is over 100 MB. Choose a smaller GEDCOM export.');
       return false;
@@ -3788,8 +4288,12 @@
       const parsed = parseGedcom(text);
       const storageKey = await primaryMediaStorageKey(file, text);
       setLoaded(file.name, parsed, storageKey, text);
+      state.gedcomSource = source;
+      state.gedcomFileHandle = handle;
+      state.gedcomBaseHash = await sha256Hex(text);
+      syncGedcomSaveUi();
       await persistActiveSession();
-      showToast(`Loaded ${parsed.people.size.toLocaleString()} individuals. The data remains in this tab.`);
+      showToast(`Loaded ${parsed.people.size.toLocaleString()} individuals. Edits are saved back to ${file.name}.`);
       return true;
     } catch (error) {
       elements.loadStatus.textContent = 'IMPORT FAILED';
@@ -3803,6 +4307,26 @@
     if (!file) return;
     if (!await loadGedcomFile(file)) elements.fileInput.value = '';
     else promptForMediaFolder();
+  });
+  // A file chosen through showOpenFilePicker can be written back to; the plain file input is the fallback.
+  document.addEventListener('click', async (event) => {
+    if (!event.target.closest?.('label[for="gedcomInput"]') || typeof window.showOpenFilePicker !== 'function') return;
+    event.preventDefault();
+    let handle;
+    try {
+      [handle] = await window.showOpenFilePicker({ types: [{ description: 'GEDCOM', accept: { 'text/plain': ['.ged', '.gedcom'] } }] });
+    } catch (error) {
+      if (error?.name !== 'AbortError') showToast('The GEDCOM file could not be opened.');
+      return;
+    }
+    let file;
+    try {
+      file = await handle.getFile();
+    } catch {
+      showToast('The GEDCOM file could not be read.');
+      return;
+    }
+    if (await loadGedcomFile(file, { source: 'handle', handle })) promptForMediaFolder();
   });
   function promptForMediaFolder() {
     if (state.mediaDirectoryHandle || state.mediaHelper || elements.mediaButton.disabled) return;
@@ -3849,6 +4373,7 @@
     let mediaHandle = null;
     let helperFolder = '';
     let mediaProblem = '';
+    let createdHandle = null;
     const errorBox = document.querySelector('#newGedcomError');
     const showCreateError = (message) => { errorBox.textContent = message; errorBox.hidden = false; };
     errorBox.hidden = true;
@@ -3873,6 +4398,7 @@
         const writable = await handle.createWritable();
         await writable.write(gedcomText);
         await writable.close();
+        createdHandle = handle;
         saveAction = 'saved';
         try {
           mediaHandle = await parent.getDirectoryHandle(`${safeBase}_Media`, { create: true });
@@ -3907,6 +4433,11 @@
 
     const storageKey = await primaryMediaStorageKey(file, gedcomText);
     setLoaded(fileName, parsed, storageKey, gedcomText);
+    if (createdHandle) {
+      state.gedcomSource = 'handle';
+      state.gedcomFileHandle = createdHandle;
+    }
+    state.gedcomBaseHash = await sha256Hex(gedcomText);
     if (mediaHandle) {
       state.mediaDirectoryHandle = mediaHandle;
       syncMediaButton();
@@ -4006,6 +4537,7 @@
     state.primaryMediaKey = ''; state.primaryMedia.clear();
     state.additionalMedia.clear();
     state.gedcomRecords = [];     state.gedcomDirty = false;
+    state.gedcomSource = ''; state.gedcomFileHandle = null; state.gedcomBaseHash = ''; state.gedcomPickerDeclined = false;
     state.people.clear(); state.families.clear(); state.sources.clear(); state.selectedId = null;
     state.primaryPersonId = ''; syncPrimaryPersonBar();
     refreshDirectoryFilters(true);
@@ -4014,11 +4546,13 @@
     elements.fileInput.value = ''; elements.mediaInput.value = ''; elements.mediaButton.disabled = true; elements.search.value = ''; elements.search.disabled = true;
     document.querySelector('#openGedcomLabel').hidden = false;
     elements.clear.disabled = true; elements.back.disabled = true; elements.forward.disabled = true;
+    document.querySelector('#importGedcomButton').disabled = true;
     elements.printMapButton.disabled = true;
     elements.zoomIn.disabled = true; elements.zoomOut.disabled = true;
     elements.treeLabel.textContent = 'No tree loaded'; elements.peopleCount.textContent = '0';
     elements.loadStatus.textContent = 'WAITING FOR FILE'; elements.statusPip.classList.remove('ready');
-    elements.canvas.innerHTML = '<div class="welcome-state"><div class="welcome-art" aria-hidden="true"><span class="orbit orbit-a"></span><span class="orbit orbit-b"></span><span class="welcome-node node-a"></span><span class="welcome-node node-b"></span><span class="welcome-node node-c"></span><span class="welcome-node node-d"></span><span class="welcome-node node-e"></span><span class="welcome-stem stem-a"></span><span class="welcome-stem stem-b"></span><span class="welcome-stem stem-c"></span><span class="welcome-stem stem-d"></span></div><div class="eyebrow">YOUR ARCHIVE, CONNECTED</div><h2>Start with a person.</h2><p>Choose a local GEDCOM file to open its family relationships in this tab.</p><label class="button button-primary welcome-button" for="gedcomInput"><span class="button-plus" aria-hidden="true">+</span> Open GEDCOM</label><span class="welcome-note">Your file is read locally and is not uploaded or saved by this app.</span></div>';
+    syncGedcomSaveUi();
+    elements.canvas.innerHTML = '<div class="welcome-state"><div class="welcome-art" aria-hidden="true"><span class="orbit orbit-a"></span><span class="orbit orbit-b"></span><span class="welcome-node node-a"></span><span class="welcome-node node-b"></span><span class="welcome-node node-c"></span><span class="welcome-node node-d"></span><span class="welcome-node node-e"></span><span class="welcome-stem stem-a"></span><span class="welcome-stem stem-b"></span><span class="welcome-stem stem-c"></span><span class="welcome-stem stem-d"></span></div><div class="eyebrow">YOUR ARCHIVE, CONNECTED</div><h2>Start with a person.</h2><p>Choose a local GEDCOM file to open its family relationships in this tab.</p><label class="button button-primary welcome-button" for="gedcomInput"><span class="button-plus" aria-hidden="true">+</span> Open GEDCOM</label><span class="welcome-note">Your file is read locally and never uploaded. Saved edits are written back to the file on this device.</span></div>';
     ensureCreateGedcomWelcomeAction();
     ensureDefaultWelcomeAction();
     elements.title.textContent = 'A family, in context.'; elements.subtitle.textContent = 'Open a GEDCOM to explore recorded relationships.';
@@ -4102,6 +4636,15 @@
     }
     if (event.target.closest('button[data-print-person]')) {
       printSection('person');
+      return;
+    }
+    if (event.target.closest('button[data-save-gedcom]')) {
+      saveGedcomFile({ interactive: true });
+      return;
+    }
+    const deletePersonButton = event.target.closest('button[data-delete-person]');
+    if (deletePersonButton) {
+      openPersonDeleteDialog(deletePersonButton.dataset.deletePerson);
       return;
     }
     if (event.target.closest('button[data-change-card-image]')) {
@@ -4246,6 +4789,38 @@
     submitLifeEvent();
   });
   lifeEvent.mediaAdd.addEventListener('click', () => lifeEvent.mediaInput.click());
+  document.querySelector('#personDeleteContinue').addEventListener('click', () => {
+    const plan = pendingPersonDelete;
+    document.querySelector('#personDeleteDialog').close();
+    if (!plan) return;
+    pendingPersonDelete = plan;
+    document.querySelector('#personDeleteConfirmName').textContent = plan.name;
+    const saveNote = gedcomSaveTarget() === 'primary'
+      ? 'The change is saved to the GEDCOM file straight away; the previous version is kept in Primary GEDCOM\\Backups.'
+      : 'The change is saved to the GEDCOM file straight away.';
+    document.querySelector('#personDeleteConfirmText').textContent =
+      `${plan.name} and all of their links will be permanently removed from ${state.fileName}. This cannot be undone in Kinship Atlas. ${saveNote}`;
+    const dialog = document.querySelector('#personDeleteConfirmDialog');
+    dialog.showModal();
+    dialog.querySelector('.dialog-button-quiet').focus();
+  });
+  document.querySelector('#confirmPersonDelete').addEventListener('click', () => {
+    const plan = pendingPersonDelete;
+    pendingPersonDelete = null;
+    document.querySelector('#personDeleteConfirmDialog').close();
+    if (!plan || !state.people.has(plan.personId)) return;
+    // Re-plan in case the tree changed while the prompts were open.
+    const current = planPersonDeletion(plan.personId);
+    if (!current) return;
+    const { removedLinks } = deletePersonRecord(current);
+    const familyNote = current.removedFamilyIds.length
+      ? ` ${current.removedFamilyIds.length} family record${current.removedFamilyIds.length === 1 ? ' was' : 's were'} removed.` : '';
+    showToast(`${current.name} was deleted and ${removedLinks} link${removedLinks === 1 ? '' : 's'} to them removed.${familyNote}`);
+  });
+  document.querySelector('#personDeleteConfirmDialog').addEventListener('close', () => { pendingPersonDelete = null; });
+  document.querySelector('#personDeleteDialog').addEventListener('close', () => {
+    if (!document.querySelector('#personDeleteConfirmDialog').open) pendingPersonDelete = null;
+  });
   document.querySelector('#eventMediaUnlink').addEventListener('click', () => {
     const pending = pendingEventMediaDelete;
     document.querySelector('#eventMediaRemoveDialog').close();
@@ -4676,7 +5251,7 @@
         showToast('The default GEDCOM could not be found. Use Set Default to choose it again.');
         return;
       }
-      if (!await loadGedcomFile(file)) return;
+      if (!await loadGedcomFile(file, { source: 'handle', handle: record.gedcomHandle })) return;
       if (record.homePersonId && state.people.has(record.homePersonId)) setFocus(record.homePersonId, true);
       else showTreeWelcome();
       if (record.mediaHandle) {
@@ -4708,7 +5283,7 @@
     if (state.fileName && state.fileName !== bundle.gedcomName) return true;
     if (!state.fileName) {
       const file = new File([bundle.gedcomText], bundle.gedcomName, { type: 'text/plain' });
-      if (!await loadGedcomFile(file)) return false;
+      if (!await loadGedcomFile(file, { source: 'primary' })) return false;
       const record = state.defaultRecord;
       if (record?.homePersonId && record.gedcomName === bundle.gedcomName && state.people.has(record.homePersonId)) setFocus(record.homePersonId, true);
       else showTreeWelcome();
@@ -4769,6 +5344,117 @@
   });
 
   document.querySelector('#defaultsButton').addEventListener('click', openDefaultsDialog);
+
+  const gedcomImport = {
+    button: document.querySelector('#importGedcomButton'), input: document.querySelector('#importGedcomInput'),
+    dialog: document.querySelector('#importGedcomDialog'), title: document.querySelector('#importGedcomTitle'),
+    file: document.querySelector('#importGedcomFile'), message: document.querySelector('#importGedcomMessage'),
+    stats: document.querySelector('#importGedcomStats'), peopleSection: document.querySelector('#importGedcomPeopleSection'),
+    people: document.querySelector('#importGedcomPeople'), hint: document.querySelector('#importGedcomHint'),
+    confirm: document.querySelector('#confirmGedcomImport'), cancel: document.querySelector('#cancelGedcomImport')
+  };
+  let pendingGedcomImport = null;
+  const countLabel = (count, one, many) => `${count.toLocaleString()} ${count === 1 ? one : many}`;
+
+  function showGedcomImportPreview(fileName, plan) {
+    const canImport = plan.importIds.size > 0;
+    pendingGedcomImport = canImport ? plan : null;
+    gedcomImport.file.textContent = fileName;
+    if (canImport) {
+      gedcomImport.title.textContent = 'Import new GEDCOM records';
+      gedcomImport.message.textContent = `${countLabel(plan.importIds.size, 'new person', 'new people')} related to your current family tree will be added.`;
+    } else if (!plan.newPeople && plan.anchors.size) {
+      gedcomImport.title.textContent = 'Nothing new to import';
+      gedcomImport.message.textContent = 'Everyone in this file who has a birth date is already in your current family tree, so there is nobody new to add.';
+    } else {
+      gedcomImport.title.textContent = 'No related people found';
+      gedcomImport.message.textContent = 'The imported file does not have any people related to your current family tree, so nothing was imported. To open this file on its own, use the "Start Again" menu option instead.';
+    }
+    const rows = [
+      ['People in the file', plan.total, true],
+      ['New and related to this tree (will be added)', plan.importIds.size, canImport],
+      ['Already in this tree (same first name, last name and birth date)', plan.alreadyInTree, false],
+      ['New but not related to this tree (not imported)', plan.unconnected, false],
+      ['No birth date recorded (not imported)', plan.noBirthDate, false]
+    ];
+    gedcomImport.stats.replaceChildren(...rows.filter(([, value, always]) => always || value).map(([label, value]) => {
+      const item = document.createElement('li');
+      const text = document.createElement('span');
+      text.textContent = label;
+      const number = document.createElement('strong');
+      number.textContent = value.toLocaleString();
+      item.append(text, number);
+      return item;
+    }));
+    const people = [...plan.importIds].map((id) => plan.incoming.people.get(id)).filter(Boolean)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const shown = people.slice(0, 30).map((person) => {
+      const item = document.createElement('li');
+      const birthDate = person.events.find((event) => event.type === 'BIRT' && event.date)?.date || '';
+      item.textContent = `${person.name}${birthDate ? ` · b. ${birthDate}` : ''}`;
+      return item;
+    });
+    if (people.length > shown.length) {
+      const more = document.createElement('li');
+      more.className = 'import-people-more';
+      more.textContent = `…and ${(people.length - shown.length).toLocaleString()} more`;
+      shown.push(more);
+    }
+    gedcomImport.people.replaceChildren(...shown);
+    gedcomImport.peopleSection.hidden = !canImport;
+    gedcomImport.hint.hidden = !canImport;
+    gedcomImport.confirm.hidden = !canImport;
+    gedcomImport.confirm.textContent = `Import ${countLabel(plan.importIds.size, 'person', 'people')} & save`;
+    gedcomImport.cancel.textContent = canImport ? 'Cancel' : 'OK';
+    gedcomImport.dialog.showModal();
+    (canImport ? gedcomImport.confirm : gedcomImport.cancel).focus();
+  }
+
+  setButtonContent(gedcomImport.button, 'import', 'Import new GEDCOM records');
+  gedcomImport.button.addEventListener('click', () => { if (state.people.size) gedcomImport.input.click(); });
+  gedcomImport.input.addEventListener('change', async () => {
+    const file = gedcomImport.input.files?.[0];
+    gedcomImport.input.value = '';
+    if (!file || !state.people.size) return;
+    if (file.size > 100 * 1024 * 1024) {
+      showToast('This file is over 100 MB. Choose a smaller GEDCOM export.');
+      return;
+    }
+    let plan;
+    try {
+      plan = planGedcomImport(await file.text());
+    } catch (error) {
+      showToast(`"${file.name}" could not be read as a GEDCOM file. ${error instanceof Error ? error.message : ''}`.trim());
+      return;
+    }
+    showGedcomImportPreview(file.name, plan);
+  });
+  gedcomImport.confirm.addEventListener('click', () => {
+    const plan = pendingGedcomImport;
+    pendingGedcomImport = null;
+    gedcomImport.dialog.close();
+    if (!plan) return;
+    const snapshot = state.gedcomRecords.map((record) => ({ ...record, lines: [...record.lines] }));
+    let result;
+    try {
+      result = applyGedcomImport(plan);
+      refreshAfterGedcomMutation(state.selectedId);
+    } catch {
+      state.gedcomRecords = snapshot;
+      refreshAfterGedcomMutation(state.selectedId);
+      showToast('The import could not be completed, so no changes were made.');
+      return;
+    }
+    const families = result.families + result.joinedFamilies;
+    showToast(`Imported ${countLabel(result.people, 'new person', 'new people')}${families ? ` with ${countLabel(families, 'family link', 'family links')}` : ''}.`);
+  });
+  gedcomImport.dialog.addEventListener('close', () => { pendingGedcomImport = null; });
+  document.querySelector('#saveGedcomButton').addEventListener('click', () => { saveGedcomFile({ interactive: true }); });
+  window.addEventListener('beforeunload', (event) => {
+    if (!state.gedcomDirty && !state.gedcomSaving) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
   setButtonContent(elements.mapViewButton, 'map', 'Map View');
   setButtonContent(elements.clear, 'restart', 'Start Again');
   document.querySelector('#defaultsPickGedcom').addEventListener('click', async () => {

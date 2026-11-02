@@ -32,24 +32,32 @@ static class KinshipAtlasLauncher
         }
     }
 
+    // The first .ged file in the "Primary GEDCOM" folder is the primary tree.
+    static string PrimaryGedcomPath(string baseDir)
+    {
+        string gedDir = Path.Combine(baseDir, "Primary GEDCOM");
+        string[] geds = Directory.Exists(gedDir) ? Directory.GetFiles(gedDir, "*.ged", SearchOption.TopDirectoryOnly) : new string[0];
+        if (geds.Length == 0) return null;
+        Array.Sort(geds, StringComparer.OrdinalIgnoreCase);
+        return geds[0];
+    }
+
     // Writes primary-data.js (read by index.html) from the "Primary GEDCOM" and "Primary Media Library" folders.
     static void WritePrimaryData(string baseDir)
     {
         string output = Path.Combine(baseDir, "primary-data.js");
-        string gedDir = Path.Combine(baseDir, "Primary GEDCOM");
         string libraryDir = Path.Combine(baseDir, "Primary Media Library");
         string mediaDir = PrimaryMediaFolder(baseDir) ?? libraryDir;
-        string[] geds = Directory.Exists(gedDir) ? Directory.GetFiles(gedDir, "*.ged", SearchOption.TopDirectoryOnly) : new string[0];
-        if (geds.Length == 0)
+        string gedcom = PrimaryGedcomPath(baseDir);
+        if (gedcom == null)
         {
             File.WriteAllText(output, "window.KINSHIP_PRIMARY = null;\r\n", new UTF8Encoding(false));
             return;
         }
-        Array.Sort(geds, StringComparer.OrdinalIgnoreCase);
 
         var sb = new StringBuilder("window.KINSHIP_PRIMARY = {\r\n");
-        sb.Append("  gedcomName: ").Append(Js(Path.GetFileName(geds[0]))).Append(",\r\n");
-        sb.Append("  gedcomText: ").Append(Js(File.ReadAllText(geds[0]))).Append(",\r\n  media: [");
+        sb.Append("  gedcomName: ").Append(Js(Path.GetFileName(gedcom))).Append(",\r\n");
+        sb.Append("  gedcomText: ").Append(Js(File.ReadAllText(gedcom))).Append(",\r\n  media: [");
         bool first = true;
         if (Directory.Exists(mediaDir))
         {
@@ -196,6 +204,89 @@ static class KinshipAtlasLauncher
         SendJson(ctx, 200, "{\"ok\":true}");
     }
 
+    static readonly object GedcomSaveLock = new object();
+    const int GedcomBackupsKept = 10;
+
+    static string Sha256Hex(string text)
+    {
+        using (var sha = System.Security.Cryptography.SHA256.Create())
+        {
+            var sb = new StringBuilder();
+            foreach (byte b in sha.ComputeHash(Encoding.UTF8.GetBytes(text))) sb.Append(b.ToString("x2"));
+            return sb.ToString();
+        }
+    }
+
+    // Writes the edited tree back to the primary GEDCOM after copying the current file to "Primary GEDCOM\Backups".
+    // X-Base-Sha256 must match the file on disk (the version the browser opened) unless X-Overwrite is 1.
+    static void HandleGedcomSave(HttpListenerContext ctx, string appDir)
+    {
+        string target = PrimaryGedcomPath(appDir);
+        string name = SafeName(Uri.UnescapeDataString(ctx.Request.Headers["X-Gedcom-Name"] ?? ""));
+        string baseHash = (ctx.Request.Headers["X-Base-Sha256"] ?? "").Trim().ToLowerInvariant();
+        bool overwrite = ctx.Request.Headers["X-Overwrite"] == "1";
+        if (target == null || name.Length == 0 || !string.Equals(name, Path.GetFileName(target), StringComparison.OrdinalIgnoreCase))
+        { SendJson(ctx, 404, "{\"error\":\"This tree is not the primary GEDCOM.\"}"); return; }
+        if (!overwrite && !System.Text.RegularExpressions.Regex.IsMatch(baseHash, "^[0-9a-f]{64}$"))
+        { SendJson(ctx, 400, "{\"error\":\"Missing file version.\"}"); return; }
+        if (ctx.Request.ContentLength64 > 200L * 1024 * 1024) { SendJson(ctx, 413, "{\"error\":\"The GEDCOM is too large.\"}"); return; }
+
+        string text;
+        try
+        {
+            using (var reader = new StreamReader(ctx.Request.InputStream, new UTF8Encoding(false, true)))
+                text = reader.ReadToEnd();
+        }
+        catch { SendJson(ctx, 400, "{\"error\":\"The GEDCOM text is not valid UTF-8.\"}"); return; }
+        string trimmed = text.TrimStart('\uFEFF', ' ', '\t', '\r', '\n');
+        if (!trimmed.StartsWith("0 HEAD") || !System.Text.RegularExpressions.Regex.IsMatch(text, "(^|\\n)0 TRLR\\s*$"))
+        { SendJson(ctx, 400, "{\"error\":\"The text is not a complete GEDCOM file.\"}"); return; }
+
+        string backupName;
+        lock (GedcomSaveLock)
+        {
+            byte[] current;
+            string currentText;
+            try { current = File.ReadAllBytes(target); currentText = File.ReadAllText(target); }
+            catch { SendJson(ctx, 500, "{\"error\":\"The GEDCOM file could not be read.\"}"); return; }
+            if (!overwrite && Sha256Hex(currentText) != baseHash)
+            { SendJson(ctx, 409, "{\"error\":\"The GEDCOM file was changed outside this tab.\"}"); return; }
+            bool bom = current.Length >= 3 && current[0] == 0xEF && current[1] == 0xBB && current[2] == 0xBF;
+            string backupDir = Path.Combine(Path.GetDirectoryName(target), "Backups");
+            string stem = Path.GetFileNameWithoutExtension(target);
+            string ext = Path.GetExtension(target);
+            string temp = target + ".saving";
+            try
+            {
+                Directory.CreateDirectory(backupDir);
+                string stamp = DateTime.Now.ToString("yyyy-MM-dd HHmmss");
+                backupName = stem + " " + stamp + ext;
+                for (int i = 2; File.Exists(Path.Combine(backupDir, backupName)); i++) backupName = stem + " " + stamp + " (" + i + ")" + ext;
+                File.WriteAllBytes(Path.Combine(backupDir, backupName), current);
+                File.WriteAllText(temp, text, new UTF8Encoding(bom));
+                try { File.Replace(temp, target, null); }
+                catch (PlatformNotSupportedException) { File.Copy(temp, target, true); File.Delete(temp); }
+            }
+            catch
+            {
+                try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+                SendJson(ctx, 500, "{\"error\":\"The GEDCOM file could not be written.\"}");
+                return;
+            }
+            try
+            {
+                var pattern = new System.Text.RegularExpressions.Regex("^" + System.Text.RegularExpressions.Regex.Escape(stem) + " \\d{4}-\\d{2}-\\d{2} \\d{6}( \\(\\d+\\))?" + System.Text.RegularExpressions.Regex.Escape(ext) + "$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                var backups = new System.Collections.Generic.List<FileInfo>();
+                foreach (var file in new DirectoryInfo(backupDir).GetFiles()) if (pattern.IsMatch(file.Name)) backups.Add(file);
+                backups.Sort((a, b) => b.LastWriteTimeUtc.CompareTo(a.LastWriteTimeUtc));
+                for (int i = GedcomBackupsKept; i < backups.Count; i++) backups[i].Delete();
+            }
+            catch { }
+        }
+        try { WritePrimaryData(appDir); } catch { }
+        SendJson(ctx, 200, "{\"ok\":true,\"backup\":" + Js(backupName) + "}");
+    }
+
     static void Handle(HttpListenerContext ctx, string appDir, string mediaDir)
     {
         lastRequest = DateTime.UtcNow;
@@ -208,9 +299,17 @@ static class KinshipAtlasLauncher
 
         string path = ctx.Request.Url.AbsolutePath;
         string method = ctx.Request.HttpMethod;
-        if (method == "GET" && path == "/api/media-info") { SendJson(ctx, 200, "{\"available\":true,\"app\":" + Js(appDir) +         ",\"folder\":" + Js(Path.GetFileName(mediaDir)) + ",\"deletePaths\":true}"); return; }
+        if (method == "GET" && path == "/api/media-info")
+        {
+            string gedcom = null;
+            try { gedcom = PrimaryGedcomPath(appDir); } catch { }
+            SendJson(ctx, 200, "{\"available\":true,\"app\":" + Js(appDir) + ",\"folder\":" + Js(Path.GetFileName(mediaDir)) +
+                ",\"deletePaths\":true,\"saveGedcom\":true,\"gedcom\":" + Js(gedcom == null ? "" : Path.GetFileName(gedcom)) + "}");
+            return;
+        }
         if (method == "POST" && path == "/api/media") { HandleUpload(ctx, mediaDir); return; }
-                if (method == "POST" && path == "/api/media-delete") { HandleDelete(ctx, appDir, mediaDir); return; }
+        if (method == "POST" && path == "/api/media-delete") { HandleDelete(ctx, appDir, mediaDir); return; }
+        if (method == "POST" && path == "/api/gedcom-save") { HandleGedcomSave(ctx, appDir); return; }
         if (method == "GET" && path.StartsWith("/media/"))
         {
             string name = SafeName(Uri.UnescapeDataString(path.Substring(7)));

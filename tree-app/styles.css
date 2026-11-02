@@ -68,6 +68,13 @@ button { color: inherit; }
 .button[hidden] { display: none; }
 .button.media-button-needed:not(:disabled) { background: #fff3c4; border-color: #e3c866; color: #5c4600; }
 .button.media-button-needed:not(:disabled):hover { background: #ffe9a0; }
+.save-gedcom-button:disabled { opacity: .6; }
+.save-gedcom-button.is-dirty { color: #fff; background: var(--coral); border-color: #db8466; }
+.save-gedcom-button.is-dirty:hover:not(:disabled) { background: #b95e43; }
+.research-button.gedcom-save-record { color: #fff; background: var(--coral); border-color: #db8466; }
+.research-button.gedcom-save-record[hidden] { display: none; }
+.research-button.person-delete-button { color: #a33a3a; border-color: #e3b9b5; }
+.research-button.person-delete-button:hover:not(:disabled) { color: #fff; background: #a33a3a; border-color: #a33a3a; }
 .button-plus { font-size: 19px; font-weight: 400; line-height: .8; }
 #gedcomInput, #mediaInput, #mediaUploadInput { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
 
@@ -360,6 +367,13 @@ a.life-event-media-thumb:hover, a.life-event-media-thumb:focus-visible { border-
 .life-event-media-remove:hover, .life-event-media-remove:focus-visible { border-color: #8b3a3a; }
 .life-event-media-hint { margin: 0; color: #83958c; font-size: 10px; line-height: 1.4; }
 .life-event-media-hint[hidden] { display: none; }
+.import-stats { display: grid; gap: 4px; margin: 0 0 14px; padding: 0; list-style: none; }
+.import-stats li { display: flex; justify-content: space-between; gap: 16px; padding: 6px 10px; border-radius: 4px; background: #f3f7f4; color: #42584f; font-size: 12px; }
+.import-stats strong { color: #17352f; }
+.import-people-heading { margin: 0 0 6px; color: #60756b; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.import-people { max-height: 180px; margin: 0 0 12px; padding: 6px 10px 6px 26px; overflow-y: auto; border: 1px solid #e3ebe6; border-radius: 4px; color: #234536; font-size: 12px; line-height: 1.6; }
+.import-people-more { list-style: none; margin-left: -16px; color: #83958c; font-style: italic; }
+#importGedcomPeopleSection[hidden], #importGedcomHint[hidden], #confirmGedcomImport[hidden] { display: none; }
 .dialog-button-danger { border-color: #a33a3a; color: #fff; background: #a33a3a; }
 .dialog-button-danger:hover:not(:disabled) { border-color: #862e2e; background: #862e2e; }
 .media-delete-name { margin: 0 0 12px; padding: 8px 10px; overflow-wrap: anywhere; border-radius: 4px; color: #344b42; background: #f5f9f6; font-size: 12px; font-weight: 700; }
@@ -372,6 +386,9 @@ a.life-event-media-thumb:hover, a.life-event-media-thumb:focus-visible { border-
 .media-delete-option-danger:hover:not(:disabled), .media-delete-option-danger:focus-visible { border-color: #a33a3a; background: #fff6f5; }
 .media-delete-option:disabled { opacity: .55; cursor: not-allowed; }
 .media-delete-warning { padding: 9px 10px; border-left: 3px solid #a33a3a; background: #fff6f5; }
+.person-delete-intro { margin: 0 0 6px; }
+.person-delete-summary { margin: 0 0 10px; padding-left: 20px; font-size: 13px; line-height: 1.5; }
+.person-delete-kept { margin: 0; color: #5b6b64; font-size: 12px; }
 .event-item-editable { cursor: pointer; border-radius: 4px; }
 .event-item-editable:hover { background: #f2faf6; }
 .event-item-editable:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }

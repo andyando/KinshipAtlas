@@ -31,6 +31,7 @@
         </button>
         <span class="primary-person-label"><span class="primary-person-kicker">PRIMARY PERSON</span><strong id="primaryPersonName"></strong></span>
       </div>
+      <button id="saveGedcomButton" class="button button-quiet save-gedcom-button" type="button" hidden disabled>Saved</button>
       <div class="settings-menu" id="settingsMenu">
         <button id="settingsButton" class="button button-quiet" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="settingsPanel">
           <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
@@ -41,6 +42,8 @@
             Open GEDCOM
             <input id="gedcomInput" type="file" accept=".ged,.gedcom,text/plain">
           </label>
+          <button id="importGedcomButton" class="menu-item" type="button" role="menuitem" disabled title="Add new people related to this tree from another GEDCOM file">Import new GEDCOM records</button>
+          <input id="importGedcomInput" type="file" accept=".ged,.gedcom,text/plain" hidden>
           <button id="mediaButton" class="menu-item media-button" type="button" role="menuitem" disabled>Select Media Folder</button>
           <input id="mediaInput" type="file" webkitdirectory directory multiple>
           <input id="mediaUploadInput" type="file" accept="image/*,.pdf,application/pdf" multiple>
@@ -120,7 +123,7 @@
               <span class="welcome-or">or</span>
               <button class="button button-secondary" type="button" data-create-gedcom>Create new GEDCOM</button>
             </div>
-            <span class="welcome-note">Your file is read locally and is not uploaded or saved by this app.</span>
+            <span class="welcome-note">Your file is read locally and never uploaded. Saved edits are written back to the file on this device.</span>
           </div>
         </div>
       </div>
@@ -140,6 +143,23 @@
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <div id="printFooter" class="print-footer" aria-hidden="true"></div>
+  <dialog id="importGedcomDialog" class="app-dialog" aria-labelledby="importGedcomTitle">
+    <section class="dialog-panel">
+      <h2 id="importGedcomTitle">Import new GEDCOM records</h2>
+      <p id="importGedcomFile" class="media-delete-name"></p>
+      <p id="importGedcomMessage"></p>
+      <ul id="importGedcomStats" class="import-stats"></ul>
+      <div id="importGedcomPeopleSection" hidden>
+        <h3 class="import-people-heading">People to add</h3>
+        <ul id="importGedcomPeople" class="import-people"></ul>
+      </div>
+      <p id="importGedcomHint" class="dialog-hint">People are matched on first name, last name and birth date. Imported people keep their life events and their relationships to each other and to matching people in this tree. Importing saves the added people to your GEDCOM file.</p>
+      <div class="dialog-actions">
+        <button id="confirmGedcomImport" class="dialog-button dialog-button-primary" type="button">Import</button>
+        <button id="cancelGedcomImport" class="dialog-button dialog-button-quiet" type="button" data-close-dialog="importGedcomDialog">Cancel</button>
+      </div>
+    </section>
+  </dialog>
   <dialog id="unlinkMediaDialog" class="app-dialog" aria-labelledby="unlinkMediaTitle">
     <section class="dialog-panel">
       <h2 id="unlinkMediaTitle">Remove media from this person?</h2>
@@ -228,7 +248,7 @@
       <button id="addGedcomFieldButton" class="dialog-button" type="button">Add field</button>
       <p id="personEditorError" class="form-error" role="alert" hidden></p>
       <div class="dialog-actions">
-        <button class="dialog-button dialog-button-primary" type="submit">Save changes</button>
+        <button class="dialog-button dialog-button-primary" type="submit">Save to GEDCOM</button>
         <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="personEditorDialog">Cancel</button>
       </div>
     </form>
@@ -259,7 +279,7 @@
               </div>
       <p id="lifeEventError" class="form-error" role="alert" hidden></p>
       <div class="dialog-actions">
-        <button class="dialog-button dialog-button-primary" type="submit">Save</button>
+        <button class="dialog-button dialog-button-primary" type="submit">Save to GEDCOM</button>
         <button id="lifeEventDelete" class="dialog-button" type="button" hidden>Delete event</button>
         <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="lifeEventDialog">Cancel</button>
       </div>
@@ -295,6 +315,30 @@
       </div>
     </section>
   </dialog>
+  <dialog id="personDeleteDialog" class="app-dialog" aria-labelledby="personDeleteTitle">
+    <section class="dialog-panel">
+      <h2 id="personDeleteTitle">Delete this person?</h2>
+      <p id="personDeleteName" class="media-delete-name"></p>
+      <p class="person-delete-intro">Deleting removes this person's record and every link to them from the GEDCOM file:</p>
+      <ul id="personDeleteSummary" class="person-delete-summary"></ul>
+      <p id="personDeleteKept" class="person-delete-kept"></p>
+      <div class="dialog-actions">
+        <button id="personDeleteContinue" class="dialog-button dialog-button-danger" type="button">Delete person…</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="personDeleteDialog">Cancel</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="personDeleteConfirmDialog" class="app-dialog" aria-labelledby="personDeleteConfirmTitle">
+    <section class="dialog-panel">
+      <h2 id="personDeleteConfirmTitle">Are you sure?</h2>
+      <p id="personDeleteConfirmName" class="media-delete-name"></p>
+      <p id="personDeleteConfirmText" class="media-delete-warning"></p>
+      <div class="dialog-actions">
+        <button id="confirmPersonDelete" class="dialog-button dialog-button-danger" type="button">Yes, delete and save</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="personDeleteConfirmDialog">Cancel</button>
+      </div>
+    </section>
+  </dialog>
   <dialog id="personSummaryDialog" class="app-dialog" aria-labelledby="personSummaryTitle">
     <form id="personSummaryForm" class="dialog-panel new-gedcom-panel">
       <h2 id="personSummaryTitle">Edit person details</h2>
@@ -310,7 +354,7 @@
       </div>
       <p id="personSummaryError" class="form-error" role="alert" hidden></p>
       <div class="dialog-actions">
-        <button class="dialog-button dialog-button-primary" type="submit">Save changes</button>
+        <button class="dialog-button dialog-button-primary" type="submit">Save to GEDCOM</button>
         <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="personSummaryDialog">Cancel</button>
       </div>
     </form>
@@ -333,7 +377,7 @@
       <p id="relativeDuplicateWarning" class="form-error" role="alert" hidden>A person with this name already exists. Confirm below only if this is a distinct individual.</p>
       <label id="relativeDuplicateConfirmationLabel" class="research-consent" hidden><input id="relativeDuplicateConfirmed" type="checkbox"> This is a different person with the same name.</label>
       <div class="dialog-actions">
-        <button class="dialog-button dialog-button-primary" type="submit">Add person</button>
+        <button class="dialog-button dialog-button-primary" type="submit">Add &amp; save to GEDCOM</button>
         <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="addRelativeDialog">Cancel</button>
       </div>
     </form>
@@ -353,7 +397,7 @@
       <p id="relationshipDeleteWarning" class="form-error" hidden></p>
       <div class="dialog-actions">
         <button id="relationshipDelete" class="dialog-button dialog-button-quiet" type="button">Delete relationship</button>
-        <button class="dialog-button dialog-button-primary" type="submit">Save</button>
+        <button class="dialog-button dialog-button-primary" type="submit">Save to GEDCOM</button>
         <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="relationshipDialog">Cancel</button>
       </div>
     </form>
