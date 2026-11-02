@@ -2195,9 +2195,16 @@
     showToast(clearing ? `Primary person cleared.${suffix}` : `${person.name} is now the primary person.${suffix}`);
   }
 
+  let lastDetailsPersonId = null;
+
   function renderDetails() {
     const person = state.people.get(state.selectedId);
     elements.details.replaceChildren();
+    // Re-renders for the same person (e.g. after an edit) keep their scroll position.
+    if (state.selectedId !== lastDetailsPersonId) {
+      elements.details.scrollTop = 0;
+      lastDetailsPersonId = state.selectedId;
+    }
     syncPrimaryPersonBar();
     if (!person) {
       const empty = document.createElement('div');
