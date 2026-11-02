@@ -3032,7 +3032,15 @@
     const file = event.target.files?.[0];
     if (!file) return;
     if (!await loadGedcomFile(file)) elements.fileInput.value = '';
+    else promptForMediaFolder();
   });
+  function promptForMediaFolder() {
+    if (state.mediaDirectoryHandle || state.mediaHelper || elements.mediaButton.disabled) return;
+    window.setTimeout(() => {
+      if (!state.mediaDirectoryHandle && !elements.mediaFolderDialog.open) showMediaFolderDialog();
+    }, 300);
+  }
+
   elements.createGedcomForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     const fileNameInput = document.querySelector('#newGedcomFileName');
@@ -3146,6 +3154,7 @@
         ? `, but the media folder could not be created (${mediaProblem}).`
         : '. No media folder was made because this browser has folder access turned off. Create a folder named "' + safeBase + '_Media" next to the downloaded file, then use Select Media Folder. (Brave: enable brave://flags/#file-system-access-api and relaunch for automatic creation.)';
     showToast(`Created a new GEDCOM starter with one person and ${saveAction} the file${mediaNote}`);
+    promptForMediaFolder();
   });
   ensureCreateGedcomWelcomeAction();
 
