@@ -1548,13 +1548,20 @@
     }
 
     for (const family of state.families.values()) {
-      const parentIds = [family.husbandId, family.wifeId].filter(Boolean);
-      for (const parentId of parentIds) {
+      for (const generation of [-2, -1, 0, 1]) {
+        const parentPoints = [family.husbandId, family.wifeId].filter(Boolean)
+          .filter((parentId) => nodeKeys.has(`${generation}|${parentId}`))
+          .map((parentId) => point(cardFor(generation, parentId), 'bottom'))
+          .filter(Boolean);
+        if (!parentPoints.length) continue;
+        // One line from the couple's midpoint when both parents are shown.
+        const origin = {
+          x: parentPoints.reduce((sum, item) => sum + item.x, 0) / parentPoints.length,
+          y: Math.max(...parentPoints.map((item) => item.y))
+        };
         for (const childId of family.childIds) {
-          for (const generation of [-2, -1, 0, 1]) {
-            if (!nodeKeys.has(`${generation}|${parentId}`) || !nodeKeys.has(`${generation + 1}|${childId}`)) continue;
-            addPath(point(cardFor(generation, parentId), 'bottom'), point(cardFor(generation + 1, childId), 'top'));
-          }
+          if (!nodeKeys.has(`${generation + 1}|${childId}`)) continue;
+          addPath(origin, point(cardFor(generation + 1, childId), 'top'));
         }
       }
     }
