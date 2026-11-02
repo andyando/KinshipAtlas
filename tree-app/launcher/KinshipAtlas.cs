@@ -171,7 +171,7 @@ static class KinshipAtlasLauncher
 
         string path = ctx.Request.Url.AbsolutePath;
         string method = ctx.Request.HttpMethod;
-        if (method == "GET" && path == "/api/media-info") { SendJson(ctx, 200, "{\"available\":true,\"folder\":" + Js(Path.GetFileName(mediaDir)) + "}"); return; }
+        if (method == "GET" && path == "/api/media-info") { SendJson(ctx, 200, "{\"available\":true,\"app\":" + Js(appDir) + ",\"folder\":" + Js(Path.GetFileName(mediaDir)) + "}"); return; }
         if (method == "POST" && path == "/api/media") { HandleUpload(ctx, mediaDir); return; }
         if (method == "GET" && path.StartsWith("/media/"))
         {
@@ -189,7 +189,8 @@ static class KinshipAtlasLauncher
         SendJson(ctx, 405, "{\"error\":\"Method not allowed\"}");
     }
 
-    static bool IsRunningHelper(string port)
+    // True only when the helper on this port serves the same app folder; a helper from another copy must not be reused.
+    static bool IsRunningHelper(string port, string appDir)
     {
         try
         {
@@ -197,7 +198,7 @@ static class KinshipAtlasLauncher
             request.Timeout = 1500;
             using (var response = (HttpWebResponse)request.GetResponse())
             using (var reader = new StreamReader(response.GetResponseStream()))
-                return reader.ReadToEnd().Contains("\"available\"");
+                return reader.ReadToEnd().Contains("\"app\":" + Js(appDir));
         }
         catch { return false; }
     }
@@ -207,7 +208,7 @@ static class KinshipAtlasLauncher
     {
         foreach (string port in Ports)
         {
-            if (IsRunningHelper(port)) { OpenUrl("http://127.0.0.1:" + port + "/"); return; }
+            if (IsRunningHelper(port, appDir)) { OpenUrl("http://127.0.0.1:" + port + "/"); return; }
             var listener = new HttpListener();
             listener.Prefixes.Add("http://127.0.0.1:" + port + "/");
             try { listener.Start(); }
