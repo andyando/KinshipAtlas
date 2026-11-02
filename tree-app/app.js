@@ -434,7 +434,7 @@
           const sourceId = splitXref(value);
           if (sourceId) {
             record.sourceIds.push(sourceId);
-            if (activeEvent) activeEvent.sources.push(sourceId);
+            if (activeEvent && level >= 2) activeEvent.sources.push(sourceId);
           }
           continue;
         }
@@ -466,13 +466,19 @@
         if (level === 1 && tag === 'WIFE') { record.wifeId = splitXref(value); activeEvent = null; continue; }
         if (level === 1 && tag === 'CHIL') { record.childIds.push(splitXref(value)); activeEvent = null; continue; }
         if (level === 1 && tag !== 'SOUR' && tag !== 'NOTE') activeEvent = null;
-        if (tag === 'SOUR') { const sourceId = splitXref(value); if (sourceId) record.sourceIds.push(sourceId); continue; }
+        if (tag === 'SOUR') {
+          const sourceId = splitXref(value);
+          if (sourceId) {
+            record.sourceIds.push(sourceId);
+            if (activeEvent && level >= 2) activeEvent.sources.push(sourceId);
+          }
+          continue;
+        }
         if (activeEvent && level >= 2) {
           if (tag === 'DATE') activeEvent.date = cleanEventDisplayText(value);
           else if (tag === 'PLAC') activeEvent.place = cleanEventDisplayText(value);
           else if (tag === 'TYPE' && level === 2 && activeEvent === record.marriage) activeEvent.detail = cleanEventDisplayText(value);
           else if (tag === 'NOTE' || tag === 'CONT') activeEvent.notes.push(cleanEventDisplayText(value));
-          else if (tag === 'SOUR') activeEvent.sources.push(splitXref(value));
         }
       } else if (record.type === 'SOUR') {
         if (level === 1 && tag === 'TITL') record.title = cleanEventDisplayText(value);
@@ -3081,7 +3087,9 @@
     mediaAdd: document.querySelector('#lifeEventMediaAdd'),
     mediaInput: document.querySelector('#lifeEventMediaInput'),
     mediaList: document.querySelector('#lifeEventMediaList'),
-    mediaHint: document.querySelector('#lifeEventMediaHint')
+    mediaHint: document.querySelector('#lifeEventMediaHint'),
+    sourceList: document.querySelector('#lifeEventSourceList'),
+    sourceAdd: document.querySelector('#lifeEventSourceAdd')
   });
 
   function eventMediaLines(names) {
@@ -3093,6 +3101,212 @@
 
   function mediaLinkedText(names) {
     return names.length ? ` ${names.length} media item${names.length === 1 ? '' : 's'} linked to the event.` : '';
+  }
+
+  // Each "2 SOUR" citation in an event block, with its deeper lines (PAGE, DATA, _APID, ...).
+  function readEventCitations(lines, start) {
+    const citations = [];
+    const end = lifeEventBlockEnd(lines, start);
+    for (let index = start + 1; index < end; index += 1) {
+      const field = parseGedcomField(lines[index]);
+      if (field?.level !== 2 || field.tag !== 'SOUR') continue;
+      let stop = index + 1;
+      while (stop < end && (parseGedcomField(lines[stop])?.level ?? 3) > 2) stop += 1;
+      const block = lines.slice(index, stop);
+      const pageIndex = block.findIndex((line, offset) => offset > 0 && parseGedcomField(line)?.level === 3 && parseGedcomField(line)?.tag === 'PAGE');
+      let page = '';
+      if (pageIndex >= 0) {
+        page = parseGedcomField(block[pageIndex]).value;
+        for (let offset = pageIndex + 1; offset < block.length; offset += 1) {
+          const part = parseGedcomField(block[offset]);
+          if (!part || part.level <= 3) break;
+          if (part.level === 4 && part.tag === 'CONC') page += part.value;
+          else if (part.level === 4 && part.tag === 'CONT') page += ` ${part.value}`;
+        }
+      }
+      citations.push({ index, lines: block, sourceId: gedcomPointer(field.value), text: gedcomPointer(field.value) ? '' : field.value.trim(), page: page.replace(/\s+/g, ' ').trim() });
+      index = stop - 1;
+    }
+    return citations;
+  }
+
+  function lifeEventBlockFor(pending) {
+    if (pending.familyId) {
+      const record = findGedcomRecord('FAM', pending.familyId);
+      const lines = record?.lines || [];
+      const start = lines.findIndex((line, index) => index > 0 && parseGedcomField(line)?.level === 1 && parseGedcomField(line)?.tag === pending.config.tag);
+      return start < 0 ? null : { lines, start };
+    }
+    if (pending.ordinal === null) return null;
+    const lines = findGedcomRecord('INDI', pending.personId)?.lines || [];
+    const start = findLifeEventStart(lines, pending.ordinal);
+    return start < 0 ? null : { lines, start };
+  }
+
+  function sourceOptionLabel(source) {
+    const title = cleanEventDisplayText(source.title) || 'Untitled source';
+    return `${title.length > 90 ? `${title.slice(0, 87)}…` : title} (${source.id})`;
+  }
+
+  function addLifeEventSourceRow(citation = { originalIndex: -1, sourceId: '', page: '', text: '' }) {
+    const fields = lifeEventFields();
+    const row = document.createElement('div');
+    row.className = 'life-event-source-row';
+    row.dataset.originalIndex = String(citation.originalIndex);
+    const select = document.createElement('select');
+    select.className = 'life-event-source-select';
+    select.setAttribute('aria-label', 'Source');
+    if (citation.text) {
+      select.append(new Option(`Text citation: ${citation.text.slice(0, 80)}`, '__text__'));
+      select.disabled = true;
+    } else {
+      select.append(new Option('Choose a source…', ''), new Option('＋ New source…', '__new__'));
+      const sources = [...state.sources.values()].sort((a, b) =>
+        (cleanEventDisplayText(a.title) || '\uffff').localeCompare(cleanEventDisplayText(b.title) || '\uffff') || a.id.localeCompare(b.id));
+      for (const source of sources) select.append(new Option(sourceOptionLabel(source), source.id));
+      if (citation.sourceId && !state.sources.has(citation.sourceId)) {
+        select.append(new Option(`Missing source record (${citation.sourceId})`, citation.sourceId));
+      }
+      select.value = citation.sourceId || '';
+    }
+    const page = document.createElement('input');
+    page.type = 'text';
+    page.className = 'life-event-source-page';
+    page.maxLength = 240;
+    page.placeholder = 'Page / citation detail';
+    page.setAttribute('aria-label', 'Page or citation detail');
+    page.autocomplete = 'off';
+    page.value = citation.page || '';
+    page.disabled = Boolean(citation.text);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'life-event-source-remove';
+    remove.textContent = '×';
+    remove.title = 'Remove this source from the event (the source record is kept)';
+    remove.setAttribute('aria-label', 'Remove this source from the event');
+    const newTitle = document.createElement('input');
+    newTitle.type = 'text';
+    newTitle.className = 'life-event-source-new';
+    newTitle.maxLength = 240;
+    newTitle.placeholder = 'New source title, e.g. 1881 England Census';
+    newTitle.setAttribute('aria-label', 'New source title');
+    newTitle.autocomplete = 'off';
+    newTitle.hidden = true;
+    select.addEventListener('change', () => {
+      newTitle.hidden = select.value !== '__new__';
+      if (!newTitle.hidden) newTitle.focus();
+    });
+    remove.addEventListener('click', () => {
+      const next = row.nextElementSibling || row.previousElementSibling;
+      row.remove();
+      syncLifeEventSourceEmpty();
+      (next?.querySelector('select:not(:disabled), input') || fields.sourceAdd).focus();
+    });
+    row.append(select, page, remove, newTitle);
+    const extraLines = citation.lines ? citation.lines.slice(1).map(parseGedcomField).filter((entry) => entry?.level === 3 && entry.tag !== 'PAGE').length : 0;
+    if (extraLines) {
+      const extra = document.createElement('span');
+      extra.className = 'life-event-source-extra';
+      extra.textContent = `${extraLines} other citation detail${extraLines === 1 ? '' : 's'} (e.g. data, quality or record ID) will be kept.`;
+      row.append(extra);
+    }
+    fields.sourceList.querySelector('.life-event-media-empty')?.remove();
+    fields.sourceList.append(row);
+    return row;
+  }
+
+  function syncLifeEventSourceEmpty() {
+    const list = lifeEventFields().sourceList;
+    if (list.querySelector('.life-event-source-row')) return;
+    if (!list.querySelector('.life-event-media-empty')) {
+      const empty = document.createElement('span');
+      empty.className = 'life-event-media-empty';
+      empty.textContent = 'No sources cited for this event.';
+      list.append(empty);
+    }
+  }
+
+  function initLifeEventSources() {
+    const pending = state.pendingLifeEvent;
+    const fields = lifeEventFields();
+    fields.sourceList.replaceChildren();
+    const block = lifeEventBlockFor(pending);
+    pending.citations = block ? readEventCitations(block.lines, block.start) : [];
+    pending.citations.forEach((citation, originalIndex) => addLifeEventSourceRow({ ...citation, originalIndex }));
+    syncLifeEventSourceEmpty();
+  }
+
+  // Reads the source rows. New sources get reserved IDs; their records are only added by commitNewSources().
+  function collectLifeEventCitations() {
+    const pending = state.pendingLifeEvent;
+    const clean = (text) => text.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const reserved = new Set(state.gedcomRecords.filter((record) => record.tag === 'SOUR').map((record) => record.xref));
+    const newSources = new Map();
+    const lines = [];
+    for (const row of lifeEventFields().sourceList.querySelectorAll('.life-event-source-row')) {
+      const original = pending.citations?.[Number(row.dataset.originalIndex)] || null;
+      const select = row.querySelector('.life-event-source-select');
+      const page = clean(row.querySelector('.life-event-source-page').value);
+      if (original?.text) { lines.push(...original.lines); continue; }
+      let sourceId = select.value;
+      if (sourceId === '__new__') {
+        const title = clean(row.querySelector('.life-event-source-new').value);
+        if (!title) return { error: 'Enter a title for the new source, or choose an existing source.' };
+        const key = title.toLocaleLowerCase();
+        const existing = [...state.sources.values()].find((source) => cleanEventDisplayText(source.title).toLocaleLowerCase() === key);
+        if (existing) sourceId = existing.id;
+        else if (newSources.has(key)) sourceId = newSources.get(key).id;
+        else {
+          let number = 1;
+          while (reserved.has(`S${number}`)) number += 1;
+          sourceId = `S${number}`;
+          reserved.add(sourceId);
+          newSources.set(key, { id: sourceId, title });
+        }
+      }
+      if (!sourceId) {
+        if (!page) continue;
+        return { error: 'Choose a source for each citation detail, or remove the empty source row.' };
+      }
+      if (original) {
+        const block = [...original.lines];
+        if (sourceId !== original.sourceId) block[0] = `2 SOUR @${sourceId}@`;
+        if (page !== original.page) {
+          const pageIndex = block.findIndex((line, index) => index > 0 && parseGedcomField(line)?.level === 3 && parseGedcomField(line)?.tag === 'PAGE');
+          if (pageIndex >= 0) {
+            let stop = pageIndex + 1;
+            while (stop < block.length && (parseGedcomField(block[stop])?.level ?? 4) > 3) stop += 1;
+            block.splice(pageIndex, stop - pageIndex, ...(page ? [`3 PAGE ${page}`] : []));
+          } else if (page) block.splice(1, 0, `3 PAGE ${page}`);
+        }
+        lines.push(...block);
+      } else {
+        lines.push(`2 SOUR @${sourceId}@`, ...(page ? [`3 PAGE ${page}`] : []));
+      }
+    }
+    return {
+      lines, newSources: [...newSources.values()],
+      changed: lines.join('\n') !== (pending.citations || []).flatMap((citation) => citation.lines).join('\n')
+    };
+  }
+
+  function commitNewSources(sources) {
+    for (const source of sources) {
+      addRecordBeforeTrailer({ xref: source.id, tag: 'SOUR', lines: [`0 @${source.id}@ SOUR`, `1 TITL ${source.title}`] });
+    }
+  }
+
+  // Swaps the event's existing citation blocks for the edited ones, keeping them where they were.
+  function replaceEventCitations(lines, start, citationLines) {
+    const current = readEventCitations(lines, start);
+    const insertAt = current[0]?.index ?? lifeEventBlockEnd(lines, start);
+    for (const citation of [...current].reverse()) lines.splice(citation.index, citation.lines.length);
+    lines.splice(insertAt, 0, ...citationLines);
+  }
+
+  function sourcesChangedText(citations) {
+    return citations.newSources.length
+      ? ` ${citations.newSources.length} new source record${citations.newSources.length === 1 ? '' : 's'} created.` : '';
   }
 
   const lifeEventPreviewUrls = [];
@@ -3304,6 +3518,12 @@
     const pending = state.pendingLifeEvent;
     const fields = lifeEventFields();
     if (!pending || pending.saving) return;
+    const citations = collectLifeEventCitations();
+    if (citations.error) {
+      fields.error.textContent = citations.error;
+      fields.error.hidden = false;
+      return;
+    }
     if (pending.newMedia.length) {
       const inputError = lifeEventInputError();
       if (inputError) {
@@ -3420,11 +3640,12 @@
     }
     fields.picker.value = datePickerValue(fields.date.value);
     fields.mediaInput.value = '';
+    initLifeEventSources();
     renderLifeEventMedia();
     fields.dialog.showModal();
   }
 
-  function saveMarriage(deleteEvent, config, mediaNames = []) {
+  function saveMarriage(deleteEvent, config, mediaNames = [], citations = { lines: [], newSources: [], changed: false }) {
     const pending = state.pendingLifeEvent;
     const fields = lifeEventFields();
     const tag = config.tag;
@@ -3441,7 +3662,7 @@
       if (date) lines.push(`2 DATE ${date}`);
       if (place) lines.push(`2 PLAC ${place}`);
       if (marriageType) lines.push(`2 TYPE ${marriageType}`);
-      return [...lines, ...eventMediaLines(mediaNames)];
+      return [...lines, ...citations.lines, ...eventMediaLines(mediaNames)];
     };
 
     if (pending.familyId) {
@@ -3455,6 +3676,7 @@
         const original = pending.original;
         if (date !== original.date) setLifeEventSubfield(lines, start, 'DATE', date);
         if (place !== original.place) setLifeEventSubfield(lines, start, 'PLAC', place);
+        if (citations.changed) replaceEventCitations(lines, start, citations.lines);
         if (marriageType !== original.marriageType) setLifeEventSubfield(lines, start, 'TYPE', marriageType);
         lines.splice(lifeEventBlockEnd(lines, start), 0, ...eventMediaLines(mediaNames));
       }
@@ -3479,9 +3701,10 @@
           const familyRecord = findRecord('FAM', existingFamily.id);
           if (!familyRecord) return showError('The existing family record could not be found.');
           familyRecord.lines = [...familyRecord.lines, ...marriageLines()];
+          commitNewSources(citations.newSources);
           refreshAfterGedcomMutation(pending.personId);
           fields.dialog.close();
-          showToast(`${config.label} added to the existing family record.${mediaLinkedText(mediaNames)}`);
+          showToast(`${config.label} added to the existing family record.${mediaLinkedText(mediaNames)}${sourcesChangedText(citations)}`);
           return true;
         }
       } else {
@@ -3501,9 +3724,10 @@
       selectedRecord.lines = [...selectedRecord.lines, `1 FAMS @${familyId}@`];
       spouseRecord.lines = [...spouseRecord.lines, `1 FAMS @${familyId}@`];
     }
+    commitNewSources(citations.newSources);
     refreshAfterGedcomMutation(pending.personId);
     fields.dialog.close();
-    showToast(`${deleteEvent ? `${config.label} removed from the family record.` : pending.familyId ? `${config.label} updated.` : `${config.label} added.`}${mediaLinkedText(mediaNames)}`);
+    showToast(`${deleteEvent ? `${config.label} removed from the family record.` : pending.familyId ? `${config.label} updated.` : `${config.label} added.`}${mediaLinkedText(mediaNames)}${sourcesChangedText(citations)}`);
     return true;
   }
 
@@ -3571,7 +3795,9 @@
       ? lifeEventTypes.find((entry) => entry.key === fields.type.value) || lifeEventTypes[0]
       : pending.config;
     if (deleteEvent) mediaNames = [];
-    if (config.family) return saveMarriage(deleteEvent, config, mediaNames);
+    const citations = deleteEvent ? { lines: [], newSources: [], changed: false } : collectLifeEventCitations();
+    if (citations.error) return showError(citations.error);
+    if (config.family) return saveMarriage(deleteEvent, config, mediaNames, citations);
     const date = clean(fields.date.value);
     const place = clean(fields.place.value);
     const description = clean(fields.desc.value);
@@ -3591,13 +3817,14 @@
       if (date) eventLines.push(`2 DATE ${date}`);
       if (place) eventLines.push(`2 PLAC ${place}`);
       if (config.mode === 'note' && description) eventLines.push(`2 NOTE ${description}`);
-      lines.push(...eventLines, ...eventMediaLines(mediaNames));
+      lines.push(...eventLines, ...citations.lines, ...eventMediaLines(mediaNames));
     } else {
       if (config.custom && !customType) return showError('Enter a name for this event, such as Census or Probate.');
       const start = findLifeEventStart(lines, pending.ordinal);
       if (start < 0) return showError('This event could not be found in the GEDCOM.');
       const original = pending.original;
       // Only changed fields are written so sources, notes and other sub-records are preserved.
+      if (citations.changed) replaceEventCitations(lines, start, citations.lines);
       if (config.mode === 'value' && description !== original.desc) {
         lines[start] = `1 ${parseGedcomField(lines[start]).tag}${description ? ` ${description}` : ''}`;
       }
@@ -3608,9 +3835,10 @@
       lines.splice(lifeEventBlockEnd(lines, start), 0, ...eventMediaLines(mediaNames));
     }
     personRecord.lines = lines;
+    commitNewSources(citations.newSources);
     refreshAfterGedcomMutation(pending.personId);
     fields.dialog.close();
-    showToast(`${deleteEvent ? 'Life event deleted.' : pending.ordinal === null ? 'Life event added.' : 'Life event updated.'}${mediaLinkedText(mediaNames)}`);
+    showToast(`${deleteEvent ? 'Life event deleted.' : pending.ordinal === null ? 'Life event added.' : 'Life event updated.'}${mediaLinkedText(mediaNames)}${sourcesChangedText(citations)}`);
     return true;
   }
 
@@ -4789,6 +5017,7 @@
     submitLifeEvent();
   });
   lifeEvent.mediaAdd.addEventListener('click', () => lifeEvent.mediaInput.click());
+  lifeEvent.sourceAdd.addEventListener('click', () => addLifeEventSourceRow().querySelector('select').focus());
   document.querySelector('#personDeleteContinue').addEventListener('click', () => {
     const plan = pendingPersonDelete;
     document.querySelector('#personDeleteDialog').close();

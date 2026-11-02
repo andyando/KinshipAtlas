@@ -267,6 +267,13 @@
         <label class="new-gedcom-field" for="lifeEventPlace">Place<input id="lifeEventPlace" type="text" maxlength="200" autocomplete="off"></label>
         <label id="lifeEventMarriageTypeField" class="new-gedcom-field life-event-wide" for="lifeEventMarriageType" hidden>Marriage type<input id="lifeEventMarriageType" type="text" maxlength="60" list="lifeEventMarriageTypes" placeholder="e.g. Religious, Civil" autocomplete="off"><datalist id="lifeEventMarriageTypes"><option value="Religious"><option value="Civil"><option value="Common law"><option value="Registered partnership"><option value="Same-sex marriage"></datalist></label>
         <label id="lifeEventDescriptionField" class="new-gedcom-field life-event-wide" for="lifeEventDescription"><span id="lifeEventDescriptionLabel">Notes</span><input id="lifeEventDescription" type="text" maxlength="250" autocomplete="off"></label>
+                <div id="lifeEventSourceField" class="life-event-sources life-event-wide">
+                  <div class="life-event-media-head">
+                    <span id="lifeEventSourceHeading">Sources</span>
+                    <button id="lifeEventSourceAdd" class="dialog-button dialog-button-quiet life-event-media-add" type="button">Add source</button>
+                  </div>
+                  <div id="lifeEventSourceList" class="life-event-source-list" role="group" aria-labelledby="lifeEventSourceHeading"></div>
+                </div>
                 <div id="lifeEventMediaField" class="life-event-media life-event-wide">
                   <div class="life-event-media-head">
                     <span id="lifeEventMediaHeading">Media</span>
