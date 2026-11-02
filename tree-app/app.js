@@ -1461,15 +1461,34 @@
     for (const ids of [...ancestors.values(), ...descendants.values()]) ids.forEach((id) => allIds.add(id));
     const nodeKeys = new Set();
 
+    const nameOrder = (ids) => sortedPeople(ids);
+    // Keeps each generation grouped under (or above) the people it connects to, instead of sorting by name.
+    const orderByRelatives = (ids, referenceRow, relatives) => {
+      const remaining = new Set(ids);
+      const ordered = [];
+      for (const reference of referenceRow) {
+        for (const id of relatives(reference.id)) {
+          if (remaining.delete(id)) ordered.push(state.people.get(id));
+        }
+      }
+      return [...ordered, ...nameOrder(remaining)].filter(Boolean);
+    };
+    const ancestorIds = (generation) => ancestors.get(generation) || new Set();
+    const descendantIds = (generation) => descendants.get(generation) || new Set();
+    const rowZero = nameOrder(new Set([selected.id, ...partners]));
+    const parentsRow = orderByRelatives(ancestorIds(-1), [selected], parentsOf);
+    const grandparentsRow = orderByRelatives(ancestorIds(-2), parentsRow, parentsOf);
+    const childrenRow = orderByRelatives(descendantIds(1), rowZero, childrenOf);
+    const grandchildrenRow = orderByRelatives(descendantIds(2), childrenRow, childrenOf);
     const rows = [
-      { generation: -2, label: 'Grandparents', ids: ancestors.get(-2) || new Set() },
-      { generation: -1, label: 'Parents', ids: ancestors.get(-1) || new Set() },
-      { generation: 0, label: 'Selected person & partners', ids: new Set([selected.id, ...partners]) },
-      { generation: 1, label: 'Children', ids: descendants.get(1) || new Set() },
-      { generation: 2, label: 'Grandchildren', ids: descendants.get(2) || new Set() }
+      { generation: -2, label: 'Grandparents', people: grandparentsRow },
+      { generation: -1, label: 'Parents', people: parentsRow },
+      { generation: 0, label: 'Selected person & partners', people: rowZero },
+      { generation: 1, label: 'Children', people: childrenRow },
+      { generation: 2, label: 'Grandchildren', people: grandchildrenRow }
     ];
     const visibleRows = rows.map((row) => {
-      const people = sortedPeople(row.ids);
+      const people = [...row.people];
       if (!people.length && row.generation === 0) people.push(selected);
       return { ...row, people };
     }).filter((row) => row.people.length);
