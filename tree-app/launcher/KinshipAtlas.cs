@@ -159,6 +159,43 @@ static class KinshipAtlasLauncher
         SendJson(ctx, 500, "{\"error\":\"The file could not be written.\"}");
     }
 
+    static string JsonString(string json, string key)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(json, "\"" + key + "\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+        if (!match.Success) return null;
+        try { return System.Text.RegularExpressions.Regex.Unescape(match.Groups[1].Value); }
+        catch { return null; }
+    }
+
+    // Deletes one image or PDF inside the media folder (subfolders allowed), then refreshes primary-data.js.
+    static void HandleDelete(HttpListenerContext ctx, string appDir, string mediaDir)
+    {
+        string json;
+        using (var reader = new StreamReader(ctx.Request.InputStream, Encoding.UTF8))
+        {
+            var buffer = new char[64 * 1024];
+            int read = reader.ReadBlock(buffer, 0, buffer.Length);
+            json = new string(buffer, 0, read);
+        }
+        string relative = JsonString(json, "path") ?? JsonString(json, "name") ?? "";
+        var sizeMatch = System.Text.RegularExpressions.Regex.Match(json, "\"size\"\\s*:\\s*(\\d+)");
+        long expectedSize = sizeMatch.Success ? long.Parse(sizeMatch.Groups[1].Value) : -1;
+
+        string[] segments = relative.Replace('\\', '/').Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
+        bool valid = segments.Length > 0 && Array.TrueForAll(segments, s => s == SafeName(s));
+        string ext = valid ? Path.GetExtension(segments[segments.Length - 1]).ToLowerInvariant() : "";
+        if (!valid || Array.IndexOf(MediaExtensions, ext) < 0) { SendJson(ctx, 400, "{\"error\":\"Invalid file name.\"}"); return; }
+        string rootFull = Path.GetFullPath(mediaDir).TrimEnd('\\') + "\\";
+        string target = Path.GetFullPath(Path.Combine(rootFull, string.Join("\\", segments)));
+        if (!target.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase)) { SendJson(ctx, 400, "{\"error\":\"Invalid file name.\"}"); return; }
+        if (!File.Exists(target)) { SendJson(ctx, 404, "{\"error\":\"Not found\"}"); return; }
+        if (expectedSize >= 0 && new FileInfo(target).Length != expectedSize) { SendJson(ctx, 409, "{\"error\":\"File does not match.\"}"); return; }
+        try { File.Delete(target); }
+        catch { SendJson(ctx, 500, "{\"error\":\"The file could not be deleted.\"}"); return; }
+        try { WritePrimaryData(appDir); } catch { }
+        SendJson(ctx, 200, "{\"ok\":true}");
+    }
+
     static void Handle(HttpListenerContext ctx, string appDir, string mediaDir)
     {
         lastRequest = DateTime.UtcNow;
@@ -171,8 +208,9 @@ static class KinshipAtlasLauncher
 
         string path = ctx.Request.Url.AbsolutePath;
         string method = ctx.Request.HttpMethod;
-        if (method == "GET" && path == "/api/media-info") { SendJson(ctx, 200, "{\"available\":true,\"app\":" + Js(appDir) + ",\"folder\":" + Js(Path.GetFileName(mediaDir)) + "}"); return; }
+        if (method == "GET" && path == "/api/media-info") { SendJson(ctx, 200, "{\"available\":true,\"app\":" + Js(appDir) +         ",\"folder\":" + Js(Path.GetFileName(mediaDir)) + ",\"deletePaths\":true}"); return; }
         if (method == "POST" && path == "/api/media") { HandleUpload(ctx, mediaDir); return; }
+                if (method == "POST" && path == "/api/media-delete") { HandleDelete(ctx, appDir, mediaDir); return; }
         if (method == "GET" && path.StartsWith("/media/"))
         {
             string name = SafeName(Uri.UnescapeDataString(path.Substring(7)));

@@ -138,6 +138,37 @@ function revealFile(request, response) {
   });
 }
 
+// Deletes one uploaded image or PDF from the media folder. Only plain file names inside the folder are accepted.
+function deleteFile(request, response) {
+  const chunks = [];
+  request.on('data', (chunk) => { if (chunks.length < 64) chunks.push(chunk); });
+  request.on('end', () => {
+    let name = '';
+    let expectedSize = null;
+    try {
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      name = safeName(body.name);
+      if (Number.isInteger(body.size)) expectedSize = body.size;
+    } catch {
+      return send(response, 400, { error: 'Invalid request.' });
+    }
+    if (!name || !uploadExtensions.has(path.extname(name).toLowerCase())) return send(response, 400, { error: 'Invalid file name.' });
+    const target = path.join(mediaDir, name);
+    if (path.dirname(target) !== mediaDir) return send(response, 400, { error: 'Invalid file name.' });
+    let stats;
+    try {
+      stats = fs.statSync(target);
+    } catch {
+      return send(response, 404, { error: 'Not found' });
+    }
+    if (!stats.isFile() || (expectedSize !== null && stats.size !== expectedSize)) return send(response, 409, { error: 'File does not match.' });
+    fs.unlink(target, (error) => {
+      if (!error) return send(response, 200, { ok: true });
+      send(response, error.code === 'ENOENT' ? 404 : 500, { error: error.code === 'ENOENT' ? 'Not found' : 'The file could not be deleted.' });
+    });
+  });
+}
+
 http.createServer((request, response) => {
   if (!isLocalRequest(request)) return send(response, 403, { error: 'Forbidden' });
   const url = new URL(request.url, `http://${request.headers.host}`);
@@ -145,6 +176,7 @@ http.createServer((request, response) => {
   if (request.method === 'POST' && url.pathname === '/api/new-tree') return receiveNewTree(request, response);
   if (request.method === 'POST' && url.pathname === '/api/media') return receiveUpload(request, response);
   if (request.method === 'POST' && url.pathname === '/api/reveal') return revealFile(request, response);
+  if (request.method === 'POST' && url.pathname === '/api/media-delete') return deleteFile(request, response);
   if (request.method === 'GET' && url.pathname.startsWith('/media/')) {
     const name = safeName(decodeURIComponent(url.pathname.slice('/media/'.length)));
     return name ? serveFile(response, mediaDir, name) : send(response, 404, { error: 'Not found' });

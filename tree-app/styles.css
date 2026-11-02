@@ -204,6 +204,13 @@ button { color: inherit; }
 .details-empty p { max-width: 235px; color: #7c8b84; font-size: 12px; line-height: 1.6; }
 .detail-hero { padding: 25px 21px 19px; background: linear-gradient(135deg, #f8fbf8 0%, #edf4ef 100%); border-bottom: 1px solid var(--line); }
 .detail-monogram { width: 42px; height: 42px; display: grid; place-items: center; margin-bottom: 15px; border: 1px solid #d3a08d; border-radius: 50%; color: #a8533e; background: #fff5ef; font-family: Baskerville, Georgia, serif; font-size: 19px; }
+.detail-monogram.has-photo { width: 56px; height: 56px; position: relative; }
+.detail-monogram-photo { width: 100%; height: 100%; display: block; border-radius: 50%; object-fit: cover; }
+.detail-monogram-edit { width: 22px; height: 22px; position: absolute; right: -4px; bottom: -4px; display: grid; place-items: center; padding: 0; border: 1px solid #c8d8ce; border-radius: 50%; color: #315d4d; background: #fff; box-shadow: 0 1px 3px rgba(23,53,47,.18); cursor: pointer; }
+.detail-monogram-edit:hover, .detail-monogram-edit:focus-visible { border-color: #2f786a; color: #fff; background: #2f786a; }
+.detail-monogram-edit .button-icon { width: 12px; height: 12px; margin: 0; }
+.detail-media-section.is-choosing-card-image { animation: card-image-highlight 1.6s ease-out; }
+@keyframes card-image-highlight { 0%, 30% { background: #fdf3e2; } 100% { background: transparent; } }
 .detail-hero h2 { margin: 7px 0 5px; color: var(--ink); font-family: Baskerville, "Palatino Linotype", Georgia, serif; font-size: 24px; font-weight: 500; line-height: 1.15; overflow-wrap: anywhere; }
 .detail-life { margin: 0; color: #6d8078; font-size: 12px; }
 .detail-id { display: inline-flex; align-items: center; margin-top: 12px; padding: 4px 7px; color: #72837b; background: #e4eee8; border-radius: 3px; font-family: Consolas, monospace; font-size: 10px; }
@@ -224,6 +231,16 @@ button { color: inherit; }
 .event-label { color: #3a554b; font-size: 11px; font-weight: 700; }
 .event-detail { margin-top: 2px; color: #76857f; font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
 .event-source { display: block; margin-top: 3px; color: #929f99; font-size: 9px; }
+.event-media { display: grid; gap: 5px; margin-top: 6px; }
+.event-media-label { color: #5f766b; font-size: 10px; font-weight: 700; }
+.event-media-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.event-media-strip > [hidden] { display: none; }
+.event-media-thumb { width: 46px; height: 46px; display: block; overflow: hidden; border: 1px solid #d5e0d9; border-radius: 3px; background: #f5f9f6; }
+.event-media-thumb:hover, .event-media-thumb:focus-visible { border-color: #2f786a; }
+.event-media-thumb img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.event-media-file { max-width: 100%; overflow: hidden; color: #2f786a; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.event-media-more { padding: 0 2px; border: 0; background: none; color: #2f786a; cursor: pointer; font-size: 10px; font-weight: 700; text-decoration: underline; }
+.event-media-missing { color: #929f99; font-size: 9px; }
 .media-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .media-folder-button, .media-add-button { min-height: 30px; padding: 0 9px; border: 1px solid #d5e0d9; border-radius: 4px; color: #426357; background: #f5f9f6; cursor: pointer; font-size: 10px; font-weight: 700; }
 .media-folder-button:hover, .media-add-button:hover:not(:disabled) { border-color: #8fb7a5; background: #ebf5ef; }
@@ -325,6 +342,36 @@ button { color: inherit; }
 .new-gedcom-field { min-width: 0; display: grid; gap: 5px; color: #60756b; font-size: 11px; font-weight: 700; }
 .new-gedcom-field[hidden] { display: none; }
 .life-event-wide { grid-column: 1 / -1; }
+.life-event-media { display: grid; gap: 7px; padding-top: 10px; border-top: 1px solid #e3ebe6; }
+.life-event-media-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #60756b; font-size: 11px; font-weight: 700; }
+.life-event-media-add { min-height: 30px; padding: 0 10px; font-size: 11px; }
+#lifeEventMediaInput { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
+.life-event-media-list { display: flex; flex-wrap: wrap; gap: 8px; max-height: 180px; overflow-y: auto; }
+.life-event-media-empty { color: #83958c; font-size: 11px; font-style: italic; }
+.life-event-media-item { position: relative; width: 74px; display: grid; gap: 3px; color: #42584f; font-size: 9px; text-decoration: none; }
+.life-event-media-thumb { width: 74px; height: 74px; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 1px solid #d5e0d9; border-radius: 4px; background: #f5f9f6; color: #2f786a; font-size: 11px; font-weight: 700; }
+.life-event-media-thumb img { width: 100%; height: 100%; display: block; object-fit: cover; }
+a.life-event-media-thumb:hover, a.life-event-media-thumb:focus-visible { border-color: #2f786a; }
+.life-event-media-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.life-event-media-item.is-new .life-event-media-thumb { border: 2px dashed #7eaa94; }
+.life-event-media-item.is-missing .life-event-media-thumb { color: #929f99; font-size: 9px; text-align: center; }
+.life-event-media-badge { position: absolute; top: 3px; left: 3px; padding: 1px 4px; border-radius: 3px; color: #fff; background: #2f786a; font-size: 8px; font-weight: 700; text-transform: uppercase; }
+.life-event-media-remove { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; border: 1px solid #d5e0d9; border-radius: 50%; color: #8b3a3a; background: #fff; font-size: 12px; line-height: 1; cursor: pointer; }
+.life-event-media-remove:hover, .life-event-media-remove:focus-visible { border-color: #8b3a3a; }
+.life-event-media-hint { margin: 0; color: #83958c; font-size: 10px; line-height: 1.4; }
+.life-event-media-hint[hidden] { display: none; }
+.dialog-button-danger { border-color: #a33a3a; color: #fff; background: #a33a3a; }
+.dialog-button-danger:hover:not(:disabled) { border-color: #862e2e; background: #862e2e; }
+.media-delete-name { margin: 0 0 12px; padding: 8px 10px; overflow-wrap: anywhere; border-radius: 4px; color: #344b42; background: #f5f9f6; font-size: 12px; font-weight: 700; }
+.media-delete-options { display: grid; gap: 8px; margin: 0; }
+.media-delete-option { display: grid; gap: 2px; padding: 9px 11px; border: 1px solid #d5e0d9; border-radius: 5px; color: #344b42; background: #fff; cursor: pointer; font: inherit; text-align: left; }
+.media-delete-option:hover:not(:disabled), .media-delete-option:focus-visible { border-color: #2f786a; background: #f2faf6; }
+.media-delete-option strong { font-size: 12px; }
+.media-delete-option span { color: #687a72; font-size: 11px; line-height: 1.4; }
+.media-delete-option-danger strong { color: #a33a3a; }
+.media-delete-option-danger:hover:not(:disabled), .media-delete-option-danger:focus-visible { border-color: #a33a3a; background: #fff6f5; }
+.media-delete-option:disabled { opacity: .55; cursor: not-allowed; }
+.media-delete-warning { padding: 9px 10px; border-left: 3px solid #a33a3a; background: #fff6f5; }
 .event-item-editable { cursor: pointer; border-radius: 4px; }
 .event-item-editable:hover { background: #f2faf6; }
 .event-item-editable:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
@@ -451,7 +498,7 @@ button { color: inherit; }
   body.print-person .roster-panel, body.print-person .main-panel { display: none !important; }
   body.print-person .details-panel { display: block; overflow: visible; border: 0; background: #fff; }
   body.print-person .details-content { overflow: visible; }
-  body.print-person .person-action-row, body.print-person .detail-media-section, body.print-person .relation-edit { display: none !important; }
+  body.print-person .person-action-row, body.print-person .detail-media-section, body.print-person .event-media, body.print-person .detail-monogram-edit, body.print-person .relation-edit { display: none !important; }
   body.print-person .detail-hero { padding: 0 0 5mm; background: none; border-bottom: 0.75pt solid #c8d4cd; }
   body.print-person .detail-monogram { width: 12mm; height: 12mm; margin-bottom: 3mm; font-size: 15pt; }
   body.print-person .detail-hero h2 { font-size: 22pt; }

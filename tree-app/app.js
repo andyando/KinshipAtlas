@@ -119,7 +119,7 @@
   }
 
   function createEvent(type, value = '') {
-    return { type, value: cleanEventDisplayText(value), date: '', place: '', detail: '', notes: [], sources: [], ordinal: -1 };
+    return { type, value: cleanEventDisplayText(value), date: '', place: '', detail: '', notes: [], sources: [], mediaPaths: [], ordinal: -1 };
   }
 
   function cleanGedcomValue(value) {
@@ -209,6 +209,19 @@
     return `${records.flatMap((record) => record.lines).join('\r\n').replace(/\r?\n*$/, '')}\r\n`;
   }
 
+  // Maps each top-level "0 @X@ OBJE" media record to its FILE paths, so "n OBJE @X@" pointers can be resolved.
+  function mediaRecordFiles(records) {
+    const files = new Map();
+    for (const record of records) {
+      if (record.tag !== 'OBJE' || !record.xref) continue;
+      const paths = record.lines.slice(1).map(parseGedcomField)
+        .filter((field) => field?.tag === 'FILE' && field.value.trim())
+        .map((field) => field.value.trim());
+      if (paths.length) files.set(record.xref, paths);
+    }
+    return files;
+  }
+
   function getActiveSessionId() {
     let sessionId = sessionStorage.getItem('kinship-atlas-session-id');
     if (!sessionId) {
@@ -289,12 +302,28 @@
     const sources = new Map();
     const gedcomRecords = splitGedcomRecords(text);
     const individualRecords = new Map(gedcomRecords.filter((entry) => entry.tag === 'INDI').map((entry) => [entry.xref, entry]));
+    const mediaFiles = mediaRecordFiles(gedcomRecords);
     let record = null;
     let activeEvent = null;
     let activeName = null;
+    // The life event whose level-1 block is being read; media anywhere inside it (including its source citations) is linked to it.
+    let mediaEvent = null;
+
+    function addMediaPaths(tag, value) {
+      const pointer = tag === 'OBJE' ? splitXref(value) : '';
+      const paths = tag === 'FILE' ? [value.trim()] : (pointer && mediaFiles.get(pointer)) || [];
+      for (const path of paths) {
+        if (!path) continue;
+        if (record.mediaPaths) record.mediaPaths.push(path);
+        if (mediaEvent) mediaEvent.mediaPaths.push(path);
+      }
+    }
 
     function finishRecord() {
       if (!record) return;
+      for (const lifeEvent of [...(record.events || []), record.marriage, record.divorce]) {
+        if (lifeEvent) lifeEvent.mediaPaths = [...new Set(lifeEvent.mediaPaths)];
+      }
       if (record.type === 'INDI') {
         const rawName = record.rawName || '';
         const parsedSurname = (rawName.match(/\/([^/]+)\//) || [])[1] || '';
@@ -328,6 +357,7 @@
       record = null;
       activeEvent = null;
       activeName = null;
+      mediaEvent = null;
     }
 
     const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
@@ -355,17 +385,20 @@
       if (!record) continue;
 
       if (record.type === 'INDI') {
+        if (level === 1) mediaEvent = null;
         if (level === 1 && tag !== 'NAME') activeName = null;
         if (level === 1 && eventTags.has(tag)) {
           activeEvent = createEvent(tag, value);
           activeEvent.ordinal = record.events.length;
           record.events.push(activeEvent);
+          mediaEvent = activeEvent;
           continue;
         }
         if (level === 1 && tag === 'OCCU') {
           activeEvent = createEvent('OCCU', value);
           activeEvent.ordinal = record.events.length;
           record.events.push(activeEvent);
+          mediaEvent = activeEvent;
           continue;
         }
         if (level === 1 && tag === 'NAME') {
@@ -389,7 +422,8 @@
           if (!activeName || activeName === record.nameEntries[0]) record.surname = value;
           continue;
         }
-        if (tag === 'FILE' && level >= 2) { record.mediaPaths.push(value.trim()); continue; }
+        if (tag === 'FILE' && level >= 2) { addMediaPaths(tag, value); continue; }
+        if (tag === 'OBJE' && splitXref(value)) { addMediaPaths(tag, value); continue; }
         if (tag === 'SOUR') {
           const sourceId = splitXref(value);
           if (sourceId) {
@@ -407,16 +441,21 @@
           else if (tag === 'NOTE' || tag === 'CONT') activeEvent.notes.push(cleanEventDisplayText(value));
         }
       } else if (record.type === 'FAM') {
+        if (level === 1) mediaEvent = null;
         if (level === 1 && tag === 'MARR') {
           record.marriage = createEvent('MARR');
           activeEvent = record.marriage;
+          mediaEvent = activeEvent;
           continue;
         }
         if (level === 1 && tag === 'DIV') {
           record.divorce = createEvent('DIV');
           activeEvent = record.divorce;
+          mediaEvent = activeEvent;
           continue;
         }
+        // Family-level media is only kept when it belongs to a marriage or divorce event.
+        if (mediaEvent && ((tag === 'FILE' && level >= 2) || (tag === 'OBJE' && splitXref(value)))) { addMediaPaths(tag, value); continue; }
         if (level === 1 && tag === 'HUSB') { record.husbandId = splitXref(value); activeEvent = null; continue; }
         if (level === 1 && tag === 'WIFE') { record.wifeId = splitXref(value); activeEvent = null; continue; }
         if (level === 1 && tag === 'CHIL') { record.childIds.push(splitXref(value)); activeEvent = null; continue; }
@@ -1046,7 +1085,7 @@
     try {
       const response = await fetch('/api/media-info', { cache: 'no-store' });
       const info = response.ok ? await response.json() : null;
-      state.mediaHelper = info?.available ? { folder: info.folder } : null;
+      state.mediaHelper = info?.available ? { folder: info.folder, deletePaths: info.deletePaths === true } : null;
     } catch {
       state.mediaHelper = null;
     }
@@ -1073,7 +1112,9 @@
         const response = await fetch(`/media/${encodeURIComponent(name)}`);
         if (!response.ok) continue;
         const blob = await response.blob();
-        addFileToMediaIndex(new File([blob], name, { type: blob.type }), name);
+        const helperFile = new File([blob], name, { type: blob.type });
+        helperMediaFiles.add(helperFile);
+        addFileToMediaIndex(helperFile, name);
         loaded = true;
       } catch {
         // The link stays; the file is picked up when the media folder is selected.
@@ -1088,6 +1129,31 @@
     return typeof window.showDirectoryPicker === 'function' ? 'none' : 'unsupported';
   }
 
+  function isSupportedMediaFile(file) {
+    return isImageFile(file) || file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+  }
+
+  // Writes one file to the selected media folder or the local helper and returns the saved file name.
+  async function storeMediaFile(file, mode, directoryHandle) {
+    if (mode === 'folder') {
+      const fileName = await uniqueMediaFileName(directoryHandle, file.name);
+      const fileHandle = await directoryHandle.getFileHandle(fileName, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(file);
+      await writable.close();
+      addFileToMediaIndex(await fileHandle.getFile(), fileName);
+      return fileName;
+    }
+    if (mode === 'helper') {
+      const fileName = await uploadToMediaHelper(file);
+      const helperFile = new File([file], fileName, { type: file.type });
+      helperMediaFiles.add(helperFile);
+      addFileToMediaIndex(helperFile, fileName);
+      return fileName;
+    }
+    throw new Error('No media folder is available.');
+  }
+
   async function saveUploadedMedia(files) {
     const person = state.people.get(state.pendingUploadPersonId);
     const directoryHandle = state.mediaDirectoryHandle;
@@ -1099,23 +1165,12 @@
     let savedCount = 0;
     let failedCount = 0;
     for (const file of files) {
-      if (!isImageFile(file) && file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) {
+      if (!isSupportedMediaFile(file)) {
         failedCount += 1;
         continue;
       }
       try {
-        let fileName;
-        if (mode === 'folder') {
-          fileName = await uniqueMediaFileName(directoryHandle, file.name);
-          const fileHandle = await directoryHandle.getFileHandle(fileName, { create: true });
-          const writable = await fileHandle.createWritable();
-          await writable.write(file);
-          await writable.close();
-          addFileToMediaIndex(await fileHandle.getFile(), fileName);
-        } else {
-          fileName = await uploadToMediaHelper(file);
-          addFileToMediaIndex(new File([file], fileName, { type: file.type }), fileName);
-        }
+        const fileName = await storeMediaFile(file, mode, directoryHandle);
         if (!person.mediaPaths.includes(fileName)) person.mediaPaths.push(fileName);
         const paths = state.additionalMedia.get(person.id) || [];
         if (!paths.includes(fileName)) paths.push(fileName);
@@ -1155,6 +1210,184 @@
   }
 
   let pendingUnlink = null;
+  const helperMediaFiles = new WeakSet();
+
+  // Removes matching FILE lines and OBJE pointers within lines[from, to); returns the number removed.
+  // An embedded OBJE left with no other files is removed whole so no empty OBJE remains.
+  function removeMediaReferences(lines, from, to, fileMatches, pointerMatches) {
+    const blockEnd = (start, level) => {
+      let end = start + 1;
+      while (end < lines.length) {
+        const field = parseGedcomField(lines[end]);
+        if (field && field.level <= level) break;
+        end += 1;
+      }
+      return end;
+    };
+    let removed = 0;
+    for (let index = from; index < to; index += 1) {
+      const field = parseGedcomField(lines[index]);
+      if (field?.tag !== 'FILE' && field?.tag !== 'OBJE') continue;
+      const pointer = field.tag === 'OBJE' ? splitXref(field.value) : '';
+      if (field.tag === 'OBJE' ? !(pointer && pointerMatches(pointer)) : !fileMatches(field.value)) continue;
+      let start = index;
+      let end = blockEnd(index, field.level);
+      if (field.tag === 'FILE') {
+        let parentIndex = index - 1;
+        while (parentIndex >= from) {
+          const candidate = parseGedcomField(lines[parentIndex]);
+          if (candidate && candidate.level < field.level) break;
+          parentIndex -= 1;
+        }
+        const parent = parentIndex >= from ? parseGedcomField(lines[parentIndex]) : null;
+        if (parent?.tag === 'OBJE' && parent.level === field.level - 1 && !splitXref(parent.value)) {
+          const parentEnd = blockEnd(parentIndex, parent.level);
+          const otherFile = lines.slice(parentIndex + 1, parentEnd).some((line) => {
+            const sibling = parseGedcomField(line);
+            return sibling?.tag === 'FILE' && sibling.level === field.level && !fileMatches(sibling.value);
+          });
+          if (!otherFile) { start = parentIndex; end = parentEnd; }
+        }
+      }
+      lines.splice(start, end - start);
+      to -= end - start;
+      index = start - 1;
+      removed += 1;
+    }
+    return removed;
+  }
+
+  function pendingEventBlock(pending) {
+    if (pending.familyId) {
+      const record = state.gedcomRecords.find((entry) => entry.tag === 'FAM' && entry.xref === pending.familyId);
+      const start = record ? record.lines.findIndex((line, index) => index > 0 &&
+        parseGedcomField(line)?.level === 1 && parseGedcomField(line)?.tag === pending.config.tag) : -1;
+      return start < 0 ? null : { record, start, end: lifeEventBlockEnd(record.lines, start) };
+    }
+    const record = state.gedcomRecords.find((entry) => entry.tag === 'INDI' && entry.xref === pending.personId);
+    const start = record ? findLifeEventStart(record.lines, pending.ordinal) : -1;
+    return start < 0 ? null : { record, start, end: lifeEventBlockEnd(record.lines, start) };
+  }
+
+  function currentPendingEventMedia(pending) {
+    if (pending.familyId) {
+      const family = state.families.get(pending.familyId);
+      return [...(family?.[pending.config.tag === 'DIV' ? 'divorce' : 'marriage']?.mediaPaths || [])];
+    }
+    const lifeEvent = state.people.get(pending.personId)?.events.find((entry) => entry.ordinal === pending.ordinal);
+    return [...(lifeEvent?.mediaPaths || [])];
+  }
+
+  // Removes the link from the event being edited only; the file and any other links stay.
+  function unlinkEventMedia(path) {
+    const pending = state.pendingLifeEvent;
+    const block = pending && pendingEventBlock(pending);
+    if (!block) return false;
+    const linkedFiles = mediaRecordFiles(state.gedcomRecords);
+    const target = normalizeMediaPath(path);
+    const fileMatches = (value) => normalizeMediaPath(value) === target;
+    const lines = [...block.record.lines];
+    if (!removeMediaReferences(lines, block.start + 1, block.end, fileMatches,
+      (pointer) => (linkedFiles.get(pointer) || []).some(fileMatches))) return false;
+    block.record.lines = lines;
+    refreshAfterGedcomMutation(pending.personId);
+    pending.existingMedia = currentPendingEventMedia(pending);
+    return true;
+  }
+
+  // In helper mode a file is deletable when the helper served it, or when it sits directly in a picked folder
+  // with the same name as the helper's folder (the helper also checks the file size before deleting).
+  function canDeleteMediaFile(file) {
+    const mode = mediaSaveMode();
+    if (!file) return false;
+    if (mode === 'folder') return true;
+    if (mode !== 'helper') return false;
+    if (helperMediaFiles.has(file)) return true;
+    // Primary Media Library files are listed by the launcher, which can delete them by their path in the library.
+    if (file.kinshipUrl && state.mediaHelper.deletePaths) return true;
+    const segments = String(file.webkitRelativePath || '').split('/').filter(Boolean);
+    return segments.length === 2 && segments[0] === state.mediaHelper.folder;
+  }
+
+  function mediaFileUsage(file) {
+    const people = [...state.people.values()].filter((person) => person.mediaPaths.some((path) => resolveMediaFile(path) === file)).length;
+    const familyEvents = [...state.families.values()].flatMap((family) => [family.marriage, family.divorce])
+      .filter((lifeEvent) => lifeEvent?.mediaPaths.some((path) => resolveMediaFile(path) === file)).length;
+    return { people, familyEvents };
+  }
+
+  // Deletes the file from the media folder, then removes every link to it in the tree.
+  async function deleteMediaFileEverywhere(path, personId) {
+    const file = resolveMediaFile(path);
+    if (!canDeleteMediaFile(file)) throw new Error('This file cannot be deleted from here.');
+    if (mediaSaveMode() === 'folder') {
+      const segments = String(state.mediaRelativePaths.get(file) || file.name).split('/').filter(Boolean);
+      let directory = state.mediaDirectoryHandle;
+      for (const segment of segments.slice(0, -1)) directory = await directory.getDirectoryHandle(segment);
+      await directory.removeEntry(segments.at(-1));
+    } else {
+      const request = file.kinshipUrl
+        ? { name: file.name, path: state.mediaRelativePaths.get(file) || file.name }
+        : { name: file.name, size: file.size };
+      const response = await fetch('/api/media-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request)
+      });
+      if (!response.ok) {
+        throw new Error(response.status === 405
+          ? 'The local helper is out of date. Restart it to enable deleting files.'
+          : response.status === 404 ? `"${file.name}" was not found in the helper's media folder.`
+            : response.status === 409 ? `The "${file.name}" in the helper's media folder is a different file, so it was not deleted.`
+              : 'The local helper could not delete the file.');
+      }
+    }
+
+    const matchesFile = (value) => resolveMediaFile(value) === file;
+    const linkedFiles = mediaRecordFiles(state.gedcomRecords);
+    const deletedObjects = new Set([...linkedFiles].filter(([, paths]) => paths.every(matchesFile)).map(([xref]) => xref));
+    let removedLinks = 0;
+    const records = state.gedcomRecords.filter((record) => !(record.tag === 'OBJE' && deletedObjects.has(record.xref)));
+    for (const record of records) {
+      const lines = [...record.lines];
+      const removed = removeMediaReferences(lines, 1, lines.length, matchesFile, (pointer) => deletedObjects.has(pointer));
+      if (removed) { record.lines = lines; removedLinks += removed; }
+    }
+    const recordsChanged = removedLinks > 0 || records.length !== state.gedcomRecords.length;
+    state.gedcomRecords = records;
+
+    let additionalChanged = false;
+    for (const [id, paths] of [...state.additionalMedia]) {
+      const remaining = paths.filter((item) => !matchesFile(item));
+      if (remaining.length === paths.length) continue;
+      additionalChanged = true;
+      removedLinks += paths.length - remaining.length;
+      if (remaining.length) state.additionalMedia.set(id, remaining);
+      else state.additionalMedia.delete(id);
+      const person = state.people.get(id);
+      if (person) person.mediaPaths = person.mediaPaths.filter((item) => !matchesFile(item));
+    }
+    if (additionalChanged) saveAdditionalMedia();
+    let primaryChanged = false;
+    for (const [id, item] of [...state.primaryMedia]) {
+      if (matchesFile(item)) { state.primaryMedia.delete(id); primaryChanged = true; }
+    }
+    if (primaryChanged) savePrimaryMedia();
+
+    for (const [key, files] of state.mediaIndex.byName) {
+      const remaining = files.filter((entry) => entry !== file);
+      if (!remaining.length) state.mediaIndex.byName.delete(key);
+      else if (remaining.length !== files.length) state.mediaIndex.byName.set(key, remaining);
+    }
+    if (state.mediaUrls.has(file)) {
+      URL.revokeObjectURL(state.mediaUrls.get(file));
+      state.mediaUrls.delete(file);
+    }
+
+    if (recordsChanged) refreshAfterGedcomMutation(personId);
+    else render();
+    return { name: file.name, removedLinks };
+  }
 
   // Browsers never expose a folder's real disk path. Prefer an absolute path recorded in the GEDCOM,
   // then a path the user saved earlier; prompt only when neither exists.
@@ -1212,19 +1445,11 @@
     let recordChanged = false;
     const personRecord = state.gedcomRecords.find((record) => record.tag === 'INDI' && record.xref === personId);
     if (personRecord) {
-      for (let index = 1; index < personRecord.lines.length; index += 1) {
-        const field = parseGedcomField(personRecord.lines[index]);
-        if (field?.tag !== 'FILE' || normalizeMediaPath(field.value) !== normalizeMediaPath(path)) continue;
-        let end = index + 1;
-        while (end < personRecord.lines.length) {
-          const descendant = parseGedcomField(personRecord.lines[end]);
-          if (descendant && descendant.level <= field.level) break;
-          end += 1;
-        }
-        personRecord.lines.splice(index, end - index);
-        index -= 1;
-        recordChanged = true;
-      }
+      const linkedFiles = mediaRecordFiles(state.gedcomRecords);
+      const target = normalizeMediaPath(path);
+      const fileMatches = (value) => normalizeMediaPath(value) === target;
+      recordChanged = removeMediaReferences(personRecord.lines, 1, personRecord.lines.length, fileMatches,
+        (pointer) => (linkedFiles.get(pointer) || []).some(fileMatches)) > 0;
     }
 
     if (additionalChanged) saveAdditionalMedia();
@@ -1854,6 +2079,66 @@
     return result;
   }
 
+  function renderEventMedia(lifeEvent) {
+    const paths = lifeEvent.mediaPaths || [];
+    if (!paths.length) return null;
+    const visibleLimit = 4;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'event-media';
+    const label = document.createElement('span');
+    label.className = 'event-media-label';
+    label.textContent = `📎 ${paths.length} linked media`;
+    wrapper.append(label);
+    if (!state.mediaIndex) return wrapper;
+
+    const strip = document.createElement('div');
+    strip.className = 'event-media-strip';
+    const items = [];
+    let missing = 0;
+    for (const path of paths) {
+      const file = resolveMediaFile(path);
+      if (!file) { missing += 1; continue; }
+      const link = document.createElement('a');
+      link.href = mediaUrl(file);
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.title = file.name;
+      if (isImageFile(file)) {
+        link.className = 'event-media-thumb';
+        const image = document.createElement('img');
+        image.src = mediaUrl(file);
+        image.alt = file.name;
+        image.loading = 'lazy';
+        link.append(image);
+      } else {
+        link.className = 'event-media-file';
+        link.textContent = file.name;
+      }
+      link.hidden = items.length >= visibleLimit;
+      items.push(link);
+      strip.append(link);
+    }
+    if (items.length) wrapper.append(strip);
+    if (items.length > visibleLimit) {
+      const more = makeButton(`+${items.length - visibleLimit} more`, 'event-media-more');
+      more.setAttribute('aria-expanded', 'false');
+      more.addEventListener('click', () => {
+        const expanded = more.getAttribute('aria-expanded') !== 'true';
+        items.slice(visibleLimit).forEach((item) => { item.hidden = !expanded; });
+        more.setAttribute('aria-expanded', String(expanded));
+        more.textContent = expanded ? 'Show less' : `+${items.length - visibleLimit} more`;
+      });
+      strip.append(more);
+    }
+    if (missing) {
+      const note = document.createElement('span');
+      note.className = 'event-media-missing';
+      note.textContent = `${missing} not found in media folder`;
+      wrapper.append(note);
+    }
+    return wrapper;
+  }
+
   function renderEvents(person) {
     const events = [...person.events, ...marriageEventsFor(person)].sort((a, b) => {
       const aYear = Number(yearFrom(a.date)) || 9999;
@@ -1901,6 +2186,8 @@
           }).join(' · ');
           body.append(source);
         }
+        const eventMedia = renderEventMedia(event);
+        if (eventMedia) body.append(eventMedia);
         item.append(marker, body);
         list.append(item);
       }
@@ -2028,7 +2315,23 @@
     showToast(clearing ? `Primary person cleared.${suffix}` : `${person.name} is now the primary person.${suffix}`);
   }
 
+  function showCardImageChoices() {
+    const mediaSection = elements.details.querySelector('.detail-media-section');
+    if (!mediaSection) return;
+    const showMore = mediaSection.querySelector('.media-show-more');
+    if (showMore && showMore.getAttribute('aria-expanded') !== 'true') showMore.click();
+    mediaSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    mediaSection.classList.remove('is-choosing-card-image');
+    void mediaSection.offsetWidth;
+    mediaSection.classList.add('is-choosing-card-image');
+    mediaSection.addEventListener('animationend', () => mediaSection.classList.remove('is-choosing-card-image'), { once: true });
+    const current = mediaSection.querySelector('.media-primary-button.is-primary') || mediaSection.querySelector('.media-primary-button');
+    current?.focus({ preventScroll: true });
+    showToast('Select ☆ on an image to make it the card image.');
+  }
+
   let lastDetailsPersonId = null;
+  let expandedMediaPersonId = null;
 
   function renderDetails() {
     const person = state.people.get(state.selectedId);
@@ -2052,7 +2355,25 @@
     }
     const hero = document.createElement('header');
     hero.className = 'detail-hero';
-    const monogram = document.createElement('div'); monogram.className = 'detail-monogram'; monogram.textContent = initials(person.name);
+    const monogram = document.createElement('div'); monogram.className = 'detail-monogram';
+    const cardImage = primaryImageFor(person);
+    if (cardImage) {
+      monogram.classList.add('has-photo');
+      const photo = document.createElement('img');
+      photo.className = 'detail-monogram-photo';
+      photo.src = mediaUrl(cardImage.file);
+      photo.alt = `${person.name} card image`;
+      const changeImage = document.createElement('button');
+      changeImage.type = 'button';
+      changeImage.className = 'detail-monogram-edit';
+      changeImage.dataset.changeCardImage = person.id;
+      changeImage.title = 'Choose a different card image';
+      changeImage.setAttribute('aria-label', 'Choose a different card image from attached media');
+      setButtonContent(changeImage, 'edit', '');
+      monogram.append(photo, changeImage);
+    } else {
+      monogram.textContent = initials(person.name);
+    }
     const kicker = document.createElement('div'); kicker.className = 'eyebrow'; kicker.textContent = person.sex ? `PERSON RECORD · ${person.sex}` : 'PERSON RECORD';
     const title = document.createElement('h2'); title.textContent = person.name;
     const life = document.createElement('p'); life.className = 'detail-life'; life.textContent = lifespan(person);
@@ -2176,6 +2497,17 @@
     mediaSection.append(grid);
     const mediaItems = [];
     const primaryImage = primaryImageFor(person);
+    const linkedEvents = new Map();
+    for (const lifeEvent of [...person.events, ...marriageEventsFor(person)]) {
+      const year = yearFrom(lifeEvent.date);
+      for (const mediaPath of lifeEvent.mediaPaths || []) {
+        if (!linkedEvents.has(mediaPath)) linkedEvents.set(mediaPath, []);
+        linkedEvents.get(mediaPath).push(`${eventTitle(lifeEvent)}${year ? ` ${year}` : ''}`);
+      }
+    }
+    const mediaTitle = (file, mediaPath) => linkedEvents.has(mediaPath)
+      ? `${file.name}\nLinked to: ${linkedEvents.get(mediaPath).join(', ')}`
+      : file.name;
     let missing = 0;
     for (const path of person.mediaPaths) {
       const file = resolveMediaFile(path);
@@ -2191,6 +2523,7 @@
         link.href = mediaUrl(file);
         link.target = '_blank';
         link.rel = 'noopener';
+        link.title = mediaTitle(file, path);
         const image = document.createElement('img');
         image.src = mediaUrl(file);
         image.alt = file.name;
@@ -2220,6 +2553,7 @@
         link.target = '_blank';
         link.rel = 'noopener';
         link.textContent = file.name;
+        link.title = mediaTitle(file, path);
         const unlinkButton = makeButton('🗑', 'media-remove-button');
         unlinkButton.dataset.personId = person.id;
         unlinkButton.dataset.unlinkMedia = path;
@@ -2232,13 +2566,18 @@
       }
     }
     if (mediaItems.length > 4) {
-      const showMoreButton = makeButton('Show more', 'media-show-more');
-      showMoreButton.setAttribute('aria-expanded', 'false');
-      showMoreButton.addEventListener('click', () => {
-        const expanded = showMoreButton.getAttribute('aria-expanded') !== 'true';
+      let expanded = expandedMediaPersonId === person.id;
+      const showMoreButton = makeButton('', 'media-show-more');
+      const applyExpanded = () => {
         mediaItems.slice(4).forEach((item) => { item.hidden = !expanded; });
         showMoreButton.setAttribute('aria-expanded', String(expanded));
         showMoreButton.textContent = expanded ? 'Show less' : 'Show more';
+      };
+      applyExpanded();
+      showMoreButton.addEventListener('click', () => {
+        expanded = !expanded;
+        expandedMediaPersonId = expanded ? person.id : null;
+        applyExpanded();
       });
       mediaSection.append(showMoreButton);
     }
@@ -2529,8 +2868,250 @@
     marriageTypeField: document.querySelector('#lifeEventMarriageTypeField'),
     marriageType: document.querySelector('#lifeEventMarriageType'),
     error: document.querySelector('#lifeEventError'),
-    remove: document.querySelector('#lifeEventDelete')
+    remove: document.querySelector('#lifeEventDelete'),
+    submit: document.querySelector('#lifeEventForm button[type="submit"]'),
+    mediaHeading: document.querySelector('#lifeEventMediaHeading'),
+    mediaAdd: document.querySelector('#lifeEventMediaAdd'),
+    mediaInput: document.querySelector('#lifeEventMediaInput'),
+    mediaList: document.querySelector('#lifeEventMediaList'),
+    mediaHint: document.querySelector('#lifeEventMediaHint')
   });
+
+  function eventMediaLines(names) {
+    return names.flatMap((name) => {
+      const extension = (name.match(/\.([^.\\/]+)$/)?.[1] || '').toLocaleLowerCase();
+      return ['2 OBJE', `3 FILE ${name}`, ...(extension ? [`4 FORM ${extension}`] : [])];
+    });
+  }
+
+  function mediaLinkedText(names) {
+    return names.length ? ` ${names.length} media item${names.length === 1 ? '' : 's'} linked to the event.` : '';
+  }
+
+  const lifeEventPreviewUrls = [];
+  function releaseLifeEventPreviewUrls() {
+    lifeEventPreviewUrls.splice(0).forEach((url) => URL.revokeObjectURL(url));
+  }
+
+  function renderLifeEventMedia() {
+    const fields = lifeEventFields();
+    const pending = state.pendingLifeEvent;
+    if (!pending) return;
+    releaseLifeEventPreviewUrls();
+    const existing = pending.existingMedia;
+    const added = pending.newMedia;
+    const makeItem = (name, thumbContent, className = '', href = '') => {
+      const item = document.createElement('div');
+      item.className = `life-event-media-item${className ? ` ${className}` : ''}`;
+      item.title = name;
+      const thumb = document.createElement(href ? 'a' : 'span');
+      thumb.className = 'life-event-media-thumb';
+      if (href) {
+        thumb.href = href;
+        thumb.target = '_blank';
+        thumb.rel = 'noopener';
+        thumb.setAttribute('aria-label', `Open ${name}`);
+      }
+      thumb.append(thumbContent);
+      const caption = document.createElement('span');
+      caption.className = 'life-event-media-name';
+      caption.textContent = name;
+      item.append(thumb, caption);
+      return item;
+    };
+    const makeRemoveButton = (dataKey, index, icon, label) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'life-event-media-remove';
+      button.dataset[dataKey] = String(index);
+      button.textContent = icon;
+      button.title = label;
+      button.setAttribute('aria-label', label);
+      return button;
+    };
+    const previewFor = (file, url) => {
+      if (!isImageFile(file)) return 'PDF';
+      const image = document.createElement('img');
+      image.src = url;
+      image.alt = '';
+      image.loading = 'lazy';
+      return image;
+    };
+
+    const items = [];
+    let missing = 0;
+    existing.forEach((path, index) => {
+      const file = state.mediaIndex ? resolveMediaFile(path) : null;
+      const name = file?.name || path.split(/[\\/]/).pop() || path;
+      let item;
+      if (file) {
+        item = makeItem(name, previewFor(file, mediaUrl(file)), '', mediaUrl(file));
+      } else {
+        missing += 1;
+        item = makeItem(name, state.mediaIndex ? 'Not found' : 'Not linked', 'is-missing');
+      }
+      item.append(makeRemoveButton('deleteEventMedia', index, '🗑', `Remove or delete ${name}`));
+      items.push(item);
+    });
+    added.forEach((entry, index) => {
+      const url = URL.createObjectURL(entry.file);
+      lifeEventPreviewUrls.push(url);
+      const item = makeItem(entry.file.name, previewFor(entry.file, url), 'is-new');
+      const badge = document.createElement('span');
+      badge.className = 'life-event-media-badge';
+      badge.textContent = 'New';
+      item.append(badge, makeRemoveButton('removeNewMedia', index, '×', `Don't upload ${entry.file.name}`));
+      items.push(item);
+    });
+    if (!items.length) {
+      const empty = document.createElement('span');
+      empty.className = 'life-event-media-empty';
+      empty.textContent = 'No media linked to this event.';
+      items.push(empty);
+    }
+    fields.mediaList.replaceChildren(...items);
+    fields.mediaHeading.textContent = `Media (${existing.length + added.length})`;
+
+    const mode = mediaSaveMode();
+    fields.mediaAdd.disabled = mode === 'none' || mode === 'unsupported';
+    fields.mediaAdd.title = mode === 'folder'
+      ? 'Choose photos or PDFs to save to the selected media folder'
+      : mode === 'helper'
+        ? `Choose photos or PDFs; saved by the local helper to ${state.mediaHelper.folder}`
+        : 'Select a media folder before uploading files';
+    const hints = [];
+    if (pending.mediaNotice) hints.push(pending.mediaNotice);
+    if (mode === 'none') hints.push('Select a media folder with the Media button before uploading files.');
+    if (mode === 'unsupported') hints.push('This browser cannot save files. Use Chrome or Edge, or run the local helper, to upload media.');
+    if (missing && !state.mediaIndex) hints.push('Link the media folder to preview attached files.');
+    if (added.length) hints.push('New files are saved to the media folder and linked to this event when you click Save.');
+    fields.mediaHint.textContent = hints.join(' ');
+    fields.mediaHint.hidden = !hints.length;
+  }
+
+  function addLifeEventMediaFiles(files) {
+    const pending = state.pendingLifeEvent;
+    if (!pending) return;
+    const fields = lifeEventFields();
+    const rejected = files.filter((file) => !isSupportedMediaFile(file));
+    for (const file of files) {
+      if (!isSupportedMediaFile(file)) continue;
+      if (pending.newMedia.some((entry) => entry.file.name === file.name && entry.file.size === file.size)) continue;
+      pending.newMedia.push({ file, savedName: null });
+    }
+    fields.error.hidden = !rejected.length;
+    if (rejected.length) fields.error.textContent = `${rejected.map((file) => file.name).join(', ')} ${rejected.length === 1 ? 'is' : 'are'} not a photo or PDF.`;
+    renderLifeEventMedia();
+  }
+
+  // Mirrors saveLifeEvent's input checks so files are not uploaded for an event that cannot be saved.
+  function lifeEventInputError() {
+    const pending = state.pendingLifeEvent;
+    const fields = lifeEventFields();
+    const clean = (text) => text.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const config = pending.ordinal === null
+      ? lifeEventTypes.find((entry) => entry.key === fields.type.value) || lifeEventTypes[0]
+      : pending.config;
+    if (config.family) {
+      if (pending.familyId) return '';
+      const spouseId = fields.spouse.value;
+      if (!spouseId && !clean(fields.newGiven.value).replaceAll('/', ' ').trim()) return 'Choose a spouse from the list, or enter the new spouse\'s given name.';
+      const familyKey = config.tag === 'DIV' ? 'divorce' : 'marriage';
+      const existingFamily = spouseId && [...state.families.values()].find((family) =>
+        (family.husbandId === pending.personId && family.wifeId === spouseId) ||
+        (family.wifeId === pending.personId && family.husbandId === spouseId));
+      if (existingFamily?.[familyKey]) return `A ${config.label.toLocaleLowerCase()} with this person is already recorded. Click it in the Life events list to edit it.`;
+      return '';
+    }
+    if (config.custom && !clean(fields.custom.value)) return 'Enter a name for this event, such as Census or Probate.';
+    if (pending.ordinal === null && !clean(fields.date.value) && !clean(fields.place.value) && !clean(fields.desc.value)) {
+      return 'Enter a date, place or description for this event.';
+    }
+    return '';
+  }
+
+  // Returns the saved names of all new files, or null when any could not be saved.
+  async function uploadLifeEventMedia() {
+    const pending = state.pendingLifeEvent;
+    const fields = lifeEventFields();
+    const waiting = pending.newMedia.filter((entry) => !entry.savedName);
+    if (waiting.length) {
+      const mode = mediaSaveMode();
+      if (mode !== 'folder' && mode !== 'helper') {
+        fields.error.textContent = 'Select a media folder before saving new media, or remove the new files.';
+        fields.error.hidden = false;
+        return null;
+      }
+      const directoryHandle = state.mediaDirectoryHandle;
+      const submitText = fields.submit.textContent;
+      fields.submit.disabled = true;
+      fields.submit.textContent = 'Saving media…';
+      const failed = [];
+      for (const entry of waiting) {
+        try {
+          entry.savedName = await storeMediaFile(entry.file, mode, directoryHandle);
+        } catch {
+          failed.push(entry.file.name);
+        }
+      }
+      fields.submit.disabled = false;
+      fields.submit.textContent = submitText;
+      if (state.pendingLifeEvent !== pending) return null;
+      if (failed.length) {
+        fields.error.textContent = `${failed.join(', ')} could not be saved to the media folder. Remove ${failed.length === 1 ? 'it' : 'them'} or try again.`;
+        fields.error.hidden = false;
+        return null;
+      }
+    }
+    return pending.newMedia.map((entry) => entry.savedName);
+  }
+
+  let pendingEventMediaDelete = null;
+
+  function openEventMediaRemoveDialog(path) {
+    if (!path || !state.pendingLifeEvent) return;
+    const file = state.mediaIndex ? resolveMediaFile(path) : null;
+    const name = file?.name || path.split(/[\\/]/).pop() || path;
+    pendingEventMediaDelete = { path, name, eventState: state.pendingLifeEvent };
+    document.querySelector('#eventMediaRemoveName').textContent = name;
+    const deleteButton = document.querySelector('#eventMediaDeleteFile');
+    const detail = document.querySelector('#eventMediaDeleteFileDetail');
+    const canDelete = canDeleteMediaFile(file);
+    deleteButton.disabled = !canDelete;
+    detail.textContent = canDelete
+      ? 'Deletes the image or PDF from the media folder and removes every link to it in this tree.'
+      : !file
+        ? 'Unavailable: the file was not found in the linked media folder.'
+        : 'Unavailable: select the media folder with write access (Chrome or Edge), or use the local helper, to delete files.';
+    document.querySelector('#eventMediaRemoveDialog').showModal();
+  }
+
+  function setLifeEventMediaNotice(message) {
+    if (!state.pendingLifeEvent) return;
+    state.pendingLifeEvent.mediaNotice = message;
+    renderLifeEventMedia();
+  }
+
+  async function submitLifeEvent() {
+    const pending = state.pendingLifeEvent;
+    const fields = lifeEventFields();
+    if (!pending || pending.saving) return;
+    if (pending.newMedia.length) {
+      const inputError = lifeEventInputError();
+      if (inputError) {
+        fields.error.textContent = inputError;
+        fields.error.hidden = false;
+        return;
+      }
+    }
+    pending.saving = true;
+    try {
+      const mediaNames = await uploadLifeEventMedia();
+      if (mediaNames && state.pendingLifeEvent === pending) saveLifeEvent(false, mediaNames);
+    } finally {
+      pending.saving = false;
+    }
+  }
 
   function syncNewSpouseFields() {
     const fields = lifeEventFields();
@@ -2572,7 +3153,10 @@
   function openLifeEventEditor(person, event) {
     const fields = lifeEventFields();
     const editing = Boolean(event);
-    state.pendingLifeEvent = { personId: person.id, ordinal: editing ? event.ordinal : null, familyId: event?.familyId || null, original: null };
+    state.pendingLifeEvent = {
+      personId: person.id, ordinal: editing ? event.ordinal : null, familyId: event?.familyId || null, original: null,
+      existingMedia: editing ? [...(event.mediaPaths || [])] : [], newMedia: []
+    };
     fields.error.hidden = true;
     fields.remove.hidden = !editing;
     fields.remove.textContent = 'Delete event';
@@ -2627,10 +3211,12 @@
       applyLifeEventConfig(lifeEventTypes[0]);
     }
     fields.picker.value = datePickerValue(fields.date.value);
+    fields.mediaInput.value = '';
+    renderLifeEventMedia();
     fields.dialog.showModal();
   }
 
-  function saveMarriage(deleteEvent, config) {
+  function saveMarriage(deleteEvent, config, mediaNames = []) {
     const pending = state.pendingLifeEvent;
     const fields = lifeEventFields();
     const tag = config.tag;
@@ -2647,7 +3233,7 @@
       if (date) lines.push(`2 DATE ${date}`);
       if (place) lines.push(`2 PLAC ${place}`);
       if (marriageType) lines.push(`2 TYPE ${marriageType}`);
-      return lines;
+      return [...lines, ...eventMediaLines(mediaNames)];
     };
 
     if (pending.familyId) {
@@ -2662,6 +3248,7 @@
         if (date !== original.date) setLifeEventSubfield(lines, start, 'DATE', date);
         if (place !== original.place) setLifeEventSubfield(lines, start, 'PLAC', place);
         if (marriageType !== original.marriageType) setLifeEventSubfield(lines, start, 'TYPE', marriageType);
+        lines.splice(lifeEventBlockEnd(lines, start), 0, ...eventMediaLines(mediaNames));
       }
       familyRecord.lines = lines;
     } else {
@@ -2686,7 +3273,7 @@
           familyRecord.lines = [...familyRecord.lines, ...marriageLines()];
           refreshAfterGedcomMutation(pending.personId);
           fields.dialog.close();
-          showToast(`${config.label} added to the existing family record.`);
+          showToast(`${config.label} added to the existing family record.${mediaLinkedText(mediaNames)}`);
           return true;
         }
       } else {
@@ -2708,7 +3295,7 @@
     }
     refreshAfterGedcomMutation(pending.personId);
     fields.dialog.close();
-    showToast(deleteEvent ? `${config.label} removed from the family record.` : pending.familyId ? `${config.label} updated.` : `${config.label} added.`);
+    showToast(`${deleteEvent ? `${config.label} removed from the family record.` : pending.familyId ? `${config.label} updated.` : `${config.label} added.`}${mediaLinkedText(mediaNames)}`);
     return true;
   }
 
@@ -2765,7 +3352,7 @@
     if (value) lines.splice(insertAt < 0 ? lifeEventBlockEnd(lines, start) : insertAt, 0, `2 NOTE ${value}`);
   }
 
-  function saveLifeEvent(deleteEvent = false) {
+  function saveLifeEvent(deleteEvent = false, mediaNames = []) {
     const pending = state.pendingLifeEvent;
     const fields = lifeEventFields();
     const personRecord = state.gedcomRecords.find((record) => record.tag === 'INDI' && record.xref === pending?.personId);
@@ -2775,7 +3362,8 @@
     const config = pending.ordinal === null
       ? lifeEventTypes.find((entry) => entry.key === fields.type.value) || lifeEventTypes[0]
       : pending.config;
-    if (config.family) return saveMarriage(deleteEvent, config);
+    if (deleteEvent) mediaNames = [];
+    if (config.family) return saveMarriage(deleteEvent, config, mediaNames);
     const date = clean(fields.date.value);
     const place = clean(fields.place.value);
     const description = clean(fields.desc.value);
@@ -2795,7 +3383,7 @@
       if (date) eventLines.push(`2 DATE ${date}`);
       if (place) eventLines.push(`2 PLAC ${place}`);
       if (config.mode === 'note' && description) eventLines.push(`2 NOTE ${description}`);
-      lines.push(...eventLines);
+      lines.push(...eventLines, ...eventMediaLines(mediaNames));
     } else {
       if (config.custom && !customType) return showError('Enter a name for this event, such as Census or Probate.');
       const start = findLifeEventStart(lines, pending.ordinal);
@@ -2809,11 +3397,12 @@
       if (date !== original.date) setLifeEventSubfield(lines, start, 'DATE', date);
       if (place !== original.place) setLifeEventSubfield(lines, start, 'PLAC', place);
       if (config.mode === 'note' && description !== original.desc) setLifeEventNote(lines, start, description);
+      lines.splice(lifeEventBlockEnd(lines, start), 0, ...eventMediaLines(mediaNames));
     }
     personRecord.lines = lines;
     refreshAfterGedcomMutation(pending.personId);
     fields.dialog.close();
-    showToast(deleteEvent ? 'Life event deleted.' : pending.ordinal === null ? 'Life event added.' : 'Life event updated.');
+    showToast(`${deleteEvent ? 'Life event deleted.' : pending.ordinal === null ? 'Life event added.' : 'Life event updated.'}${mediaLinkedText(mediaNames)}`);
     return true;
   }
 
@@ -3515,12 +4104,17 @@
       printSection('person');
       return;
     }
+    if (event.target.closest('button[data-change-card-image]')) {
+      showCardImageChoices();
+      return;
+    }
     const editButton = event.target.closest('button[data-add-life-event]');
     if (editButton) {
       const person = state.people.get(editButton.dataset.addLifeEvent);
       if (person) openLifeEventEditor(person, null);
       return;
     }
+    if (event.target.closest('.event-media a, .event-media button')) return;
     const eventItem = event.target.closest('.event-item[data-event-ordinal], .event-item[data-family-id]');
     if (eventItem) {
       const person = state.people.get(state.selectedId);
@@ -3649,7 +4243,90 @@
   });
   document.querySelector('#lifeEventForm').addEventListener('submit', (event) => {
     event.preventDefault();
-    saveLifeEvent(false);
+    submitLifeEvent();
+  });
+  lifeEvent.mediaAdd.addEventListener('click', () => lifeEvent.mediaInput.click());
+  document.querySelector('#eventMediaUnlink').addEventListener('click', () => {
+    const pending = pendingEventMediaDelete;
+    document.querySelector('#eventMediaRemoveDialog').close();
+    if (!pending || pending.eventState !== state.pendingLifeEvent) return;
+    const message = unlinkEventMedia(pending.path)
+      ? `"${pending.name}" was delinked from this event. The file is still in the media folder.`
+      : `"${pending.name}" could not be delinked. The event may have changed; close and reopen it.`;
+    setLifeEventMediaNotice(message);
+    showToast(message);
+    lifeEvent.mediaAdd.focus();
+  });
+  document.querySelector('#eventMediaDeleteFile').addEventListener('click', () => {
+    const pending = pendingEventMediaDelete;
+    document.querySelector('#eventMediaRemoveDialog').close();
+    if (!pending || pending.eventState !== state.pendingLifeEvent) return;
+    const file = resolveMediaFile(pending.path);
+    const usage = file ? mediaFileUsage(file) : { people: 0, familyEvents: 0 };
+    const linkedTo = [
+      usage.people && `${usage.people} ${usage.people === 1 ? 'person' : 'people'}`,
+      usage.familyEvents && `${usage.familyEvents} family event${usage.familyEvents === 1 ? '' : 's'}`
+    ].filter(Boolean).join(' and ');
+    document.querySelector('#eventMediaDeleteConfirmName').textContent = pending.name;
+    document.querySelector('#eventMediaDeleteConfirmText').textContent =
+      `This file will be deleted from the media folder and cannot be recovered from Kinship Atlas.${linkedTo ? ` It is linked to ${linkedTo} in this tree; all of those links will be removed.` : ''}`;
+    document.querySelector('#eventMediaDeleteConfirmDialog').showModal();
+    document.querySelector('#eventMediaDeleteConfirmDialog .dialog-button-quiet').focus();
+  });
+  document.querySelector('#confirmEventMediaDelete').addEventListener('click', async () => {
+    const pending = pendingEventMediaDelete;
+    const confirmButton = document.querySelector('#confirmEventMediaDelete');
+    if (!pending || pending.eventState !== state.pendingLifeEvent || confirmButton.disabled) return;
+    confirmButton.disabled = true;
+    try {
+      const result = await deleteMediaFileEverywhere(pending.path, pending.eventState.personId);
+      if (state.pendingLifeEvent === pending.eventState) pending.eventState.existingMedia = currentPendingEventMedia(pending.eventState);
+      const message = `"${result.name}" was deleted from the media folder and ${result.removedLinks} link${result.removedLinks === 1 ? ' was' : 's were'} removed.`;
+      setLifeEventMediaNotice(message);
+      showToast(message);
+    } catch (error) {
+      const message = `"${pending.name}" could not be deleted. ${error?.message || ''}`.trim();
+      setLifeEventMediaNotice(message);
+      showToast(message);
+    } finally {
+      confirmButton.disabled = false;
+      pendingEventMediaDelete = null;
+      document.querySelector('#eventMediaDeleteConfirmDialog').close();
+      if (lifeEvent.dialog.open) lifeEvent.mediaAdd.focus();
+    }
+  });
+  // The close event is queued, so when "Delete the file permanently" was chosen the confirm prompt is already open.
+  for (const id of ['eventMediaRemoveDialog', 'eventMediaDeleteConfirmDialog']) {
+    const promptDialog = document.querySelector(`#${id}`);
+    // Handled here because Chrome can otherwise close the life event dialog underneath, or neither.
+    promptDialog.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!document.querySelector('#confirmEventMediaDelete').disabled) promptDialog.close();
+    });
+  }
+  document.querySelector('#eventMediaRemoveDialog').addEventListener('close', () => {
+    if (!document.querySelector('#eventMediaDeleteConfirmDialog').open) pendingEventMediaDelete = null;
+  });
+  document.querySelector('#eventMediaDeleteConfirmDialog').addEventListener('close', () => {
+    if (!document.querySelector('#confirmEventMediaDelete').disabled) pendingEventMediaDelete = null;
+  });
+  lifeEvent.mediaInput.addEventListener('change', () => {
+    addLifeEventMediaFiles([...(lifeEvent.mediaInput.files || [])]);
+    lifeEvent.mediaInput.value = '';
+  });
+  lifeEvent.mediaList.addEventListener('click', (event) => {
+    const deleteButton = event.target.closest('button[data-delete-event-media]');
+    if (deleteButton && state.pendingLifeEvent) {
+      openEventMediaRemoveDialog(state.pendingLifeEvent.existingMedia[Number(deleteButton.dataset.deleteEventMedia)]);
+      return;
+    }
+    const removeButton = event.target.closest('button[data-remove-new-media]');
+    if (!removeButton || !state.pendingLifeEvent) return;
+    state.pendingLifeEvent.newMedia.splice(Number(removeButton.dataset.removeNewMedia), 1);
+    renderLifeEventMedia();
+    lifeEvent.mediaAdd.focus();
   });
   lifeEvent.remove.addEventListener('click', () => {
     if (lifeEvent.remove.dataset.confirm !== 'true') {
@@ -3661,10 +4338,14 @@
   });
   lifeEvent.dialog.addEventListener('close', () => {
     state.pendingLifeEvent = null;
+    pendingEventMediaDelete = null;
+    releaseLifeEventPreviewUrls();
+    lifeEvent.mediaList.replaceChildren();
     delete lifeEvent.remove.dataset.confirm;
   });
   elements.details.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
+    if (event.target.closest?.('.event-media a, .event-media button')) return;
     const eventItem = event.target.closest?.('.event-item[data-event-ordinal], .event-item[data-family-id]');
     if (!eventItem) return;
     event.preventDefault();

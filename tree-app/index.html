@@ -247,7 +247,16 @@
         <label class="new-gedcom-field" for="lifeEventPlace">Place<input id="lifeEventPlace" type="text" maxlength="200" autocomplete="off"></label>
         <label id="lifeEventMarriageTypeField" class="new-gedcom-field life-event-wide" for="lifeEventMarriageType" hidden>Marriage type<input id="lifeEventMarriageType" type="text" maxlength="60" list="lifeEventMarriageTypes" placeholder="e.g. Religious, Civil" autocomplete="off"><datalist id="lifeEventMarriageTypes"><option value="Religious"><option value="Civil"><option value="Common law"><option value="Registered partnership"><option value="Same-sex marriage"></datalist></label>
         <label id="lifeEventDescriptionField" class="new-gedcom-field life-event-wide" for="lifeEventDescription"><span id="lifeEventDescriptionLabel">Notes</span><input id="lifeEventDescription" type="text" maxlength="250" autocomplete="off"></label>
-      </div>
+                <div id="lifeEventMediaField" class="life-event-media life-event-wide">
+                  <div class="life-event-media-head">
+                    <span id="lifeEventMediaHeading">Media</span>
+                    <button id="lifeEventMediaAdd" class="dialog-button dialog-button-quiet life-event-media-add" type="button">Upload photo or PDF</button>
+                    <input id="lifeEventMediaInput" type="file" accept="image/*,.pdf,application/pdf" multiple tabindex="-1" aria-hidden="true">
+                  </div>
+                  <div id="lifeEventMediaList" class="life-event-media-list" aria-labelledby="lifeEventMediaHeading"></div>
+                  <p id="lifeEventMediaHint" class="life-event-media-hint" hidden></p>
+                </div>
+              </div>
       <p id="lifeEventError" class="form-error" role="alert" hidden></p>
       <div class="dialog-actions">
         <button class="dialog-button dialog-button-primary" type="submit">Save</button>
@@ -255,6 +264,36 @@
         <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="lifeEventDialog">Cancel</button>
       </div>
     </form>
+  </dialog>
+  <dialog id="eventMediaRemoveDialog" class="app-dialog" aria-labelledby="eventMediaRemoveTitle">
+    <section class="dialog-panel">
+      <h2 id="eventMediaRemoveTitle">Remove media from this event?</h2>
+      <p id="eventMediaRemoveName" class="media-delete-name"></p>
+      <div class="media-delete-options">
+        <button id="eventMediaUnlink" class="media-delete-option" type="button">
+          <strong>Delink from this event only</strong>
+          <span>The link is removed from this life event. The file stays in the media folder and other links to it are kept.</span>
+        </button>
+        <button id="eventMediaDeleteFile" class="media-delete-option media-delete-option-danger" type="button">
+          <strong>Delete the file permanently…</strong>
+          <span id="eventMediaDeleteFileDetail">Deletes the image or PDF from the media folder and removes every link to it in this tree.</span>
+        </button>
+      </div>
+      <div class="dialog-actions">
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="eventMediaRemoveDialog">Cancel</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="eventMediaDeleteConfirmDialog" class="app-dialog" aria-labelledby="eventMediaDeleteConfirmTitle">
+    <section class="dialog-panel">
+      <h2 id="eventMediaDeleteConfirmTitle">Permanently delete this file?</h2>
+      <p id="eventMediaDeleteConfirmName" class="media-delete-name"></p>
+      <p id="eventMediaDeleteConfirmText" class="media-delete-warning"></p>
+      <div class="dialog-actions">
+        <button id="confirmEventMediaDelete" class="dialog-button dialog-button-danger" type="button">Delete permanently</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="eventMediaDeleteConfirmDialog">Cancel</button>
+      </div>
+    </section>
   </dialog>
   <dialog id="personSummaryDialog" class="app-dialog" aria-labelledby="personSummaryTitle">
     <form id="personSummaryForm" class="dialog-panel new-gedcom-panel">
