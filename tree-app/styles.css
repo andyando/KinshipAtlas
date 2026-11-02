@@ -317,13 +317,6 @@ button { color: inherit; }
 .wikitree-query dd.is-missing { color: #8a9791; font-style: italic; }
 .wikitree-status { margin: 12px 0 0; color: #42584f; font-size: 11px; line-height: 1.45; }
 .wikitree-results { margin: 12px 0 0; }
-.wikitree-results-heading { margin: 0 0 8px; color: #53695f; font-size: 11px; font-weight: 700; }
-.wikitree-match-list { max-height: 36vh; display: grid; gap: 6px; margin: 0; padding: 0; overflow: auto; list-style: none; }
-.wikitree-match { display: grid; gap: 2px; padding: 8px 9px; border: 1px solid #d8e2dc; border-radius: 4px; color: #314f44; background: #fff; text-decoration: none; }
-.wikitree-match:hover { border-color: #8fb7a5; background: #f0f7f2; }
-.wikitree-match strong { font-size: 13px; font-weight: 700; }
-.wikitree-match-id { color: #6d8078; font-family: Consolas, monospace; font-size: 10px; }
-.wikitree-match-life { color: #76857f; font-size: 11px; line-height: 1.4; }
 .wikitree-site-link { display: inline-block; margin-top: 9px; color: #2f786a; font-size: 11px; font-weight: 700; }
 .research-consent { display: flex; align-items: flex-start; gap: 8px; margin-top: 13px; color: #42584f; font-size: 11px; line-height: 1.45; }
 .research-consent input { flex: 0 0 auto; margin: 1px 0 0; accent-color: var(--green); }

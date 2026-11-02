@@ -109,7 +109,6 @@
     printFooter: document.querySelector('#printFooter')
   };
   let toastTimer = 0;
-  let wikiTreeSearchAbort = null;
 
   function splitXref(value) {
     return value ? value.replace(/^@|@$/g, '') : '';
@@ -678,21 +677,12 @@
     const firstName = fullName.toLocaleLowerCase().endsWith(` ${surname.toLocaleLowerCase()}`)
       ? fullName.slice(0, -(surname.length + 1)).trim()
       : fullName;
-    const parents = parentsOf(person.id).map((id) => state.people.get(id));
-    const father = parents.find((parent) => parent.sex === 'M');
-    const mother = parents.find((parent) => parent.sex === 'F');
     return {
       firstName: firstName.slice(0, 120),
       lastName: surname.slice(0, 120),
       birthYear: yearFrom(birth?.date),
       deathYear: yearFrom(death?.date),
-      birthCountry: countryFlagForPlace(birth?.place)?.country || '',
-      deathCountry: countryFlagForPlace(death?.place)?.country || '',
-      sex: person.sex === 'M' ? 'Male' : person.sex === 'F' ? 'Female' : '',
-      fatherFirstName: (father?.givenName || '').trim().slice(0, 120),
-      fatherLastName: (father?.surname || '').trim().slice(0, 120),
-      motherFirstName: (mother?.givenName || '').trim().slice(0, 120),
-      motherLastName: (mother?.maidenName || mother?.surname || '').trim().slice(0, 120)
+      birthCountry: countryFlagForPlace(birth?.place)?.country || ''
     };
   }
 
@@ -702,13 +692,7 @@
       ['Last name', query.lastName],
       ['Year born', query.birthYear],
       ['Year died', query.deathYear],
-      ['Country born', query.birthCountry],
-      ['Country died', query.deathCountry],
-      ['Sex at birth', query.sex],
-      ['Father first name', query.fatherFirstName],
-      ['Father last name', query.fatherLastName],
-      ['Mother first name', query.motherFirstName],
-      ['Mother last name', query.motherLastName]
+      ['Country born', query.birthCountry]
     ];
     elements.wikiTreeQueryPreview.replaceChildren();
     for (const [label, value] of fields) {
@@ -724,22 +708,6 @@
   function setWikiTreeSearchStatus(message) {
     elements.wikiTreeSearchStatus.textContent = message;
     elements.wikiTreeSearchStatus.hidden = !message;
-  }
-
-  function wikiTreeSearchParameters(query) {
-    const parameters = new URLSearchParams();
-    if (query.firstName) parameters.set('FirstName', query.firstName);
-    if (query.lastName) parameters.set('LastName', query.lastName);
-    if (query.birthYear) parameters.set('BirthDate', query.birthYear);
-    if (query.deathYear) parameters.set('DeathDate', query.deathYear);
-    if (query.birthCountry) parameters.set('BirthLocation', query.birthCountry);
-    if (query.deathCountry) parameters.set('DeathLocation', query.deathCountry);
-    if (query.sex) parameters.set('Gender', query.sex);
-    if (query.fatherFirstName) parameters.set('FatherFirstName', query.fatherFirstName);
-    if (query.fatherLastName) parameters.set('FatherLastName', query.fatherLastName);
-    if (query.motherFirstName) parameters.set('MotherFirstName', query.motherFirstName);
-    if (query.motherLastName) parameters.set('MotherLastName', query.motherLastName);
-    return parameters;
   }
 
   function submitWikiTreeSearch(query) {
@@ -762,13 +730,7 @@
       ['wpLast', query.lastName],
       ['wpBirthDate', query.birthYear],
       ['wpDeathDate', query.deathYear],
-      ['birth_location', query.birthCountry],
-      ['death_location', query.deathCountry],
-      ['father_first_name', query.fatherFirstName],
-      ['father_last_name', query.fatherLastName],
-      ['mother_first_name', query.motherFirstName],
-      ['mother_last_name', query.motherLastName],
-      ['gender', query.sex]
+      ['birth_location', query.birthCountry]
     ];
     for (const [name, value] of fields) {
       if (!value) continue;
@@ -798,145 +760,16 @@
     elements.wikiTreeResults.append(link);
   }
 
-  async function readWikiTreeResponse(response) {
-    const maximumResponseLength = 256 * 1024;
-    if (!response.body?.getReader) {
-      const text = await response.text();
-      if (text.length > maximumResponseLength) throw new Error('WikiTree returned an unexpectedly large response.');
-      return JSON.parse(text);
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let text = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      text += decoder.decode(value, { stream: true });
-      if (text.length > maximumResponseLength) {
-        await reader.cancel();
-        throw new Error('WikiTree returned an unexpectedly large response.');
-      }
-    }
-    text += decoder.decode();
-    return JSON.parse(text);
-  }
-
-  function extractWikiTreePeople(payload) {
-    const entries = Array.isArray(payload) ? payload : [payload];
-    const failures = entries.filter((entry) => entry?.status && entry.status !== 'OK');
-    if (failures.length) throw new Error('WikiTree reported that the search could not be completed.');
-    const hasPeopleList = entries.some((entry) => Array.isArray(entry?.people));
-    if (!hasPeopleList) throw new Error('WikiTree returned an unexpected response.');
-    return entries.flatMap((entry) => Array.isArray(entry.people) ? entry.people : []);
-  }
-
-  function renderWikiTreeResults(people, query) {
-    const deceasedMatches = people
-      .filter((person) => typeof person?.Name === 'string' && person.Name.trim() && (person.DeathDate || person.DeathYear))
-      .slice(0, 20);
+  function searchWikiTree() {
+    const person = state.people.get(state.pendingResearchPersonId);
+    if (!elements.researchConsent.checked || !isRecordedDeceased(person)) return;
+    const query = buildWikiTreeQuery(person);
+    // WikiTree's API blocks in-page requests from other sites (CORS), so open its search page in a new tab instead.
+    submitWikiTreeSearch(query);
     elements.wikiTreeResults.replaceChildren();
     elements.wikiTreeResults.hidden = false;
-    const heading = document.createElement('p');
-    heading.className = 'wikitree-results-heading';
-    heading.textContent = deceasedMatches.length
-      ? `${deceasedMatches.length} deceased ${deceasedMatches.length === 1 ? 'match' : 'matches'}`
-      : 'No deceased matches were returned.';
-    elements.wikiTreeResults.append(heading);
-
-    if (deceasedMatches.length) {
-      const list = document.createElement('ul');
-      list.className = 'wikitree-match-list';
-      for (const person of deceasedMatches) {
-        const item = document.createElement('li');
-        const link = document.createElement('a');
-        link.className = 'wikitree-match';
-        link.href = `https://www.wikitree.com/wiki/${encodeURIComponent(person.Name)}`;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        const name = document.createElement('strong');
-        name.textContent = person.FirstName && person.LastName
-          ? `${person.FirstName} ${person.LastName}`
-          : person.Name;
-        const profileId = document.createElement('span');
-        profileId.className = 'wikitree-match-id';
-        profileId.textContent = person.Name;
-        const life = document.createElement('span');
-        life.className = 'wikitree-match-life';
-        life.textContent = [
-          person.BirthDate || person.BirthYear ? `b. ${person.BirthDate || person.BirthYear}` : '',
-          person.DeathDate || person.DeathYear ? `d. ${person.DeathDate || person.DeathYear}` : ''
-        ].filter(Boolean).join(' · ');
-        link.append(name, profileId, life);
-        item.append(link);
-        list.append(item);
-      }
-      elements.wikiTreeResults.append(list);
-    }
     renderWikiTreeFallback(query);
-  }
-
-  async function searchWikiTree() {
-    const person = state.people.get(state.pendingResearchPersonId);
-    if (!elements.researchConsent.checked || !isRecordedDeceased(person) || wikiTreeSearchAbort) return;
-
-    const query = buildWikiTreeQuery(person);
-    if (window.location.protocol === 'file:') {
-      elements.wikiTreeResults.replaceChildren();
-      elements.wikiTreeResults.hidden = false;
-      renderWikiTreeFallback(query);
-      setWikiTreeSearchStatus('Opening WikiTree in a new tab. If it does not open, use the link below.');
-      submitWikiTreeSearch(query);
-      return;
-    }
-
-    const controller = new AbortController();
-    let timedOut = false;
-    wikiTreeSearchAbort = controller;
-    elements.confirmWikiTreeSearch.disabled = true;
-    elements.wikiTreeResults.replaceChildren();
-    elements.wikiTreeResults.hidden = true;
-    setWikiTreeSearchStatus('Searching WikiTree…');
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, 15000);
-
-    try {
-      const parameters = new URLSearchParams({
-        action: 'searchPerson',
-        Query: wikiTreeSearchParameters(query).toString(),
-        Fields: 'Id,Name,FirstName,LastName,BirthDate,DeathDate',
-        Limit: '20'
-      });
-      const response = await fetch('https://api.wikitree.com/api.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-        body: parameters,
-        credentials: 'omit',
-        referrerPolicy: 'no-referrer',
-        signal: controller.signal
-      });
-      if (!response.ok) throw new Error(`WikiTree returned HTTP ${response.status}.`);
-      const payload = await readWikiTreeResponse(response);
-      if (wikiTreeSearchAbort !== controller) return;
-      renderWikiTreeResults(extractWikiTreePeople(payload), query);
-      setWikiTreeSearchStatus('');
-    } catch (error) {
-      if (wikiTreeSearchAbort !== controller || (controller.signal.aborted && !timedOut)) return;
-      setWikiTreeSearchStatus(timedOut
-        ? 'WikiTree did not respond in time. You can open the same search directly on WikiTree.'
-        : `The WikiTree API could not complete this search${error instanceof Error ? `: ${error.message}` : '.'}`);
-      elements.wikiTreeResults.replaceChildren();
-      elements.wikiTreeResults.hidden = false;
-      renderWikiTreeFallback(query);
-    } finally {
-      clearTimeout(timeout);
-      if (wikiTreeSearchAbort === controller) {
-        wikiTreeSearchAbort = null;
-        elements.confirmWikiTreeSearch.disabled = !elements.researchConsent.checked;
-      }
-    }
+    setWikiTreeSearchStatus('Opened the WikiTree search in a new tab. If it did not open, use the link below.');
   }
 
   function countryFlagForPlace(place) {
@@ -3732,8 +3565,6 @@
     if (researchButton) {
       const person = state.people.get(researchButton.dataset.wikitreeSearch);
       if (!isRecordedDeceased(person)) return;
-      wikiTreeSearchAbort?.abort();
-      wikiTreeSearchAbort = null;
       state.pendingResearchPersonId = person.id;
       renderWikiTreeQueryPreview(buildWikiTreeQuery(person));
       elements.wikiTreeSearchStatus.hidden = true;
@@ -3874,12 +3705,10 @@
     state.pendingRelationship = null;
   });
   elements.researchConsent.addEventListener('change', () => {
-    elements.confirmWikiTreeSearch.disabled = !elements.researchConsent.checked || Boolean(wikiTreeSearchAbort);
+    elements.confirmWikiTreeSearch.disabled = !elements.researchConsent.checked;
   });
   elements.confirmWikiTreeSearch.addEventListener('click', searchWikiTree);
   elements.researchDialog.addEventListener('close', () => {
-    wikiTreeSearchAbort?.abort();
-    wikiTreeSearchAbort = null;
     state.pendingResearchPersonId = null;
   });
   elements.back.addEventListener('click', () => {
