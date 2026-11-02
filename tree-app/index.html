@@ -21,6 +21,7 @@
         <span><span class="brand-kicker">LOCAL FAMILY ARCHIVE</span><strong>Kinship Atlas</strong></span>
       </a>
       <button id="mapViewButton" class="button button-quiet" type="button" aria-pressed="false" disabled>Map View</button>
+      <button id="reportsButton" class="button button-quiet" type="button" aria-pressed="false" disabled>Reports</button>
     </div>
     <div class="topbar-meta"><span class="privacy-indicator"><span class="privacy-dot"></span> ON THIS DEVICE</span><span class="topbar-divider"></span><span id="treeLabel">No tree loaded</span></div>
     <div class="topbar-actions">
@@ -47,7 +48,7 @@
           <button id="mediaButton" class="menu-item media-button" type="button" role="menuitem" disabled>Select Media Folder</button>
           <input id="mediaInput" type="file" webkitdirectory directory multiple>
           <input id="mediaUploadInput" type="file" accept="image/*,.pdf,application/pdf" multiple>
-          <button id="defaultsButton" class="menu-item" type="button" role="menuitem" title="Choose the GEDCOM file and media folder that open automatically">Set Default</button>
+          <button id="defaultsButton" class="menu-item" type="button" role="menuitem" title="Choose the GEDCOM file and media folder that open automatically">Update defaults</button>
           <button id="clearButton" class="menu-item" type="button" role="menuitem" disabled>Start Again</button>
         </div>
       </div>
@@ -141,6 +142,19 @@
       </div>
     </aside>
   </div>
+  <section id="reportsView" class="reports-view" aria-labelledby="reportsTitle" hidden>
+    <div class="reports-heading">
+      <div>
+        <div class="eyebrow">REPORTS <span class="eyebrow-rule"></span><span id="reportsFileName"></span></div>
+        <h1 id="reportsTitle">Tree statistics</h1>
+        <p id="reportsSubtitle">A summary of the people recorded in this GEDCOM.</p>
+      </div>
+      <button id="printReportsButton" class="icon-button" type="button" title="Print reports (A4)" aria-label="Print reports">
+        <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v7H6z"/></svg>
+      </button>
+    </div>
+    <div id="reportsContent" class="reports-content"></div>
+  </section>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <div id="printFooter" class="print-footer" aria-hidden="true"></div>
   <dialog id="importGedcomDialog" class="app-dialog" aria-labelledby="importGedcomTitle">

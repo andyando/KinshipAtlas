@@ -35,7 +35,7 @@
     ['turkiye', 'TR', 'Turkiye'], ['turkey', 'TR', 'Turkey']
   ].sort((a, b) => b[0].length - a[0].length);
   const state = {
-    mapMode: false, mapStats: null, directoryMatches: [],
+    mapMode: false, mapStats: null, directoryMatches: [], reportsMode: false,
     people: new Map(), families: new Map(), sources: new Map(), selectedId: null,
     fileName: '', searchText: '', history: [], historyIndex: -1, zoom: 1,
     mediaIndex: null, mediaUrls: new Map(), mediaRelativePaths: new WeakMap(), mediaDirectoryHandle: null,
@@ -88,6 +88,8 @@
     newGedcomDialog: document.querySelector('#newGedcomDialog'),
     createGedcomForm: document.querySelector('#createGedcomForm'),
     clear: document.querySelector('#clearButton'), mapViewButton: document.querySelector('#mapViewButton'),
+    reportsButton: document.querySelector('#reportsButton'), reportsView: document.querySelector('#reportsView'),
+    reportsContent: document.querySelector('#reportsContent'), appShell: document.querySelector('.app-shell'),
     treeLabel: document.querySelector('#treeLabel'), peopleCount: document.querySelector('#peopleCount'),
     visibleCount: document.querySelector('#visibleCount'), clearSurnameFilter: document.querySelector('#clearSurnameFilter'),
     search: document.querySelector('#peopleSearch'), peopleList: document.querySelector('#peopleList'),
@@ -1035,8 +1037,8 @@
   function syncMediaButton() {
     const hasFolder = Boolean(state.mediaDirectoryHandle || state.rememberedMediaDirectoryHandle || state.mediaFolderPicked);
     const helperDefault = !hasFolder && state.mediaHelper;
-    elements.mediaButton.textContent = helperDefault ? `Default media: ${state.mediaHelper.folder}` : hasFolder ? 'Update Media Folder' : 'Select Media Folder';
-    elements.mediaButton.title = helperDefault ? 'Photos and PDFs are saved to this folder inside Primary Media Library. Click to choose a different folder.' : '';
+    elements.mediaButton.textContent = helperDefault || hasFolder ? 'Change media folder' : 'Select Media Folder';
+    elements.mediaButton.title = helperDefault ? `Photos and PDFs are saved to "${state.mediaHelper.folder}" inside Primary Media Library. Click to choose a different folder.` : '';
     elements.mediaButton.classList.toggle('media-button-needed', !hasFolder && !state.mediaHelper);
   }
 
@@ -1515,6 +1517,7 @@
     elements.clear.disabled = false;
     document.querySelector('#importGedcomButton').disabled = false;
     elements.mapViewButton.disabled = false;
+    elements.reportsButton.disabled = false;
     elements.printMapButton.disabled = false;
     document.querySelector('#openGedcomLabel').hidden = true;
     state.zoom = 1;
@@ -1795,8 +1798,15 @@
     }
     const years = document.createElement('span');
     years.className = 'card-years';
-    years.textContent = [lifespan(person), birthPlace].filter(Boolean).join(' · ');
+    years.textContent = lifespan(person);
     button.append(relationLabel, nameLine, years);
+    if (birthPlace) {
+      const place = document.createElement('span');
+      place.className = 'card-place';
+      place.textContent = birthPlace;
+      place.title = `Born in ${birthPlace}`;
+      button.append(place);
+    }
     node.append(button);
     for (const [direction, enabled] of [['up', canShiftUp], ['down', canShiftDown]]) {
       if (!enabled) continue;
@@ -2805,6 +2815,7 @@
   }
 
   function render() {
+    if (state.reportsMode) renderReports();
     const person = state.people.get(state.selectedId);
     if (!person) return;
     elements.title.textContent = person.name;
@@ -2860,6 +2871,7 @@
   const buttonIcons = {
     map: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.4 4 5.6 4 9s-1.4 6.6-4 9c-2.6-2.4-4-5.6-4-9s1.4-6.6 4-9z"/>',
     tree: '<rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/>',
+    chart: '<path d="M3 21h18"/><rect x="5" y="11" width="3" height="7" rx=".5"/><rect x="10.5" y="5" width="3" height="13" rx=".5"/><rect x="16" y="8" width="3" height="10" rx=".5"/>',
     restart: '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>',
     import: '<path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 17v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>',
     save: '<path d="M5 3h11l5 5v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M7 3v5h8V3"/><rect x="7" y="13" width="10" height="8"/>',
@@ -2902,6 +2914,282 @@
       map?.hide();
       if (state.people.size) renderGraph();
     }
+  }
+
+  function setReportsMode(on) {
+    if (on && !state.people.size) return;
+    state.reportsMode = on;
+    elements.reportsView.hidden = !on;
+    elements.appShell.hidden = on;
+    setButtonContent(elements.reportsButton, on ? 'tree' : 'chart', on ? 'Back to tree' : 'Reports');
+    elements.reportsButton.setAttribute('aria-pressed', String(on));
+    if (on) {
+      renderReports();
+      elements.reportsView.scrollTop = 0;
+    }
+  }
+
+  const reportMonthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+
+  // Sorts on the first date in the value; qualifiers such as ABT/BEF/BET are compared by their stated date.
+  function reportDateKey(date) {
+    const text = String(date || '').toUpperCase();
+    const match = text.match(/(?:(\d{1,2})\s+)?(?:(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*\.?\s+)?(?<!\d)(\d{3,4})(?!\d)/);
+    if (!match) return null;
+    const month = match[2] ? reportMonthNames.indexOf(match[2]) + 1 : 0;
+    const day = month && match[1] ? Number(match[1]) : 0;
+    return { key: Number(match[3]) * 10000 + month * 100 + day, year: Number(match[3]), approximate: /\b(ABT|ABOUT|BEF|BEFORE|AFT|AFTER|EST|CAL|BET|FROM|TO|C|CIRCA)\b/.test(text) };
+  }
+
+  function buildReportStats() {
+    const people = [...state.people.values()];
+    const stats = {
+      total: people.length,
+      men: people.filter((person) => person.sex === 'M').length,
+      women: people.filter((person) => person.sex === 'F').length,
+      withMedia: people.filter((person) => person.mediaPaths.length).length,
+      mediaFiles: new Set(people.flatMap((person) => person.mediaPaths)).size,
+      countries: new Map(), unmatchedPlaces: new Set(), births: [], decades: new Map()
+    };
+    stats.unknownSex = stats.total - stats.men - stats.women;
+    stats.withoutMedia = stats.total - stats.withMedia;
+    const addPlace = (place, personIds) => {
+      if (!place) return;
+      const country = countryFlagForPlace(place)?.country;
+      if (!country) { stats.unmatchedPlaces.add(place.trim().toLocaleLowerCase()); return; }
+      if (!stats.countries.has(country)) stats.countries.set(country, new Set());
+      personIds.forEach((id) => stats.countries.get(country).add(id));
+    };
+    for (const person of people) {
+      for (const event of person.events) addPlace(event.place, [person.id]);
+      const birth = person.events.find((event) => event.type === 'BIRT');
+      const parsed = reportDateKey(birth?.date);
+      if (parsed) {
+        stats.births.push({ person, birth, ...parsed });
+        const decade = Math.floor(parsed.year / 10) * 10;
+        stats.decades.set(decade, (stats.decades.get(decade) || 0) + 1);
+      }
+    }
+    for (const family of state.families.values()) {
+      const spouses = [family.husbandId, family.wifeId].filter((id) => state.people.has(id));
+      for (const event of [family.marriage, family.divorce]) if (event) addPlace(event.place, spouses);
+    }
+    stats.births.sort((a, b) => a.key - b.key || a.person.name.localeCompare(b.person.name));
+    return stats;
+  }
+
+  function reportElement(tag, className, text) {
+    const element = document.createElement(tag);
+    if (className) element.className = className;
+    if (text !== undefined) element.textContent = text;
+    return element;
+  }
+
+  function reportPercent(value, total) {
+    return total ? `${Math.round((value / total) * 100)}%` : '0%';
+  }
+
+  function reportStatCard(label, value, detail, accent) {
+    const card = reportElement('div', 'report-stat');
+    if (accent) card.style.setProperty('--report-accent', accent);
+    card.append(reportElement('div', 'report-stat-label', label), reportElement('div', 'report-stat-value', value));
+    if (detail) card.append(reportElement('div', 'report-stat-detail', detail));
+    return card;
+  }
+
+  function reportPanel(title, wide = false) {
+    const panel = reportElement('section', `report-panel${wide ? ' is-wide' : ''}`);
+    panel.append(reportElement('h2', '', title));
+    return panel;
+  }
+
+  function reportDonut(segments, caption) {
+    const total = segments.reduce((sum, segment) => sum + segment.value, 0);
+    const wrap = reportElement('div', 'report-donut');
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', '0 0 120 120');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', segments.map((segment) => `${segment.label}: ${segment.value}`).join(', '));
+    const radius = 46;
+    const circumference = 2 * Math.PI * radius;
+    const track = document.createElementNS(ns, 'circle');
+    Object.entries({ cx: 60, cy: 60, r: radius, fill: 'none', stroke: '#eef3f0', 'stroke-width': 16 }).forEach(([key, value]) => track.setAttribute(key, value));
+    svg.append(track);
+    let offset = 0;
+    for (const segment of segments) {
+      if (!segment.value || !total) continue;
+      const length = (segment.value / total) * circumference;
+      const arc = document.createElementNS(ns, 'circle');
+      Object.entries({ cx: 60, cy: 60, r: radius, fill: 'none', stroke: segment.color, 'stroke-width': 16, 'stroke-dasharray': `${length} ${circumference - length}`, 'stroke-dashoffset': String(-offset), transform: 'rotate(-90 60 60)' })
+        .forEach(([key, value]) => arc.setAttribute(key, value));
+      const title = document.createElementNS(ns, 'title');
+      title.textContent = `${segment.label}: ${segment.value.toLocaleString()} (${reportPercent(segment.value, total)})`;
+      arc.append(title);
+      svg.append(arc);
+      offset += length;
+    }
+    const totalText = document.createElementNS(ns, 'text');
+    Object.entries({ x: 60, y: 62, 'text-anchor': 'middle', class: 'report-donut-total' }).forEach(([key, value]) => totalText.setAttribute(key, value));
+    totalText.textContent = total.toLocaleString();
+    const captionText = document.createElementNS(ns, 'text');
+    Object.entries({ x: 60, y: 78, 'text-anchor': 'middle', class: 'report-donut-caption' }).forEach(([key, value]) => captionText.setAttribute(key, value));
+    captionText.textContent = caption;
+    svg.append(totalText, captionText);
+    const legend = reportElement('ul', 'report-legend');
+    for (const segment of segments) {
+      const item = document.createElement('li');
+      const swatch = reportElement('span', 'report-swatch');
+      swatch.style.background = segment.color;
+      const value = reportElement('span', 'report-legend-value', segment.value.toLocaleString());
+      value.append(' ', reportElement('small', '', reportPercent(segment.value, total)));
+      item.append(swatch, reportElement('span', '', segment.label), value);
+      legend.append(item);
+    }
+    wrap.append(svg, legend);
+    return wrap;
+  }
+
+  function reportPersonLink(person, className = 'report-person-link') {
+    const button = makeButton(person.name, className);
+    button.dataset.reportPerson = person.id;
+    button.title = `Open ${person.name}'s Person Record`;
+    return button;
+  }
+
+  function renderReports() {
+    if (!state.reportsMode) return;
+    const stats = buildReportStats();
+    document.querySelector('#reportsFileName').textContent = state.fileName;
+    document.querySelector('#reportsSubtitle').textContent = `A summary of the ${stats.total.toLocaleString()} people recorded in this GEDCOM.`;
+    const earliest = stats.births[0];
+
+    const cards = reportElement('div', 'report-stats');
+    cards.append(
+      reportStatCard('Total people', stats.total.toLocaleString(), `${state.families.size.toLocaleString()} family records`, 'var(--ink)'),
+      reportStatCard('Men', stats.men.toLocaleString(), `${reportPercent(stats.men, stats.total)} of people`, 'var(--blue)'),
+      reportStatCard('Women', stats.women.toLocaleString(), `${reportPercent(stats.women, stats.total)} of people`, 'var(--coral)'),
+      reportStatCard('Countries', stats.countries.size.toLocaleString(), 'Recognised in event places', 'var(--gold)'),
+      reportStatCard('With media', stats.withMedia.toLocaleString(), `${stats.mediaFiles.toLocaleString()} distinct media files`, 'var(--green)'),
+      reportStatCard('Without media', stats.withoutMedia.toLocaleString(), `${reportPercent(stats.withoutMedia, stats.total)} of people`, '#a3b3ab')
+    );
+
+    const charts = reportElement('div', 'report-charts');
+
+    const sexPanel = reportPanel('Men and women');
+    const sexSegments = [
+      { label: 'Men', value: stats.men, color: '#5a88a1' },
+      { label: 'Women', value: stats.women, color: '#c9694e' }
+    ];
+    if (stats.unknownSex) sexSegments.push({ label: 'Not recorded', value: stats.unknownSex, color: '#b8c4be' });
+    sexPanel.append(reportDonut(sexSegments, 'PEOPLE'));
+
+    const mediaPanel = reportPanel('Media coverage');
+    mediaPanel.append(reportDonut([
+      { label: 'People with media', value: stats.withMedia, color: '#2f786a' },
+      { label: 'People without media', value: stats.withoutMedia, color: '#d5dfda' }
+    ], 'PEOPLE'));
+    mediaPanel.append(reportElement('p', 'report-note', 'Counts photos and PDFs attached to the person or to any of their life events.'));
+
+    const earliestPanel = reportPanel('Earliest recorded birth');
+    if (earliest) {
+      earliestPanel.append(reportPersonLink(earliest.person, 'report-earliest-name'));
+      earliestPanel.append(reportElement('p', 'report-earliest-meta', [`Born ${earliest.birth.date}`, earliest.birth.place].filter(Boolean).join(' · ')));
+      const tied = stats.births.filter((entry) => entry.key === earliest.key).length;
+      if (tied > 1) earliestPanel.append(reportElement('p', 'report-note', `${tied} people share this earliest birth date.`));
+      const runners = stats.births.slice(1, 6);
+      if (runners.length) {
+        const list = reportElement('ol', 'report-runners');
+        list.start = 2;
+        for (const entry of runners) {
+          const item = document.createElement('li');
+          item.append(reportPersonLink(entry.person), document.createTextNode(' '), reportElement('span', 'report-runner-date', `· ${entry.birth.date}`));
+          list.append(item);
+        }
+        earliestPanel.append(list);
+      }
+      if (earliest.approximate) earliestPanel.append(reportElement('p', 'report-note', 'This date is approximate or a range, so it is compared using the first date it states.'));
+    } else {
+      earliestPanel.append(reportElement('p', 'report-empty', 'No birth dates are recorded in this tree.'));
+    }
+    const undated = stats.total - stats.births.length;
+    if (undated) earliestPanel.append(reportElement('p', 'report-note', `${undated.toLocaleString()} ${undated === 1 ? 'person has' : 'people have'} no birth year recorded and ${undated === 1 ? 'is' : 'are'} not included.`));
+
+    const birthsPanel = reportPanel('Births by decade');
+    if (stats.decades.size) {
+      const decades = [...stats.decades.keys()];
+      const first = Math.min(...decades);
+      const last = Math.max(...decades);
+      const peak = Math.max(...stats.decades.values());
+      const count = (last - first) / 10 + 1;
+      const labelEvery = Math.max(1, Math.ceil(count / 12));
+      const columns = reportElement('div', 'report-columns');
+      columns.setAttribute('role', 'img');
+      columns.setAttribute('aria-label', `Births by decade from the ${first}s to the ${last}s`);
+      for (let decade = first, index = 0; decade <= last; decade += 10, index += 1) {
+        const value = stats.decades.get(decade) || 0;
+        const column = reportElement('div', 'report-column');
+        column.title = `${decade}s: ${value.toLocaleString()} ${value === 1 ? 'birth' : 'births'}`;
+        const bar = reportElement('div', `report-column-bar${value ? ' has-value' : ''}`);
+        bar.style.height = `calc((100% - 18px) * ${value / peak})`;
+        column.append(bar, reportElement('div', 'report-column-label', index % labelEvery === 0 ? `${decade}s` : ''));
+        columns.append(column);
+      }
+      birthsPanel.append(columns);
+      const peakDecade = [...stats.decades.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0];
+      birthsPanel.append(reportElement('p', 'report-note', `${stats.births.length.toLocaleString()} people with a birth year, from the ${first}s to the ${last}s. Busiest decade: ${peakDecade[0]}s (${peakDecade[1].toLocaleString()}).`));
+    } else {
+      birthsPanel.append(reportElement('p', 'report-empty', 'No birth years are recorded in this tree.'));
+    }
+
+    const countryPanel = reportPanel('People by country', true);
+    const countryRows = [...stats.countries.entries()].map(([country, ids]) => [country, ids.size])
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    if (countryRows.length) {
+      const bars = reportElement('div', 'report-bars');
+      const top = countryRows[0][1];
+      countryRows.forEach(([country, value], index) => {
+        const row = reportElement('div', `report-bar-row${index >= 10 ? ' is-extra' : ''}`);
+        row.hidden = index >= 10;
+        row.title = `${country}: ${value.toLocaleString()} ${value === 1 ? 'person' : 'people'}`;
+        const track = reportElement('div', 'report-bar-track');
+        const fill = reportElement('div', 'report-bar-fill');
+        fill.style.width = `${(value / top) * 100}%`;
+        track.append(fill);
+        row.append(reportElement('span', 'report-bar-label', country), track, reportElement('span', 'report-bar-value', value.toLocaleString()));
+        bars.append(row);
+      });
+      countryPanel.append(bars);
+      if (countryRows.length > 10) {
+        const more = makeButton(`Show all ${countryRows.length} countries`, 'report-more');
+        more.dataset.reportMore = more.textContent;
+        countryPanel.append(more);
+      }
+      countryPanel.append(reportElement('p', 'report-note', `People are counted once per country where any of their life events took place, so totals can exceed the number of people.${stats.unmatchedPlaces.size ? ` ${stats.unmatchedPlaces.size.toLocaleString()} distinct place ${stats.unmatchedPlaces.size === 1 ? 'name does' : 'names do'} not include a recognised country.` : ''}`));
+    } else {
+      countryPanel.append(reportElement('p', 'report-empty', 'No recognised countries were found in the recorded places.'));
+    }
+
+    charts.append(sexPanel, mediaPanel, earliestPanel, birthsPanel, countryPanel);
+    elements.reportsContent.replaceChildren(cards, charts);
+  }
+
+  function printReports() {
+    if (!state.reportsMode) return;
+    if (printCleanup) printCleanup();
+    const printedOn = new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+    elements.printFooter.textContent = `Reports · ${state.fileName} · Printed ${printedOn} from Kinship Atlas · Private family research; may include living people.`;
+    document.body.classList.add('print-reports');
+    setPrintPageOrientation(null);
+    const cleanup = () => {
+      printCleanup = null;
+      window.removeEventListener('afterprint', cleanup);
+      document.body.classList.remove('print-reports');
+      elements.printFooter.textContent = '';
+    };
+    printCleanup = cleanup;
+    window.addEventListener('afterprint', cleanup);
+    window.print();
   }
   function appendGedcomFieldRow(field = { level: 1, tag: 'NOTE', value: '' }) {
     const row = document.createElement('div');
@@ -4758,7 +5046,9 @@
 
   elements.clear.addEventListener('click', () => {
     if (state.mapMode) setMapMode(false);
+    if (state.reportsMode) setReportsMode(false);
     elements.mapViewButton.disabled = true;
+    elements.reportsButton.disabled = true;
     releaseMediaUrls(); state.mediaIndex = null; state.mediaFolderPicked = false;
     state.mediaRelativePaths = new WeakMap(); state.mediaDirectoryHandle = null; state.pendingUploadPersonId = null;
     syncMediaButton();
@@ -4791,7 +5081,26 @@
   });
 
   elements.search.addEventListener('input', () => { state.searchText = elements.search.value; renderRoster(); });
-  elements.mapViewButton.addEventListener('click', () => setMapMode(!state.mapMode));
+  elements.mapViewButton.addEventListener('click', () => {
+    if (state.reportsMode) setReportsMode(false);
+    setMapMode(!state.mapMode);
+  });
+  elements.reportsButton.addEventListener('click', () => setReportsMode(!state.reportsMode));
+  document.querySelector('#printReportsButton').addEventListener('click', printReports);
+  elements.reportsContent.addEventListener('click', (event) => {
+    const more = event.target.closest('[data-report-more]');
+    if (more) {
+      const rows = [...more.parentElement.querySelectorAll('.report-bar-row.is-extra')];
+      const expand = rows.some((row) => row.hidden);
+      rows.forEach((row) => { row.hidden = !expand; });
+      more.textContent = expand ? 'Show fewer' : more.dataset.reportMore;
+      return;
+    }
+    const link = event.target.closest('[data-report-person]');
+    if (!link || !state.people.has(link.dataset.reportPerson)) return;
+    setReportsMode(false);
+    setFocus(link.dataset.reportPerson);
+  });
   elements.birthCountryFilter.addEventListener('change', () => {
     state.directoryFilters.birthCountry = elements.birthCountryFilter.value;
     renderRoster();
@@ -5209,10 +5518,31 @@
   elements.printMapButton.addEventListener('click', () => printSection('map'));
 
   // A4 landscape with 12 mm margins leaves about 273 x 186 mm, i.e. roughly 1030 x 700 CSS px.
-  // The height budget leaves room for the map heading and print footer on the same page.
   const printPageWidth = 1030;
-  const printMapHeightBudget = 520;
+  const printPageHeight = 700;
+  const mmToPx = 96 / 25.4;
   let printCleanup = null;
+
+  // Measure the map heading, summary line and print footer at print width so the map gets only the height left on one page.
+  function printMapHeightBudget() {
+    const measure = (element, extraStyles = {}) => {
+      if (!element) return 0;
+      const clone = element.cloneNode(true);
+      clone.removeAttribute('id');
+      clone.querySelectorAll('[id]').forEach((node) => node.removeAttribute('id'));
+      Object.assign(clone.style, { position: 'absolute', left: '-10000px', top: '0', visibility: 'hidden', width: `${printPageWidth}px`, ...extraStyles });
+      [clone, ...clone.querySelectorAll('*')].forEach((node) => Object.assign(node.style, { whiteSpace: 'normal', overflow: 'visible', textOverflow: 'clip' }));
+      element.parentNode.appendChild(clone);
+      const height = clone.getBoundingClientRect().height;
+      clone.remove();
+      return height;
+    };
+    const heading = measure(document.querySelector('.main-heading .heading-copy')) + 9 * mmToPx;
+    const summary = measure(elements.graphSummary || document.querySelector('#graphSummary'), { display: 'block' }) + 4 * mmToPx;
+    const footer = measure(elements.printFooter, { display: 'block', fontSize: '7.5pt', lineHeight: '1.4' }) + 8 * mmToPx;
+    const safety = 36;
+    return Math.max(200, printPageHeight - heading - summary - footer - safety);
+  }
 
   function setPrintPageOrientation(orientation) {
     let style = document.getElementById('printPageStyle');
@@ -5231,6 +5561,7 @@
   function preparePrintMap() {
     const canvas = elements.canvas;
     const svg = canvas.querySelector('.connector-layer');
+    const heightBudget = printMapHeightBudget();
     canvas.style.zoom = '1';
     canvas.style.minWidth = '0';
     canvas.style.minHeight = '0';
@@ -5243,7 +5574,7 @@
     const rowWidth = (count) => count * 192 + Math.max(0, count - 1) * 11 + 8;
     const fitScale = (width) => {
       canvas.style.width = `${width}px`;
-      return Math.min(1, printPageWidth / Math.max(width, canvas.scrollWidth), printMapHeightBudget / Math.max(1, canvas.scrollHeight));
+      return Math.min(1, printPageWidth / Math.max(width, canvas.scrollWidth), heightBudget / Math.max(1, canvas.scrollHeight));
     };
     let best = { width: printPageWidth, scale: fitScale(printPageWidth) };
     for (let count = widestCount; count >= 1; count -= 1) {
@@ -5343,7 +5674,7 @@
   });
 
   function updateDefaultsButton() {
-    document.querySelector('#defaultsButton').textContent = state.defaultRecord?.gedcomHandle ? 'Change Default' : 'Set Default';
+    document.querySelector('#defaultsButton').textContent = 'Update defaults';
   }
 
   function syncDefaultsDialog() {
@@ -5477,7 +5808,7 @@
       try {
         file = await record.gedcomHandle.getFile();
       } catch {
-        showToast('The default GEDCOM could not be found. Use Set Default to choose it again.');
+        showToast('The default GEDCOM could not be found. Use Update defaults to choose it again.');
         return;
       }
       if (!await loadGedcomFile(file, { source: 'handle', handle: record.gedcomHandle })) return;
@@ -5488,7 +5819,7 @@
         await persistActiveSession();
       }
     } catch {
-      showToast('The default tree could not be opened. Use Set Default to choose it again.');
+      showToast('The default tree could not be opened. Use Update defaults to choose it again.');
     }
   }
 
@@ -5550,7 +5881,7 @@
     state.defaultRecord = updated;
     try {
       const wrote = await writeDefaultsFile(updated, false);
-      if (!wrote) showToast(clearing ? 'Home person cleared (saved in this browser only).' : `${person.name} is now the home person (saved in this browser only; use Change Default to also update kinship-defaults.json).`);
+      if (!wrote) showToast(clearing ? 'Home person cleared (saved in this browser only).' : `${person.name} is now the home person (saved in this browser only; use Update defaults to also update kinship-defaults.json).`);
       else showToast(clearing ? 'Home person cleared.' : `${person.name} will be selected when the default GEDCOM opens.`);
     } catch {
       showToast('Home person saved in this browser; kinship-defaults.json could not be updated.');
@@ -5685,6 +6016,7 @@
     event.returnValue = '';
   });
   setButtonContent(elements.mapViewButton, 'map', 'Map View');
+  setButtonContent(elements.reportsButton, 'chart', 'Reports');
   setButtonContent(elements.clear, 'restart', 'Start Again');
   document.querySelector('#defaultsPickGedcom').addEventListener('click', async () => {
     if (typeof window.showOpenFilePicker !== 'function') {
