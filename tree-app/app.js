@@ -35,17 +35,19 @@
     ['turkiye', 'TR', 'Turkiye'], ['turkey', 'TR', 'Turkey']
   ].sort((a, b) => b[0].length - a[0].length);
   const state = {
+    mapMode: false, mapStats: null, directoryMatches: [],
     people: new Map(), families: new Map(), sources: new Map(), selectedId: null,
     fileName: '', searchText: '', history: [], historyIndex: -1, zoom: 1,
     mediaIndex: null, mediaUrls: new Map(), mediaRelativePaths: new WeakMap(), mediaDirectoryHandle: null,
     rememberedMediaDirectoryHandle: null, mediaFolderPicked: false, mediaHelper: null,
     pendingUploadPersonId: null, pendingResearchPersonId: null,
     pendingPersonSummaryId: null,
+    pendingLifeEvent: null,
     primaryMediaKey: '', primaryMedia: new Map(), additionalMedia: new Map(),
     gedcomRecords: [], gedcomDirty: false, gedcomText: '', sessionSaveQueue: Promise.resolve(),
     directoryFilters: { birthCountry: '', deathCountry: '', birthMin: null, birthMax: null, deathMin: null, deathMax: null },
     directoryYearBounds: { birth: null, death: null },
-    expandedSurnames: new Set()
+    expandedSurnames: new Set(), surnameFilter: new Set()
   };
   const elements = {
     fileInput: document.querySelector('#gedcomInput'), mediaInput: document.querySelector('#mediaInput'),
@@ -83,8 +85,9 @@
     confirmWikiTreeSearch: document.querySelector('#confirmWikiTreeSearch'),
     newGedcomDialog: document.querySelector('#newGedcomDialog'),
     createGedcomForm: document.querySelector('#createGedcomForm'),
-    clear: document.querySelector('#clearButton'),
+    clear: document.querySelector('#clearButton'), mapViewButton: document.querySelector('#mapViewButton'),
     treeLabel: document.querySelector('#treeLabel'), peopleCount: document.querySelector('#peopleCount'),
+    visibleCount: document.querySelector('#visibleCount'), clearSurnameFilter: document.querySelector('#clearSurnameFilter'),
     search: document.querySelector('#peopleSearch'), peopleList: document.querySelector('#peopleList'),
     birthCountryFilter: document.querySelector('#birthCountryFilter'),
     deathCountryFilter: document.querySelector('#deathCountryFilter'),
@@ -108,7 +111,7 @@
   }
 
   function createEvent(type, value = '') {
-    return { type, value: cleanEventDisplayText(value), date: '', place: '', detail: '', notes: [], sources: [] };
+    return { type, value: cleanEventDisplayText(value), date: '', place: '', detail: '', notes: [], sources: [], ordinal: -1 };
   }
 
   function cleanGedcomValue(value) {
@@ -308,7 +311,7 @@
       } else if (record.type === 'FAM') {
         families.set(record.id, {
           id: record.id, husbandId: record.husbandId, wifeId: record.wifeId,
-          childIds: [...new Set(record.childIds)], marriage: record.marriage,
+          childIds: [...new Set(record.childIds)],           marriage: record.marriage, divorce: record.divorce,
           sourceIds: [...new Set(record.sourceIds)]
         });
       } else if (record.type === 'SOUR') {
@@ -347,11 +350,13 @@
         if (level === 1 && tag !== 'NAME') activeName = null;
         if (level === 1 && eventTags.has(tag)) {
           activeEvent = createEvent(tag, value);
+          activeEvent.ordinal = record.events.length;
           record.events.push(activeEvent);
           continue;
         }
         if (level === 1 && tag === 'OCCU') {
           activeEvent = createEvent('OCCU', value);
+          activeEvent.ordinal = record.events.length;
           record.events.push(activeEvent);
           continue;
         }
@@ -388,6 +393,8 @@
         if (activeEvent && level >= 2) {
           if (tag === 'DATE') activeEvent.date = cleanEventDisplayText(value);
           else if (tag === 'PLAC') activeEvent.place = cleanEventDisplayText(value);
+          else if (tag === 'LATI' && level >= 3) activeEvent.lat = parseGedcomCoordinate(value) ?? undefined;
+          else if (tag === 'LONG' && level >= 3) activeEvent.lon = parseGedcomCoordinate(value) ?? undefined;
           else if (tag === 'TYPE') activeEvent.detail = cleanEventDisplayText(value);
           else if (tag === 'NOTE' || tag === 'CONT') activeEvent.notes.push(cleanEventDisplayText(value));
         }
@@ -395,6 +402,11 @@
         if (level === 1 && tag === 'MARR') {
           record.marriage = createEvent('MARR');
           activeEvent = record.marriage;
+          continue;
+        }
+        if (level === 1 && tag === 'DIV') {
+          record.divorce = createEvent('DIV');
+          activeEvent = record.divorce;
           continue;
         }
         if (level === 1 && tag === 'HUSB') { record.husbandId = splitXref(value); activeEvent = null; continue; }
@@ -405,6 +417,7 @@
         if (activeEvent && level >= 2) {
           if (tag === 'DATE') activeEvent.date = cleanEventDisplayText(value);
           else if (tag === 'PLAC') activeEvent.place = cleanEventDisplayText(value);
+          else if (tag === 'TYPE' && level === 2 && activeEvent === record.marriage) activeEvent.detail = cleanEventDisplayText(value);
           else if (tag === 'NOTE' || tag === 'CONT') activeEvent.notes.push(cleanEventDisplayText(value));
           else if (tag === 'SOUR') activeEvent.sources.push(splitXref(value));
         }
@@ -841,6 +854,7 @@
   }
 
   function mediaUrl(file) {
+    if (file.kinshipUrl) return file.kinshipUrl;
     if (!state.mediaUrls.has(file)) state.mediaUrls.set(file, URL.createObjectURL(file));
     return state.mediaUrls.get(file);
   }
@@ -986,8 +1000,10 @@
 
   function syncMediaButton() {
     const hasFolder = Boolean(state.mediaDirectoryHandle || state.rememberedMediaDirectoryHandle || state.mediaFolderPicked);
-    elements.mediaButton.textContent = hasFolder ? 'Update Media Folder' : 'Select Media Folder';
-    elements.mediaButton.classList.toggle('media-button-needed', !hasFolder);
+    const helperDefault = !hasFolder && state.mediaHelper;
+    elements.mediaButton.textContent = helperDefault ? `Default media: ${state.mediaHelper.folder}` : hasFolder ? 'Update Media Folder' : 'Select Media Folder';
+    elements.mediaButton.title = helperDefault ? 'Photos and PDFs are saved to this folder inside Primary Media Library. Click to choose a different folder.' : '';
+    elements.mediaButton.classList.toggle('media-button-needed', !hasFolder && !state.mediaHelper);
   }
 
   async function chooseMediaDirectory(createNew = false) {
@@ -1269,6 +1285,7 @@
     elements.search.value = '';
     elements.search.disabled = false;
     elements.clear.disabled = false;
+    elements.mapViewButton.disabled = false;
     document.querySelector('#openGedcomLabel').hidden = true;
     state.zoom = 1;
     elements.zoomIn.disabled = false;
@@ -1404,10 +1421,39 @@
     return nodes;
   }
 
+  // Shown after a default tree opens: nobody is selected until the user picks someone.
+  function renderTreeWelcome() {
+    elements.canvas.replaceChildren();
+    const welcome = document.createElement('div');
+    welcome.className = 'welcome-state tree-welcome';
+    welcome.innerHTML = '<div class="welcome-art" aria-hidden="true"><span class="orbit orbit-a"></span><span class="orbit orbit-b"></span><span class="welcome-node node-a"></span><span class="welcome-node node-b"></span><span class="welcome-node node-c"></span><span class="welcome-node node-d"></span><span class="welcome-node node-e"></span><span class="welcome-stem stem-a"></span><span class="welcome-stem stem-b"></span><span class="welcome-stem stem-c"></span><span class="welcome-stem stem-d"></span></div><div class="eyebrow">WELCOME</div><h2></h2><p></p><span class="welcome-note">Use the search box or directory on the left to choose a person, or switch to Map View to see where everyone lived.</span>';
+    welcome.querySelector('h2').textContent = 'Welcome to your family archive';
+    welcome.querySelector('p').textContent = `${state.fileName} is open with ${state.people.size.toLocaleString()} ${state.people.size === 1 ? 'person' : 'people'}. Select someone to see their relationships.`;
+    elements.canvas.append(welcome);
+    elements.generationLabel.textContent = 'NO PERSON SELECTED';
+    elements.graphSummary.textContent = `${state.people.size.toLocaleString()} IN TREE`;
+  }
+
+  function showTreeWelcome() {
+    state.selectedId = null;
+    state.history = [];
+    state.historyIndex = -1;
+    elements.back.disabled = true;
+    elements.forward.disabled = true;
+    elements.title.textContent = 'Welcome';
+    elements.subtitle.textContent = 'Select a person from the directory to begin.';
+    renderRoster();
+    if (!state.mapMode) renderTreeWelcome();
+    renderDetails();
+  }
+
   function renderGraph() {
     const selected = state.people.get(state.selectedId);
     elements.canvas.replaceChildren();
-    if (!selected) return;
+    if (!selected) {
+      if (state.people.size) renderTreeWelcome();
+      return;
+    }
     const ancestors = generationLevels(selected.id, 'up', 2);
     const descendants = generationLevels(selected.id, 'down', 2);
     const partners = partnersOf(selected.id).map((item) => item.id);
@@ -1458,6 +1504,7 @@
       return elements.canvas.querySelector(`.person-card[data-generation="${generation}"][data-person-id="${CSS.escape(id)}"]`);
     }
     function point(card, side) {
+      if (!card) return null;
       const rect = card.getBoundingClientRect();
       return {
         x: rect.left - canvasRect.left + rect.width / 2,
@@ -1500,6 +1547,7 @@
     const query = state.searchText.trim().toLocaleLowerCase();
     const matches = [...state.people.values()].filter((person) => {
       if (query && !person.name.toLocaleLowerCase().includes(query)) return false;
+      if (state.surnameFilter.size && !state.surnameFilter.has(person.surname || 'Unknown surname')) return false;
       for (const [eventType, countryFilter, minFilter, maxFilter] of [
         ['BIRT', 'birthCountry', 'birthMin', 'birthMax'], ['DEAT', 'deathCountry', 'deathMin', 'deathMax']
       ]) {
@@ -1519,6 +1567,10 @@
       return surnameOrder || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
     });
     elements.peopleList.replaceChildren();
+    state.directoryMatches = matches;
+    elements.visibleCount.textContent = matches.length.toLocaleString();
+    elements.clearSurnameFilter.hidden = !state.surnameFilter.size;
+    refreshMapView();
     if (!matches.length) {
       const empty = document.createElement('div');
       empty.className = 'list-empty';
@@ -1537,6 +1589,15 @@
       const group = document.createElement('section');
       group.className = 'surname-group';
       const expanded = state.expandedSurnames.has(surname) || Boolean(query);
+      const header = document.createElement('div');
+      header.className = 'surname-group-header';
+      const check = document.createElement('input');
+      check.type = 'checkbox';
+      check.className = 'surname-group-check';
+      check.dataset.surnameFilter = surname;
+      check.checked = state.surnameFilter.has(surname);
+      check.title = `Show only people with the surname ${surname}`;
+      check.setAttribute('aria-label', `Show only ${surname}`);
       const toggle = makeButton('', 'surname-group-toggle');
       toggle.dataset.surnameToggle = surname;
       toggle.setAttribute('aria-expanded', String(expanded));
@@ -1550,7 +1611,8 @@
       count.className = 'surname-group-count';
       count.textContent = String(people.length);
       toggle.append(indicator, label, count);
-      group.append(toggle);
+      header.append(check, toggle);
+      group.append(header);
       const groupedPeople = document.createElement('div');
       groupedPeople.className = 'surname-group-people';
       groupedPeople.hidden = !expanded;
@@ -1657,6 +1719,7 @@
     if (reset) {
       state.directoryFilters = { birthCountry: '', deathCountry: '', birthMin: null, birthMax: null, deathMin: null, deathMax: null };
       state.expandedSurnames.clear();
+      state.surnameFilter.clear();
       elements.birthCountryFilter.value = '';
       elements.deathCountryFilter.value = '';
     }
@@ -1676,6 +1739,9 @@
     return wrapper;
   }
 
+  const relationGroupTypes = { Parents: 'PARENT', Siblings: 'SIBLING', 'Partners / spouses': 'PARTNER', Children: 'CHILD' };
+  const relationAddTitles = { PARENT: 'Add a parent', SIBLING: 'Add a sibling', PARTNER: 'Add a partner', CHILD: 'Add a child' };
+
   function addRelationGroup(parent, label, items) {
     const group = document.createElement('div');
     group.className = 'relation-group';
@@ -1684,10 +1750,11 @@
     heading.textContent = label;
     const list = document.createElement('div');
     list.className = 'relation-list';
+    const groupType = relationGroupTypes[label];
     if (!items.length) {
-      const empty = document.createElement('span');
-      empty.className = 'relation-button empty';
-      empty.textContent = 'Not recorded';
+      const empty = makeButton('Not recorded', 'relation-button empty relation-add');
+      empty.dataset.addRelation = groupType;
+      empty.title = `${relationAddTitles[groupType]} (not recorded)`;
       list.append(empty);
     } else {
       for (const item of items) {
@@ -1698,6 +1765,8 @@
           list.append(unknown);
           continue;
         }
+        const wrapper = document.createElement('span');
+        wrapper.className = 'relation-item';
         const button = makeButton(item.label, 'relation-button');
         button.dataset.personId = item.id;
         if (item.detail) {
@@ -1706,7 +1775,17 @@
           detail.textContent = item.detail;
           button.append(detail);
         }
-        list.append(button);
+        wrapper.append(button);
+        if (item.familyId) {
+          const edit = makeButton('✎', 'relation-edit');
+          edit.dataset.editRelationship = groupType;
+          edit.dataset.familyId = item.familyId;
+          edit.dataset.otherId = item.id;
+          edit.title = `Edit relationship with ${item.label}`;
+          edit.setAttribute('aria-label', edit.title);
+          wrapper.append(edit);
+        }
+        list.append(wrapper);
       }
     }
     group.append(heading, list);
@@ -1716,20 +1795,26 @@
   function relationshipGroups(person) {
     const parentFamilies = person.parentFamilyIds.map((id) => state.families.get(id)).filter(Boolean);
     const parents = [];
-    const siblings = new Set();
+    const siblings = new Map();
     for (const family of parentFamilies) {
       const present = [family.husbandId, family.wifeId].filter(Boolean);
-      for (const id of present) if (state.people.has(id)) parents.push({ id, label: personName(id) });
+      for (const id of present) if (state.people.has(id)) parents.push({ id, label: personName(id), familyId: family.id });
       if (present.length < 2) parents.push({ id: '', label: 'Parent not identified' });
-      family.childIds.forEach((id) => { if (id !== person.id && state.people.has(id)) siblings.add(id); });
+      family.childIds.forEach((id) => { if (id !== person.id && state.people.has(id) && !siblings.has(id)) siblings.set(id, family.id); });
     }
     const partners = partnersOf(person.id).map(({ id, family }) => ({
-      id, label: personName(id),
-      detail: family.marriage ? [family.marriage.date, family.marriage.place].filter(Boolean).join(' · ') : ''
+      id, label: personName(id), familyId: family.id
     }));
-    const children = childrenOf(person.id).map((id) => ({ id, label: personName(id) }));
+    const children = [];
+    for (const familyId of person.spouseFamilyIds) {
+      const family = state.families.get(familyId);
+      if (!family) continue;
+      for (const id of family.childIds) {
+        if (state.people.has(id) && !children.some((child) => child.id === id)) children.push({ id, label: personName(id), familyId: family.id });
+      }
+    }
     return [
-      ['Parents', parents], ['Siblings', [...siblings].map((id) => ({ id, label: personName(id) }))],
+      ['Parents', parents], ['Siblings', [...siblings].map(([id, familyId]) => ({ id, label: personName(id), familyId }))],
       ['Partners / spouses', partners], ['Children', children]
     ];
   }
@@ -1739,8 +1824,26 @@
     return cleanEventDisplayText(eventNames[event.type] || event.type);
   }
 
+  // Marriages live in FAM records, so they are gathered from the person's spouse families.
+  function marriageEventsFor(person) {
+    const result = [];
+    for (const family of state.families.values()) {
+      if (family.husbandId !== person.id && family.wifeId !== person.id) continue;
+      const spouseId = family.husbandId === person.id ? family.wifeId : family.husbandId;
+      const spouse = spouseId && state.people.has(spouseId) ? personName(spouseId) : '';
+      for (const familyEvent of [family.marriage, family.divorce]) {
+        if (!familyEvent) continue;
+        result.push({
+          ...familyEvent, ordinal: -1, familyId: family.id, spouseId,
+          value: [spouse, familyEvent.detail && `(${familyEvent.detail})`].filter(Boolean).join(' ')
+        });
+      }
+    }
+    return result;
+  }
+
   function renderEvents(person) {
-    const events = [...person.events].sort((a, b) => {
+    const events = [...person.events, ...marriageEventsFor(person)].sort((a, b) => {
       const aYear = Number(yearFrom(a.date)) || 9999;
       const bYear = Number(yearFrom(b.date)) || 9999;
       return aYear - bYear;
@@ -1757,6 +1860,14 @@
       for (const event of events) {
         const item = document.createElement('div');
         item.className = 'event-item';
+        if (event.ordinal >= 0 || event.familyId) {
+          item.classList.add('event-item-editable');
+          if (event.familyId) { item.dataset.familyId = event.familyId; item.dataset.familyEvent = event.type; }
+          else item.dataset.eventOrdinal = String(event.ordinal);
+          item.tabIndex = 0;
+          item.setAttribute('role', 'button');
+          item.title = 'Click to edit this event';
+        }
         const marker = document.createElement('span');
         marker.className = `event-marker ${event.type === 'RESI' ? 'residence' : event.type === 'OCCU' ? 'occupation' : ['BIRT', 'DEAT'].includes(event.type) ? '' : 'other'}`;
         const body = document.createElement('div');
@@ -1812,11 +1923,18 @@
     personActions.className = 'person-action-row';
     const summaryEditButton = makeButton('Edit person details', 'research-button');
     summaryEditButton.dataset.editPersonSummary = person.id;
-    const editButton = makeButton('Edit GEDCOM fields', 'research-button');
-    editButton.dataset.editPerson = person.id;
+    const addEventButton = makeButton('Add Life Event', 'research-button');
+    addEventButton.dataset.addLifeEvent = person.id;
     const addRelativeButton = makeButton('Add relative', 'research-button');
     addRelativeButton.dataset.addRelative = person.id;
-    personActions.append(summaryEditButton, editButton, addRelativeButton);
+    personActions.append(summaryEditButton, addEventButton, addRelativeButton);
+    if (state.defaultRecord?.gedcomHandle && state.defaultRecord.gedcomName === state.fileName) {
+      const isHome = state.defaultRecord.homePersonId === person.id;
+      const homeButton = makeButton(isHome ? '★ Home person' : '☆ Set as home person', 'research-button');
+      homeButton.dataset.homePerson = person.id;
+      homeButton.title = isHome ? 'Click to stop opening on this person' : 'Select this person when the default GEDCOM opens';
+      personActions.append(homeButton);
+    }
     if (isRecordedDeceased(person)) {
       const researchButton = makeButton('Search WikiTree', 'research-button');
       researchButton.dataset.wikitreeSearch = person.id;
@@ -1975,8 +2093,82 @@
     if (death) summary.push(`Died ${[death.date, death.place].filter(Boolean).join(' · ') || 'date/place not recorded'}`);
     elements.subtitle.textContent = summary.join('   /   ') || 'Birth and death details not recorded';
     renderRoster();
-    renderGraph();
+    if (state.mapMode) updateMapLabels(); else renderGraph();
     renderDetails();
+  }
+
+  function parseGedcomCoordinate(value) {
+    const match = String(value || '').trim().match(/^([NSEW])?\s*(-?\d+(?:\.\d+)?)$/i);
+    if (!match) return null;
+    const number = Number(match[2]);
+    return /^[SW]$/i.test(match[1] || '') ? -number : number;
+  }
+
+  let mapInstance = null;
+
+  function getMapInstance() {
+    if (!mapInstance && window.KinshipMap) {
+      mapInstance = window.KinshipMap.create({
+        container: document.querySelector('#mapView'),
+        getPeople: () => state.directoryMatches || [],
+        placeEventsFor: (person) => [...person.events, ...marriageEventsFor(person)],
+        getSelectedId: () => state.selectedId,
+        onSelect: (id) => setFocus(id),
+        describe: (person) => lifespan(person),
+        eventLabel: (event) => eventTitle(event)
+      });
+    }
+    return mapInstance;
+  }
+
+  function updateMapLabels() {
+    if (!state.mapMode || !state.mapStats) return;
+    const { placed, unplaced } = state.mapStats;
+    elements.generationLabel.textContent = `${placed} ON MAP`;
+    elements.graphSummary.textContent = `${placed} PLACED · ${unplaced} NOT PLACED · ${(state.directoryMatches || []).length} IN DIRECTORY`;
+  }
+
+  function refreshMapView() {
+    if (!state.mapMode || !mapInstance) return;
+    state.mapStats = mapInstance.refresh();
+    updateMapLabels();
+  }
+
+  // Inline SVG icons use currentColor, so they render the same in every browser (no emoji or icon fonts).
+  const buttonIcons = {
+    map: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.4 4 5.6 4 9s-1.4 6.6-4 9c-2.6-2.4-4-5.6-4-9s1.4-6.6 4-9z"/>',
+    tree: '<rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/>',
+    restart: '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>'
+  };
+
+  function setButtonContent(button, icon, text) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'button-icon');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    svg.innerHTML = buttonIcons[icon];
+    button.replaceChildren(svg, document.createTextNode(text));
+  }
+
+  function setMapMode(on) {
+    const map = on ? getMapInstance() : mapInstance;
+    if (on && !map) { showToast('The map component could not be loaded.'); return; }
+    state.mapMode = on;
+    setButtonContent(elements.mapViewButton, on ? 'tree' : 'map', on ? 'Relationship View' : 'Map View');
+    elements.mapViewButton.setAttribute('aria-pressed', String(on));
+    elements.viewport.classList.toggle('map-active', on);
+    elements.canvas.hidden = on;
+    document.querySelector('.main-panel').classList.toggle('map-mode', on);
+    document.querySelector('#viewEyebrow').textContent = on ? 'WORLD MAP' : 'RELATIONSHIP MAP';
+    document.querySelector('.graph-footer-right').textContent = on ? 'CLICK A PIN TO OPEN THAT PERSON' : 'SELECT A PERSON TO RECENTER';
+    if (on) {
+      state.mapStats = map.show();
+      updateMapLabels();
+    } else {
+      map?.hide();
+      if (state.people.size) renderGraph();
+    }
   }
   function appendGedcomFieldRow(field = { level: 1, tag: 'NOTE', value: '' }) {
     const row = document.createElement('div');
@@ -2106,6 +2298,342 @@
     } else if (value) {
       lines.splice(eventIndex + 1, 0, `2 ${fieldTag} ${value}`);
     }
+  }
+
+  // Marriage is a family event: it is saved as MARR inside the FAM record that links HUSB and WIFE.
+  // Military has no individual-level GEDCOM tag, so it is stored as EVEN with a TYPE.
+  const lifeEventTypes = [
+    { key: 'RESI', label: 'Residence', tag: 'RESI', descLabel: 'Address / notes', mode: 'note' },
+    { key: 'MARR', label: 'Marriage', tag: 'MARR', family: true, descLabel: '', mode: 'family' },
+    { key: 'DIV', label: 'Divorce', tag: 'DIV', family: true, descLabel: '', mode: 'family' },
+    { key: 'BAPM', label: 'Baptism', tag: 'BAPM', descLabel: 'Church / notes', mode: 'note' },
+    { key: 'EDUC', label: 'Education', tag: 'EDUC', descLabel: 'School or qualification', mode: 'value' },
+    { key: 'OCCU', label: 'Occupation', tag: 'OCCU', descLabel: 'Occupation', mode: 'value' },
+    { key: 'MILT', label: 'Military', tag: 'EVEN', type: 'Military Service', descLabel: 'Unit / rank / notes', mode: 'value' },
+    { key: 'EMIG', label: 'Departure', tag: 'EMIG', descLabel: 'Notes', mode: 'note' },
+    { key: 'IMMI', label: 'Arrival', tag: 'IMMI', descLabel: 'Notes', mode: 'note' },
+    { key: 'BURI', label: 'Burial', tag: 'BURI', descLabel: 'Cemetery / notes', mode: 'note' },
+    { key: 'OTHER', label: 'Other', tag: 'EVEN', custom: true, descLabel: 'Description / notes', mode: 'value' }
+  ];
+
+  function lifeEventConfigFor(event) {
+    if (event.familyId) return lifeEventTypes.find((entry) => entry.family && entry.tag === event.type);
+    if (event.type === 'EVEN') {
+      const detail = (event.detail || '').trim().toLocaleLowerCase();
+      return lifeEventTypes.find((entry) => entry.type && entry.type.toLocaleLowerCase() === detail) ||
+        lifeEventTypes.find((entry) => entry.custom);
+    }
+    return lifeEventTypes.find((entry) => entry.tag === event.type && !entry.custom && !entry.type && !entry.family) ||
+      { key: event.type, label: eventNames[event.type] || event.type, tag: event.type, descLabel: 'Notes', mode: 'note' };
+  }
+
+  const lifeEventFields = () => ({
+    dialog: document.querySelector('#lifeEventDialog'),
+    title: document.querySelector('#lifeEventTitle'),
+    type: document.querySelector('#lifeEventType'),
+    customField: document.querySelector('#lifeEventCustomTypeField'),
+    custom: document.querySelector('#lifeEventCustomType'),
+    date: document.querySelector('#lifeEventDate'),
+    picker: document.querySelector('#lifeEventDatePicker'),
+    place: document.querySelector('#lifeEventPlace'),
+    descLabel: document.querySelector('#lifeEventDescriptionLabel'),
+    descField: document.querySelector('#lifeEventDescriptionField'),
+    desc: document.querySelector('#lifeEventDescription'),
+    spouseField: document.querySelector('#lifeEventSpouseField'),
+    spouse: document.querySelector('#lifeEventSpouse'),
+    newGivenField: document.querySelector('#lifeEventNewSpouseGivenField'),
+    newGiven: document.querySelector('#lifeEventNewSpouseGiven'),
+    newSurnameField: document.querySelector('#lifeEventNewSpouseSurnameField'),
+    newSurname: document.querySelector('#lifeEventNewSpouseSurname'),
+    marriageTypeField: document.querySelector('#lifeEventMarriageTypeField'),
+    marriageType: document.querySelector('#lifeEventMarriageType'),
+    error: document.querySelector('#lifeEventError'),
+    remove: document.querySelector('#lifeEventDelete')
+  });
+
+  function syncNewSpouseFields() {
+    const fields = lifeEventFields();
+    const isNew = !fields.spouseField.hidden && !fields.spouse.disabled && fields.spouse.value === '';
+    fields.newGivenField.hidden = !isNew;
+    fields.newSurnameField.hidden = !isNew;
+  }
+
+  function applyLifeEventConfig(config) {
+    const fields = lifeEventFields();
+    fields.descLabel.textContent = config.descLabel;
+    fields.descField.hidden = Boolean(config.family);
+    fields.customField.hidden = !config.custom;
+    fields.spouseField.hidden = !config.family;
+    fields.marriageTypeField.hidden = config.tag !== 'MARR';
+    syncNewSpouseFields();
+  }
+
+  function populateSpouseOptions(person) {
+    const fields = lifeEventFields();
+    fields.spouse.replaceChildren();
+    const create = document.createElement('option');
+    create.value = '';
+    create.textContent = '＋ New person…';
+    fields.spouse.append(create);
+    const others = [...state.people.values()].filter((entry) => entry.id !== person.id)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    for (const other of others) {
+      const option = document.createElement('option');
+      option.value = other.id;
+      const birth = yearFrom(other.events.find((entry) => entry.type === 'BIRT')?.date);
+      option.textContent = `${other.name}${birth ? ` (b. ${birth})` : ''}`;
+      fields.spouse.append(option);
+    }
+    fields.spouse.disabled = false;
+    fields.spouse.value = '';
+  }
+
+  function openLifeEventEditor(person, event) {
+    const fields = lifeEventFields();
+    const editing = Boolean(event);
+    state.pendingLifeEvent = { personId: person.id, ordinal: editing ? event.ordinal : null, familyId: event?.familyId || null, original: null };
+    fields.error.hidden = true;
+    fields.remove.hidden = !editing;
+    fields.remove.textContent = 'Delete event';
+    fields.title.textContent = editing ? 'Edit life event' : 'Add life event';
+    fields.type.replaceChildren();
+    fields.marriageType.value = '';
+    fields.newGiven.value = '';
+    fields.newSurname.value = '';
+    if (editing) {
+      const config = lifeEventConfigFor(event);
+      state.pendingLifeEvent.config = config;
+      const option = document.createElement('option');
+      option.value = config.key;
+      option.textContent = config.label;
+      fields.type.append(option);
+      fields.type.disabled = true;
+      const original = {
+        date: event.date, place: event.place,
+        desc: config.mode === 'value' ? event.value : event.notes.join(' '),
+        custom: config.custom ? event.detail : '',
+        marriageType: config.tag === 'MARR' ? event.detail : ''
+      };
+      state.pendingLifeEvent.original = original;
+      fields.date.value = original.date;
+      fields.place.value = original.place;
+      fields.desc.value = original.desc;
+      fields.custom.value = original.custom;
+      fields.marriageType.value = original.marriageType;
+      if (config.family) {
+        fields.spouse.replaceChildren();
+        const spouseOption = document.createElement('option');
+        spouseOption.value = event.spouseId || '';
+        spouseOption.textContent = event.spouseId ? personName(event.spouseId) : 'Spouse not identified';
+        fields.spouse.append(spouseOption);
+        fields.spouse.disabled = true;
+      }
+      applyLifeEventConfig(config);
+    } else {
+      for (const config of lifeEventTypes) {
+        const option = document.createElement('option');
+        option.value = config.key;
+        option.textContent = config.label;
+        fields.type.append(option);
+      }
+      fields.type.disabled = false;
+      fields.date.value = '';
+      fields.place.value = '';
+      fields.desc.value = '';
+      fields.custom.value = '';
+      populateSpouseOptions(person);
+      state.pendingLifeEvent.config = lifeEventTypes[0];
+      applyLifeEventConfig(lifeEventTypes[0]);
+    }
+    fields.picker.value = datePickerValue(fields.date.value);
+    fields.dialog.showModal();
+  }
+
+  function saveMarriage(deleteEvent, config) {
+    const pending = state.pendingLifeEvent;
+    const fields = lifeEventFields();
+    const tag = config.tag;
+    const noun = config.label.toLocaleLowerCase();
+    const familyKey = tag === 'DIV' ? 'divorce' : 'marriage';
+    const showError = (message) => { fields.error.textContent = message; fields.error.hidden = false; return false; };
+    const clean = (text) => text.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const date = clean(fields.date.value);
+    const place = clean(fields.place.value);
+    const marriageType = tag === 'MARR' ? clean(fields.marriageType.value) : '';
+    const findRecord = (recordTag, xref) => state.gedcomRecords.find((record) => record.tag === recordTag && record.xref === xref);
+    const marriageLines = () => {
+      const lines = [date || place || marriageType ? `1 ${tag}` : `1 ${tag} Y`];
+      if (date) lines.push(`2 DATE ${date}`);
+      if (place) lines.push(`2 PLAC ${place}`);
+      if (marriageType) lines.push(`2 TYPE ${marriageType}`);
+      return lines;
+    };
+
+    if (pending.familyId) {
+      const familyRecord = findRecord('FAM', pending.familyId);
+      const lines = familyRecord ? [...familyRecord.lines] : [];
+      const start = lines.findIndex((line, index) => index > 0 && parseGedcomField(line)?.level === 1 && parseGedcomField(line)?.tag === tag);
+      if (start < 0) return showError(`This ${noun} could not be found in the GEDCOM.`);
+      if (deleteEvent) {
+        lines.splice(start, lifeEventBlockEnd(lines, start) - start);
+      } else {
+        const original = pending.original;
+        if (date !== original.date) setLifeEventSubfield(lines, start, 'DATE', date);
+        if (place !== original.place) setLifeEventSubfield(lines, start, 'PLAC', place);
+        if (marriageType !== original.marriageType) setLifeEventSubfield(lines, start, 'TYPE', marriageType);
+      }
+      familyRecord.lines = lines;
+    } else {
+      const selected = state.people.get(pending.personId);
+      const selectedRecord = findRecord('INDI', pending.personId);
+      if (!selected || !selectedRecord) return showError('This person record could not be found in the current GEDCOM.');
+      let spouseId = fields.spouse.value;
+      const newGiven = clean(fields.newGiven.value).replaceAll('/', ' ').trim();
+      const newSurname = clean(fields.newSurname.value).replaceAll('/', ' ').trim();
+      if (!spouseId && !newGiven) return showError('Choose a spouse from the list, or enter the new spouse\'s given name.');
+      const spouseSex = spouseId ? state.people.get(spouseId)?.sex : '';
+      const selectedRole = selected.sex === 'F' ? 'WIFE' : selected.sex === 'M' ? 'HUSB' : spouseSex === 'M' ? 'WIFE' : 'HUSB';
+
+      if (spouseId) {
+        const existingFamily = [...state.families.values()].find((family) =>
+          (family.husbandId === selected.id && family.wifeId === spouseId) ||
+          (family.wifeId === selected.id && family.husbandId === spouseId));
+        if (existingFamily) {
+          if (existingFamily[familyKey]) return showError(`A ${noun} with this person is already recorded. Click it in the Life events list to edit it.`);
+          const familyRecord = findRecord('FAM', existingFamily.id);
+          if (!familyRecord) return showError('The existing family record could not be found.');
+          familyRecord.lines = [...familyRecord.lines, ...marriageLines()];
+          refreshAfterGedcomMutation(pending.personId);
+          fields.dialog.close();
+          showToast(`${config.label} added to the existing family record.`);
+          return true;
+        }
+      } else {
+        spouseId = nextGedcomXref('I', 'INDI');
+        addRecordBeforeTrailer({
+          xref: spouseId, tag: 'INDI',
+          lines: [`0 @${spouseId}@ INDI`, `1 NAME ${newGiven}${newSurname ? ` /${newSurname}/` : ''}`, `2 GIVN ${newGiven}`, ...(newSurname ? [`2 SURN ${newSurname}`] : [])]
+        });
+      }
+      const spouseRecord = findRecord('INDI', spouseId);
+      if (!spouseRecord) return showError('The spouse record could not be found.');
+      const familyId = nextGedcomXref('F', 'FAM');
+      addRecordBeforeTrailer({
+        xref: familyId, tag: 'FAM',
+        lines: [`0 @${familyId}@ FAM`, `1 HUSB @${selectedRole === 'HUSB' ? pending.personId : spouseId}@`, `1 WIFE @${selectedRole === 'WIFE' ? pending.personId : spouseId}@`, ...marriageLines()]
+      });
+      selectedRecord.lines = [...selectedRecord.lines, `1 FAMS @${familyId}@`];
+      spouseRecord.lines = [...spouseRecord.lines, `1 FAMS @${familyId}@`];
+    }
+    refreshAfterGedcomMutation(pending.personId);
+    fields.dialog.close();
+    showToast(deleteEvent ? `${config.label} removed from the family record.` : pending.familyId ? `${config.label} updated.` : `${config.label} added.`);
+    return true;
+  }
+
+  function lifeEventBlockEnd(lines, start) {
+    let end = start + 1;
+    while (end < lines.length) {
+      const field = parseGedcomField(lines[end]);
+      if (field && field.level <= 1) break;
+      end += 1;
+    }
+    return end;
+  }
+
+  function findLifeEventStart(lines, ordinal) {
+    let count = 0;
+    for (let index = 1; index < lines.length; index += 1) {
+      const field = parseGedcomField(lines[index]);
+      if (field?.level !== 1 || !eventTags.has(field.tag)) continue;
+      if (count === ordinal) return index;
+      count += 1;
+    }
+    return -1;
+  }
+
+  function setLifeEventSubfield(lines, start, fieldTag, value) {
+    const end = lifeEventBlockEnd(lines, start);
+    let found = -1;
+    for (let index = start + 1; index < end; index += 1) {
+      const field = parseGedcomField(lines[index]);
+      if (field?.level === 2 && field.tag === fieldTag) { found = index; break; }
+    }
+    if (found >= 0) {
+      if (value) lines[found] = `2 ${fieldTag} ${value}`;
+      else lines.splice(found, 1);
+    } else if (value) {
+      lines.splice(start + 1, 0, `2 ${fieldTag} ${value}`);
+    }
+  }
+
+  function setLifeEventNote(lines, start, value) {
+    let index = start + 1;
+    let insertAt = -1;
+    while (index < lifeEventBlockEnd(lines, start)) {
+      const field = parseGedcomField(lines[index]);
+      if (field?.level === 2 && field.tag === 'NOTE' && !field.value.startsWith('@')) {
+        if (insertAt < 0) insertAt = index;
+        let removeTo = index + 1;
+        while (removeTo < lines.length && (parseGedcomField(lines[removeTo])?.level || 0) >= 3) removeTo += 1;
+        lines.splice(index, removeTo - index);
+      } else {
+        index += 1;
+      }
+    }
+    if (value) lines.splice(insertAt < 0 ? lifeEventBlockEnd(lines, start) : insertAt, 0, `2 NOTE ${value}`);
+  }
+
+  function saveLifeEvent(deleteEvent = false) {
+    const pending = state.pendingLifeEvent;
+    const fields = lifeEventFields();
+    const personRecord = state.gedcomRecords.find((record) => record.tag === 'INDI' && record.xref === pending?.personId);
+    const showError = (message) => { fields.error.textContent = message; fields.error.hidden = false; return false; };
+    if (!personRecord) return showError('This person record could not be found in the current GEDCOM.');
+    const clean = (text) => text.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const config = pending.ordinal === null
+      ? lifeEventTypes.find((entry) => entry.key === fields.type.value) || lifeEventTypes[0]
+      : pending.config;
+    if (config.family) return saveMarriage(deleteEvent, config);
+    const date = clean(fields.date.value);
+    const place = clean(fields.place.value);
+    const description = clean(fields.desc.value);
+    const customType = clean(fields.custom.value);
+    const lines = [...personRecord.lines];
+
+    if (deleteEvent) {
+      const start = findLifeEventStart(lines, pending.ordinal);
+      if (start < 0) return showError('This event could not be found in the GEDCOM.');
+      lines.splice(start, lifeEventBlockEnd(lines, start) - start);
+    } else if (pending.ordinal === null) {
+      if (config.custom && !customType) return showError('Enter a name for this event, such as Census or Probate.');
+      if (!date && !place && !description) return showError('Enter a date, place or description for this event.');
+      const eventLines = [`1 ${config.tag}${config.mode === 'value' && description ? ` ${description}` : ''}`];
+      const typeText = config.custom ? customType : config.type;
+      if (typeText) eventLines.push(`2 TYPE ${typeText}`);
+      if (date) eventLines.push(`2 DATE ${date}`);
+      if (place) eventLines.push(`2 PLAC ${place}`);
+      if (config.mode === 'note' && description) eventLines.push(`2 NOTE ${description}`);
+      lines.push(...eventLines);
+    } else {
+      if (config.custom && !customType) return showError('Enter a name for this event, such as Census or Probate.');
+      const start = findLifeEventStart(lines, pending.ordinal);
+      if (start < 0) return showError('This event could not be found in the GEDCOM.');
+      const original = pending.original;
+      // Only changed fields are written so sources, notes and other sub-records are preserved.
+      if (config.mode === 'value' && description !== original.desc) {
+        lines[start] = `1 ${parseGedcomField(lines[start]).tag}${description ? ` ${description}` : ''}`;
+      }
+      if (config.custom && customType !== original.custom) setLifeEventSubfield(lines, start, 'TYPE', customType);
+      if (date !== original.date) setLifeEventSubfield(lines, start, 'DATE', date);
+      if (place !== original.place) setLifeEventSubfield(lines, start, 'PLAC', place);
+      if (config.mode === 'note' && description !== original.desc) setLifeEventNote(lines, start, description);
+    }
+    personRecord.lines = lines;
+    refreshAfterGedcomMutation(pending.personId);
+    fields.dialog.close();
+    showToast(deleteEvent ? 'Life event deleted.' : pending.ordinal === null ? 'Life event added.' : 'Life event updated.');
+    return true;
   }
 
   function savePersonSummary() {
@@ -2293,6 +2821,178 @@
     return true;
   }
 
+  const relationshipSentences = {
+    PARENT: (other, me) => `${other} is a parent of ${me}.`,
+    CHILD: (other, me) => `${other} is a child of ${me}.`,
+    SIBLING: (other, me) => `${other} is a sibling of ${me}.`,
+    PARTNER: (other, me) => `${other} is a partner / spouse of ${me}.`
+  };
+
+  function relationshipDialogParts() {
+    const byId = (id) => document.querySelector(`#${id}`);
+    return {
+      dialog: byId('relationshipDialog'), summary: byId('relationshipSummary'), error: byId('relationshipError'),
+      deleteWarning: byId('relationshipDeleteWarning'), deleteButton: byId('relationshipDelete'),
+      role: byId('relationshipRole'), roleField: byId('relationshipRoleField'),
+      pedi: byId('relationshipPedi'), pediField: byId('relationshipPediField'),
+      date: byId('relationshipDate'), dateField: byId('relationshipDateField'),
+      place: byId('relationshipPlace'), placeField: byId('relationshipPlaceField'),
+      marriageType: byId('relationshipMarriageType'), marriageTypeField: byId('relationshipMarriageTypeField')
+    };
+  }
+
+  const findGedcomRecord = (tag, xref) => state.gedcomRecords.find((record) => record.tag === tag && record.xref === xref);
+
+  function findLinkLine(lines, tag, xref) {
+    return lines.findIndex((line, index) => {
+      if (index === 0) return false;
+      const field = parseGedcomField(line);
+      return field?.level === 1 && field.tag === tag && splitXref(field.value) === xref;
+    });
+  }
+
+  function removeLinkLine(record, tag, xref) {
+    if (!record) return;
+    const lines = [...record.lines];
+    const start = findLinkLine(lines, tag, xref);
+    if (start < 0) return;
+    lines.splice(start, lifeEventBlockEnd(lines, start) - start);
+    record.lines = lines;
+  }
+
+  function readPedigree(childId, familyId) {
+    const lines = findGedcomRecord('INDI', childId)?.lines || [];
+    const start = findLinkLine(lines, 'FAMC', familyId);
+    if (start < 0) return '';
+    for (let index = start + 1; index < lifeEventBlockEnd(lines, start); index += 1) {
+      const field = parseGedcomField(lines[index]);
+      if (field?.level === 2 && field.tag === 'PEDI') return field.value.trim().toLowerCase();
+    }
+    return '';
+  }
+
+  function openRelationshipEditor(kind, familyId, otherId) {
+    const parts = relationshipDialogParts();
+    const family = state.families.get(familyId);
+    const person = state.people.get(state.selectedId);
+    if (!family || !person || !state.people.has(otherId)) return;
+    const childId = kind === 'PARENT' ? person.id : kind === 'PARTNER' ? '' : otherId;
+    const pending = { kind, familyId, otherId, personId: person.id, childId, original: {} };
+    parts.summary.textContent = relationshipSentences[kind](personName(otherId), person.name);
+    parts.error.hidden = true;
+    parts.deleteWarning.hidden = true;
+    parts.deleteButton.textContent = 'Delete relationship';
+    pending.deleteArmed = false;
+    parts.roleField.hidden = kind !== 'PARENT';
+    parts.pediField.hidden = !childId;
+    for (const field of [parts.dateField, parts.placeField, parts.marriageTypeField]) field.hidden = kind !== 'PARTNER';
+    if (kind === 'PARENT') {
+      pending.original.role = family.husbandId === otherId ? 'HUSB' : 'WIFE';
+      parts.role.value = pending.original.role;
+    }
+    if (childId) {
+      pending.original.pedi = readPedigree(childId, familyId);
+      if (pending.original.pedi && ![...parts.pedi.options].some((option) => option.value === pending.original.pedi)) {
+        parts.pedi.append(new Option(pending.original.pedi, pending.original.pedi));
+      }
+      parts.pedi.value = pending.original.pedi;
+    }
+    if (kind === 'PARTNER') {
+      const marriage = family.marriage;
+      pending.original.date = marriage?.date || '';
+      pending.original.place = marriage?.place || '';
+      pending.original.marriageType = marriage?.detail || '';
+      parts.date.value = pending.original.date;
+      parts.place.value = pending.original.place;
+      parts.marriageType.value = pending.original.marriageType;
+    }
+    state.pendingRelationship = pending;
+    parts.dialog.showModal();
+  }
+
+  function saveRelationship() {
+    const pending = state.pendingRelationship;
+    const parts = relationshipDialogParts();
+    const showError = (message) => { parts.error.textContent = message; parts.error.hidden = false; return false; };
+    const clean = (text) => text.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const familyRecord = findGedcomRecord('FAM', pending.familyId);
+    if (!familyRecord) return showError('This family record could not be found in the GEDCOM.');
+    const lines = [...familyRecord.lines];
+
+    if (pending.kind === 'PARENT') {
+      const role = parts.role.value;
+      if (role !== pending.original.role) {
+        const family = state.families.get(pending.familyId);
+        if ((role === 'HUSB' ? family.husbandId : family.wifeId)) {
+          return showError(`This family already has a ${role === 'HUSB' ? 'father / HUSB' : 'mother / WIFE'}. Change or remove that parent first.`);
+        }
+        const index = findLinkLine(lines, pending.original.role, pending.otherId);
+        if (index >= 0) lines[index] = `1 ${role} @${pending.otherId}@`;
+      }
+    }
+    if (pending.kind === 'PARTNER') {
+      const date = clean(parts.date.value);
+      const place = clean(parts.place.value);
+      const marriageType = clean(parts.marriageType.value);
+      const original = pending.original;
+      const start = lines.findIndex((line, index) => index > 0 && parseGedcomField(line)?.level === 1 && parseGedcomField(line)?.tag === 'MARR');
+      if (start >= 0) {
+        if (date !== original.date) setLifeEventSubfield(lines, start, 'DATE', date);
+        if (place !== original.place) setLifeEventSubfield(lines, start, 'PLAC', place);
+        if (marriageType !== original.marriageType) setLifeEventSubfield(lines, start, 'TYPE', marriageType);
+      } else if (date || place || marriageType) {
+        lines.push('1 MARR');
+        if (date) lines.push(`2 DATE ${date}`);
+        if (place) lines.push(`2 PLAC ${place}`);
+        if (marriageType) lines.push(`2 TYPE ${marriageType}`);
+      }
+    }
+    familyRecord.lines = lines;
+
+    if (pending.childId && parts.pedi.value !== pending.original.pedi) {
+      const childRecord = findGedcomRecord('INDI', pending.childId);
+      const childLines = childRecord ? [...childRecord.lines] : [];
+      const start = findLinkLine(childLines, 'FAMC', pending.familyId);
+      if (start >= 0) {
+        setLifeEventSubfield(childLines, start, 'PEDI', parts.pedi.value);
+        childRecord.lines = childLines;
+      }
+    }
+    refreshAfterGedcomMutation(pending.personId);
+    parts.dialog.close();
+    showToast('Relationship updated.');
+    return true;
+  }
+
+  function deleteRelationship() {
+    const pending = state.pendingRelationship;
+    const parts = relationshipDialogParts();
+    const { kind, familyId, otherId, personId } = pending;
+    const family = state.families.get(familyId);
+    const familyRecord = findGedcomRecord('FAM', familyId);
+    if (!family || !familyRecord) return false;
+    if (kind === 'PARENT' || kind === 'PARTNER') {
+      const memberId = otherId;
+      const hasChildren = family.childIds.length > 0;
+      if (kind === 'PARTNER' && !hasChildren) {
+        removeLinkLine(findGedcomRecord('INDI', personId), 'FAMS', familyId);
+        removeLinkLine(findGedcomRecord('INDI', otherId), 'FAMS', familyId);
+        state.gedcomRecords.splice(state.gedcomRecords.indexOf(familyRecord), 1);
+      } else {
+        const role = family.husbandId === memberId ? 'HUSB' : 'WIFE';
+        removeLinkLine(familyRecord, role, memberId);
+        removeLinkLine(findGedcomRecord('INDI', memberId), 'FAMS', familyId);
+      }
+    } else {
+      removeLinkLine(familyRecord, 'CHIL', otherId);
+      removeLinkLine(findGedcomRecord('INDI', otherId), 'FAMC', familyId);
+    }
+    refreshAfterGedcomMutation(personId);
+    parts.dialog.close();
+    showToast('Relationship deleted. The people records were kept.');
+    return true;
+  }
+
   function ensureCreateGedcomWelcomeAction() {
     const welcomeButton = elements.canvas.querySelector('.welcome-button');
     if (!welcomeButton || elements.canvas.querySelector('[data-create-gedcom]')) return;
@@ -2307,13 +3007,10 @@
     actions.append(welcomeButton, orLabel, createButton);
   }
 
-  elements.fileInput.addEventListener('change', async (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  async function loadGedcomFile(file) {
     if (file.size > 100 * 1024 * 1024) {
       showToast('This file is over 100 MB. Choose a smaller GEDCOM export.');
-      elements.fileInput.value = '';
-      return;
+      return false;
     }
     try {
       elements.loadStatus.textContent = 'READING LOCALLY…';
@@ -2323,10 +3020,18 @@
       setLoaded(file.name, parsed, storageKey, text);
       await persistActiveSession();
       showToast(`Loaded ${parsed.people.size.toLocaleString()} individuals. The data remains in this tab.`);
+      return true;
     } catch (error) {
       elements.loadStatus.textContent = 'IMPORT FAILED';
       showToast(error instanceof Error ? error.message : 'The GEDCOM could not be read.');
+      return false;
     }
+  }
+
+  elements.fileInput.addEventListener('change', async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!await loadGedcomFile(file)) elements.fileInput.value = '';
   });
   elements.createGedcomForm.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -2514,6 +3219,8 @@
   });
 
   elements.clear.addEventListener('click', () => {
+    if (state.mapMode) setMapMode(false);
+    elements.mapViewButton.disabled = true;
     releaseMediaUrls(); state.mediaIndex = null; state.mediaFolderPicked = false;
     state.mediaRelativePaths = new WeakMap(); state.mediaDirectoryHandle = null; state.pendingUploadPersonId = null;
     syncMediaButton();
@@ -2532,6 +3239,7 @@
     elements.loadStatus.textContent = 'WAITING FOR FILE'; elements.statusPip.classList.remove('ready');
     elements.canvas.innerHTML = '<div class="welcome-state"><div class="welcome-art" aria-hidden="true"><span class="orbit orbit-a"></span><span class="orbit orbit-b"></span><span class="welcome-node node-a"></span><span class="welcome-node node-b"></span><span class="welcome-node node-c"></span><span class="welcome-node node-d"></span><span class="welcome-node node-e"></span><span class="welcome-stem stem-a"></span><span class="welcome-stem stem-b"></span><span class="welcome-stem stem-c"></span><span class="welcome-stem stem-d"></span></div><div class="eyebrow">YOUR ARCHIVE, CONNECTED</div><h2>Start with a person.</h2><p>Choose a local GEDCOM file to open its family relationships in this tab.</p><label class="button button-primary welcome-button" for="gedcomInput"><span class="button-plus" aria-hidden="true">+</span> Open GEDCOM</label><span class="welcome-note">Your file is read locally and is not uploaded or saved by this app.</span></div>';
     ensureCreateGedcomWelcomeAction();
+    ensureDefaultWelcomeAction();
     elements.title.textContent = 'A family, in context.'; elements.subtitle.textContent = 'Open a GEDCOM to explore recorded relationships.';
     elements.graphSummary.textContent = 'NO TREE LOADED'; elements.generationLabel.textContent = 'FIVE GENERATIONS';
     state.zoom = 1; elements.canvas.style.zoom = '1'; elements.zoomLabel.textContent = '100%';
@@ -2540,6 +3248,7 @@
   });
 
   elements.search.addEventListener('input', () => { state.searchText = elements.search.value; renderRoster(); });
+  elements.mapViewButton.addEventListener('click', () => setMapMode(!state.mapMode));
   elements.birthCountryFilter.addEventListener('change', () => {
     state.directoryFilters.birthCountry = elements.birthCountryFilter.value;
     renderRoster();
@@ -2552,6 +3261,17 @@
   elements.birthYearMax.addEventListener('input', () => handleYearFilterInput('birth', 'max'));
   elements.deathYearMin.addEventListener('input', () => handleYearFilterInput('death', 'min'));
   elements.deathYearMax.addEventListener('input', () => handleYearFilterInput('death', 'max'));
+  elements.peopleList.addEventListener('change', (event) => {
+    const check = event.target.closest('input[data-surname-filter]');
+    if (!check) return;
+    if (check.checked) state.surnameFilter.add(check.dataset.surnameFilter);
+    else state.surnameFilter.delete(check.dataset.surnameFilter);
+    renderRoster();
+  });
+  elements.clearSurnameFilter.addEventListener('click', () => {
+    state.surnameFilter.clear();
+    renderRoster();
+  });
   elements.peopleList.addEventListener('click', (event) => {
     const groupToggle = event.target.closest('button[data-surname-toggle]');
     if (groupToggle) {
@@ -2565,6 +3285,10 @@
     if (button) setFocus(button.dataset.personId);
   });
   elements.canvas.addEventListener('click', (event) => {
+    if (event.target.closest('button[data-open-default]')) {
+      openDefaultTree(true);
+      return;
+    }
     if (event.target.closest('button[data-create-gedcom]')) {
       showNewGedcomNotice();
       elements.newGedcomDialog.showModal();
@@ -2585,10 +3309,39 @@
       if (person) openPersonSummaryEditor(person);
       return;
     }
-    const editButton = event.target.closest('button[data-edit-person]');
+    const homeButton = event.target.closest('button[data-home-person]');
+    if (homeButton) {
+      toggleHomePerson(homeButton.dataset.homePerson);
+      return;
+    }
+    const editButton = event.target.closest('button[data-add-life-event]');
     if (editButton) {
-      const person = state.people.get(editButton.dataset.editPerson);
-      if (person) openPersonEditor(person);
+      const person = state.people.get(editButton.dataset.addLifeEvent);
+      if (person) openLifeEventEditor(person, null);
+      return;
+    }
+    const eventItem = event.target.closest('.event-item[data-event-ordinal], .event-item[data-family-id]');
+    if (eventItem) {
+      const person = state.people.get(state.selectedId);
+      const lifeEvent = eventItem.dataset.familyId
+        ? marriageEventsFor(person).find((entry) => entry.familyId === eventItem.dataset.familyId && entry.type === eventItem.dataset.familyEvent)
+        : person?.events.find((entry) => entry.ordinal === Number(eventItem.dataset.eventOrdinal));
+      if (lifeEvent) openLifeEventEditor(person, lifeEvent);
+      return;
+    }
+    const addRelationButton = event.target.closest('button[data-add-relation]');
+    if (addRelationButton && state.people.has(state.selectedId)) {
+      elements.addRelativeForm.reset();
+      elements.relativeType.value = addRelationButton.dataset.addRelation;
+      document.querySelector('#relativeDuplicateWarning').hidden = true;
+      document.querySelector('#relativeDuplicateConfirmationLabel').hidden = true;
+      elements.relativeParentRoleField.hidden = elements.relativeType.value !== 'PARENT';
+      elements.addRelativeDialog.showModal();
+      return;
+    }
+    const editRelationButton = event.target.closest('button[data-edit-relationship]');
+    if (editRelationButton) {
+      openRelationshipEditor(editRelationButton.dataset.editRelationship, editRelationButton.dataset.familyId, editRelationButton.dataset.otherId);
       return;
     }
     const relativeButton = event.target.closest('button[data-add-relative]');
@@ -2681,6 +3434,40 @@
   elements.personSummaryDialog.addEventListener('close', () => {
     state.pendingPersonSummaryId = null;
   });
+  const lifeEvent = lifeEventFields();
+  lifeEvent.type.addEventListener('change', () => {
+    const config = lifeEventTypes.find((entry) => entry.key === lifeEvent.type.value) || lifeEventTypes[0];
+    state.pendingLifeEvent.config = config;
+    applyLifeEventConfig(config);
+  });
+  lifeEvent.spouse.addEventListener('change', syncNewSpouseFields);
+  lifeEvent.date.addEventListener('input', () => { lifeEvent.picker.value = datePickerValue(lifeEvent.date.value); });
+  lifeEvent.picker.addEventListener('change', () => {
+    if (lifeEvent.picker.value) lifeEvent.date.value = formatGedcomDate(lifeEvent.picker.value);
+  });
+  document.querySelector('#lifeEventForm').addEventListener('submit', (event) => {
+    event.preventDefault();
+    saveLifeEvent(false);
+  });
+  lifeEvent.remove.addEventListener('click', () => {
+    if (lifeEvent.remove.dataset.confirm !== 'true') {
+      lifeEvent.remove.dataset.confirm = 'true';
+      lifeEvent.remove.textContent = 'Click again to confirm delete';
+      return;
+    }
+    saveLifeEvent(true);
+  });
+  lifeEvent.dialog.addEventListener('close', () => {
+    state.pendingLifeEvent = null;
+    delete lifeEvent.remove.dataset.confirm;
+  });
+  elements.details.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const eventItem = event.target.closest?.('.event-item[data-event-ordinal], .event-item[data-family-id]');
+    if (!eventItem) return;
+    event.preventDefault();
+    eventItem.click();
+  });
   elements.personEditorDialog.addEventListener('close', () => {
     state.pendingEditPersonId = null;
   });
@@ -2692,6 +3479,28 @@
   });
   elements.relativeType.addEventListener('change', () => {
     elements.relativeParentRoleField.hidden = elements.relativeType.value !== 'PARENT';
+  });
+  document.querySelector('#relationshipForm').addEventListener('submit', (event) => {
+    event.preventDefault();
+    saveRelationship();
+  });
+  document.querySelector('#relationshipDelete').addEventListener('click', () => {
+    const pending = state.pendingRelationship;
+    if (!pending) return;
+    const parts = relationshipDialogParts();
+    if (!pending.deleteArmed) {
+      pending.deleteArmed = true;
+      parts.deleteButton.textContent = 'Confirm delete';
+      parts.deleteWarning.textContent = pending.kind === 'PARTNER'
+        ? 'This removes the partnership link. If the couple have children, they stay linked to their other parent. No people or media are deleted.'
+        : 'This removes only the link between these two people. No people or media are deleted.';
+      parts.deleteWarning.hidden = false;
+      return;
+    }
+    deleteRelationship();
+  });
+  document.querySelector('#relationshipDialog').addEventListener('close', () => {
+    state.pendingRelationship = null;
   });
   elements.researchConsent.addEventListener('change', () => {
     elements.confirmWikiTreeSearch.disabled = !elements.researchConsent.checked || Boolean(wikiTreeSearchAbort);
@@ -2729,6 +3538,318 @@
       if (!elements.search.disabled) elements.search.focus();
     }
   });
+  // Default tree: the file/folder handles live in IndexedDB (the only way a page can reopen them);
+  // a readable copy of the names and paths is written to kinship-defaults.json.
+  function openDefaultsDatabase() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open('kinship-atlas-defaults', 1);
+      request.onupgradeneeded = () => request.result.createObjectStore('handles');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function defaultsStoreRequest(mode, action) {
+    const database = await openDefaultsDatabase();
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction('handles', mode);
+      const request = action(transaction.objectStore('handles'));
+      transaction.oncomplete = () => resolve(request.result);
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  }
+
+  const readDefaultRecord = () => defaultsStoreRequest('readonly', (store) => store.get('default')).then((record) => record || null, () => null);
+  const writeDefaultRecord = (record) => defaultsStoreRequest('readwrite', (store) => store.put(record, 'default'));
+  const deleteDefaultRecord = () => defaultsStoreRequest('readwrite', (store) => store.delete('default'));
+
+  const defaultsParts = () => ({
+    dialog: document.querySelector('#defaultsDialog'),
+    gedcomName: document.querySelector('#defaultsGedcomName'),
+    gedcomPath: document.querySelector('#defaultsGedcomPath'),
+    mediaName: document.querySelector('#defaultsMediaName'),
+    mediaPath: document.querySelector('#defaultsMediaPath'),
+    removeMedia: document.querySelector('#defaultsRemoveMedia'),
+    error: document.querySelector('#defaultsError'),
+    clear: document.querySelector('#defaultsClear')
+  });
+
+  function updateDefaultsButton() {
+    document.querySelector('#defaultsButton').textContent = state.defaultRecord?.gedcomHandle ? 'Change Default' : 'Set Default';
+  }
+
+  function syncDefaultsDialog() {
+    const parts = defaultsParts();
+    const draft = state.defaultsDraft;
+    parts.gedcomName.textContent = draft.gedcomName || 'None selected';
+    parts.mediaName.textContent = draft.mediaName || 'None selected';
+    parts.removeMedia.hidden = !draft.mediaHandle;
+  }
+
+  function openDefaultsDialog() {
+    const parts = defaultsParts();
+    const record = state.defaultRecord;
+    state.defaultsDraft = {
+      gedcomHandle: record?.gedcomHandle || null, gedcomName: record?.gedcomName || '',
+      mediaHandle: record?.mediaHandle || null, mediaName: record?.mediaName || '',
+      configHandle: record?.configHandle || null
+    };
+    parts.gedcomPath.value = record?.gedcomPath || '';
+    parts.mediaPath.value = record?.mediaPath || '';
+    parts.error.hidden = true;
+    parts.clear.hidden = !record;
+    syncDefaultsDialog();
+    parts.dialog.showModal();
+  }
+
+  async function writeDefaultsFile(record, allowPicker = true) {
+    const payload = JSON.stringify({
+      app: 'Kinship Atlas', version: 1, savedAt: new Date().toISOString(),
+      gedcom: record ? { name: record.gedcomName, path: record.gedcomPath || '' } : null,
+      mediaFolder: record?.mediaHandle ? { name: record.mediaName, path: record.mediaPath || '' } : null,
+      homePerson: record?.homePersonId ? { id: record.homePersonId, name: record.homePersonName || '' } : null
+    }, null, 2);
+    const write = async (handle) => {
+      const writable = await handle.createWritable();
+      await writable.write(`${payload}\n`);
+      await writable.close();
+    };
+    if (state.defaultsDraft.configHandle) {
+      try {
+        await write(state.defaultsDraft.configHandle);
+        return state.defaultsDraft.configHandle;
+      } catch {
+        state.defaultsDraft.configHandle = null;
+      }
+    }
+    if (!allowPicker || typeof window.showSaveFilePicker !== 'function') return null;
+    const handle = await window.showSaveFilePicker({
+      suggestedName: 'kinship-defaults.json',
+      types: [{ description: 'Kinship Atlas defaults', accept: { 'application/json': ['.json'] } }]
+    });
+    await write(handle);
+    return handle;
+  }
+
+  async function saveDefaults() {
+    const parts = defaultsParts();
+    const draft = state.defaultsDraft;
+    if (!draft.gedcomHandle) {
+      parts.error.textContent = 'Choose a GEDCOM file first.';
+      parts.error.hidden = false;
+      return;
+    }
+    const record = {
+      gedcomHandle: draft.gedcomHandle, gedcomName: draft.gedcomName, gedcomPath: parts.gedcomPath.value.trim(),
+      mediaHandle: draft.mediaHandle, mediaName: draft.mediaName, mediaPath: parts.mediaPath.value.trim(),
+      configHandle: null,
+      homePersonId: state.defaultRecord?.gedcomName === draft.gedcomName ? state.defaultRecord.homePersonId || '' : '',
+      homePersonName: state.defaultRecord?.gedcomName === draft.gedcomName ? state.defaultRecord.homePersonName || '' : ''
+    };
+    let configSaved = false;
+    try {
+      record.configHandle = await writeDefaultsFile(record);
+      configSaved = Boolean(record.configHandle);
+    } catch (error) {
+      if (error.name !== 'AbortError') showToast('kinship-defaults.json could not be written.');
+    }
+    try {
+      await writeDefaultRecord(record);
+    } catch {
+      parts.error.textContent = 'This browser could not remember the default. Check that site storage is allowed.';
+      parts.error.hidden = false;
+      return;
+    }
+    state.defaultRecord = record;
+    updateDefaultsButton();
+    if (!state.fileName) ensureDefaultWelcomeAction();
+    parts.dialog.close();
+    showToast(configSaved ? 'Default saved and written to kinship-defaults.json.' : 'Default saved in this browser (kinship-defaults.json was not written).');
+  }
+
+  async function clearDefaults() {
+    const parts = defaultsParts();
+    try {
+      state.defaultsDraft.configHandle = state.defaultRecord?.configHandle || null;
+      if (state.defaultsDraft.configHandle) await writeDefaultsFile(null).catch(() => {});
+      await deleteDefaultRecord();
+    } catch {
+      showToast('The default could not be cleared.');
+      return;
+    }
+    state.defaultRecord = null;
+    updateDefaultsButton();
+    elements.canvas.querySelector('[data-open-default]')?.remove();
+    parts.dialog.close();
+    showToast('Default cleared. The app will open on the home page.');
+  }
+
+  function ensureDefaultWelcomeAction() {
+    const welcome = elements.canvas.querySelector('.welcome-state');
+    if (!welcome || !state.defaultRecord?.gedcomHandle || welcome.querySelector('[data-open-default]')) return;
+    const button = makeButton(`Open default: ${state.defaultRecord.gedcomName}`, 'button button-primary welcome-default');
+    button.dataset.openDefault = 'true';
+    welcome.append(button);
+  }
+
+  async function openDefaultTree(interactive) {
+    const record = state.defaultRecord;
+    if (!record?.gedcomHandle) return;
+    try {
+      if (interactive) {
+        // Permission prompts need this click as the user gesture.
+        const read = await record.gedcomHandle.requestPermission({ mode: 'read' });
+        if (record.mediaHandle) await record.mediaHandle.requestPermission({ mode: 'readwrite' }).catch(() => {});
+        if (read !== 'granted') {
+          showToast('Access to the default GEDCOM was not allowed.');
+          return;
+        }
+      }
+      let file;
+      try {
+        file = await record.gedcomHandle.getFile();
+      } catch {
+        showToast('The default GEDCOM could not be found. Use Set Default to choose it again.');
+        return;
+      }
+      if (!await loadGedcomFile(file)) return;
+      if (record.homePersonId && state.people.has(record.homePersonId)) setFocus(record.homePersonId, true);
+      else showTreeWelcome();
+      if (record.mediaHandle) {
+        await restoreMediaDirectoryHandle(record.mediaHandle);
+        await persistActiveSession();
+      }
+    } catch {
+      showToast('The default tree could not be opened. Use Set Default to choose it again.');
+    }
+  }
+
+  // primary-data.js is written by Kinship Atlas.exe from the "Primary GEDCOM" and "Primary Media Library" folders.
+  function attachPrimaryMedia(bundle) {
+    if (state.mediaDirectoryHandle || !Array.isArray(bundle.media)) return;
+    let added = false;
+    for (const item of bundle.media) {
+      if (!item?.name || !item.url || resolveMediaFile(item.name)) continue;
+      const file = new File([], item.name, { type: item.type || '' });
+      file.kinshipUrl = item.url;
+      addFileToMediaIndex(file, item.path || item.name);
+      added = true;
+    }
+    if (added) render();
+  }
+
+  async function openPrimaryFolderTree() {
+    const bundle = window.KINSHIP_PRIMARY;
+    if (!bundle || typeof bundle.gedcomText !== 'string' || !bundle.gedcomName) return false;
+    if (state.fileName && state.fileName !== bundle.gedcomName) return true;
+    if (!state.fileName) {
+      const file = new File([bundle.gedcomText], bundle.gedcomName, { type: 'text/plain' });
+      if (!await loadGedcomFile(file)) return false;
+      const record = state.defaultRecord;
+      if (record?.homePersonId && record.gedcomName === bundle.gedcomName && state.people.has(record.homePersonId)) setFocus(record.homePersonId, true);
+      else showTreeWelcome();
+    }
+    attachPrimaryMedia(bundle);
+    return true;
+  }
+
+  async function applyDefaultOnStartup() {
+    state.defaultRecord = await readDefaultRecord();
+    updateDefaultsButton();
+    if (await openPrimaryFolderTree()) return;
+    if (state.fileName || !state.defaultRecord?.gedcomHandle) return;
+    ensureDefaultWelcomeAction();
+    try {
+      if (await state.defaultRecord.gedcomHandle.queryPermission({ mode: 'read' }) === 'granted') await openDefaultTree(false);
+    } catch {
+      // The home page button stays available.
+    }
+  }
+
+  async function toggleHomePerson(personId) {
+    const record = state.defaultRecord;
+    const person = state.people.get(personId);
+    if (!record || !person) return;
+    const clearing = record.homePersonId === personId;
+    const updated = { ...record, homePersonId: clearing ? '' : personId, homePersonName: clearing ? '' : person.name };
+    state.defaultsDraft = { configHandle: record.configHandle || null };
+    try {
+      await writeDefaultRecord(updated);
+    } catch {
+      showToast('This browser could not remember the home person.');
+      return;
+    }
+    state.defaultRecord = updated;
+    try {
+      const wrote = await writeDefaultsFile(updated, false);
+      if (!wrote) showToast(clearing ? 'Home person cleared (saved in this browser only).' : `${person.name} is now the home person (saved in this browser only; use Change Default to also update kinship-defaults.json).`);
+      else showToast(clearing ? 'Home person cleared.' : `${person.name} will be selected when the default GEDCOM opens.`);
+    } catch {
+      showToast('Home person saved in this browser; kinship-defaults.json could not be updated.');
+    }
+    renderDetails();
+  }
+
+  const settingsMenu = document.querySelector('#settingsMenu');
+  const settingsPanel = document.querySelector('#settingsPanel');
+  const settingsButton = document.querySelector('#settingsButton');
+  function setSettingsOpen(open) {
+    settingsPanel.hidden = !open;
+    settingsButton.setAttribute('aria-expanded', String(open));
+  }
+  settingsButton.addEventListener('click', () => setSettingsOpen(settingsPanel.hidden));
+  settingsPanel.addEventListener('click', () => window.setTimeout(() => setSettingsOpen(false), 0));
+  document.addEventListener('click', (event) => { if (!settingsMenu.contains(event.target)) setSettingsOpen(false); });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !settingsPanel.hidden) { setSettingsOpen(false); settingsButton.focus(); }
+  });
+
+  document.querySelector('#defaultsButton').addEventListener('click', openDefaultsDialog);
+  setButtonContent(elements.mapViewButton, 'map', 'Map View');
+  setButtonContent(elements.clear, 'restart', 'Start Again');
+  document.querySelector('#defaultsPickGedcom').addEventListener('click', async () => {
+    if (typeof window.showOpenFilePicker !== 'function') {
+      defaultsParts().error.textContent = 'Setting a default needs a browser with local file access, such as Edge or Chrome.';
+      defaultsParts().error.hidden = false;
+      return;
+    }
+    try {
+      const [handle] = await window.showOpenFilePicker({ types: [{ description: 'GEDCOM', accept: { 'text/plain': ['.ged', '.gedcom'] } }] });
+      state.defaultsDraft.gedcomHandle = handle;
+      state.defaultsDraft.gedcomName = handle.name;
+      defaultsParts().error.hidden = true;
+      syncDefaultsDialog();
+    } catch (error) {
+      if (error.name !== 'AbortError') showToast('The GEDCOM file could not be selected.');
+    }
+  });
+  document.querySelector('#defaultsPickMedia').addEventListener('click', async () => {
+    if (typeof window.showDirectoryPicker !== 'function') {
+      defaultsParts().error.textContent = 'Choosing a media folder needs a browser with local directory access, such as Edge or Chrome.';
+      defaultsParts().error.hidden = false;
+      return;
+    }
+    try {
+      const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+      state.defaultsDraft.mediaHandle = handle;
+      state.defaultsDraft.mediaName = handle.name;
+      syncDefaultsDialog();
+    } catch (error) {
+      if (error.name !== 'AbortError') showToast('The media folder could not be selected.');
+    }
+  });
+  document.querySelector('#defaultsRemoveMedia').addEventListener('click', () => {
+    state.defaultsDraft.mediaHandle = null;
+    state.defaultsDraft.mediaName = '';
+    defaultsParts().mediaPath.value = '';
+    syncDefaultsDialog();
+  });
+  document.querySelector('#defaultsSave').addEventListener('click', saveDefaults);
+  document.querySelector('#defaultsClear').addEventListener('click', clearDefaults);
+
   window.addEventListener('pagehide', () => { persistActiveSession(); });
-  probeMediaHelper().then(restoreActiveSession).then(loadHelperMedia);
+  // Keeps Kinship Atlas.exe's local server alive while this tab is open.
+  window.setInterval(() => { if (state.mediaHelper) fetch('/api/media-info', { cache: 'no-store' }).catch(() => {}); }, 30000);
+  probeMediaHelper().then(restoreActiveSession).then(applyDefaultOnStartup).then(loadHelperMedia);
 })();

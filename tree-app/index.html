@@ -5,25 +5,42 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>Kinship Atlas</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="alternate icon" type="image/x-icon" href="launcher/kinship-atlas.ico">
   <link rel="stylesheet" href="styles.css">
+  <script src="primary-data.js" defer></script>
+  <script src="data/world-data.js" defer></script>
+  <script src="map.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="#" aria-label="Kinship Atlas home">
-      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
-      <span><span class="brand-kicker">LOCAL FAMILY ARCHIVE</span><strong>Kinship Atlas</strong></span>
-    </a>
+    <div class="topbar-left">
+      <a class="brand" href="#" aria-label="Kinship Atlas home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <span><span class="brand-kicker">LOCAL FAMILY ARCHIVE</span><strong>Kinship Atlas</strong></span>
+      </a>
+      <button id="mapViewButton" class="button button-quiet" type="button" aria-pressed="false" disabled>Map View</button>
+    </div>
     <div class="topbar-meta"><span class="privacy-indicator"><span class="privacy-dot"></span> ON THIS DEVICE</span><span class="topbar-divider"></span><span id="treeLabel">No tree loaded</span></div>
     <div class="topbar-actions">
-      <label id="openGedcomLabel" class="button button-primary" for="gedcomInput">
-        <span class="button-plus" aria-hidden="true">+</span> Open GEDCOM
-        <input id="gedcomInput" type="file" accept=".ged,.gedcom,text/plain">
-      </label>
-      <button id="mediaButton" class="button button-quiet media-button" type="button" disabled>Select Media Folder</button>
-      <input id="mediaInput" type="file" webkitdirectory directory multiple>
-      <input id="mediaUploadInput" type="file" accept="image/*,.pdf,application/pdf" multiple>
-      <button id="clearButton" class="button button-quiet" type="button" disabled>Start Again</button>
+      <div class="settings-menu" id="settingsMenu">
+        <button id="settingsButton" class="button button-quiet" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="settingsPanel">
+          <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+          Settings <span class="menu-caret" aria-hidden="true">▾</span>
+        </button>
+        <div id="settingsPanel" class="settings-panel" role="menu" hidden>
+          <label id="openGedcomLabel" class="menu-item" for="gedcomInput" role="menuitem">
+            Open GEDCOM
+            <input id="gedcomInput" type="file" accept=".ged,.gedcom,text/plain">
+          </label>
+          <button id="mediaButton" class="menu-item media-button" type="button" role="menuitem" disabled>Select Media Folder</button>
+          <input id="mediaInput" type="file" webkitdirectory directory multiple>
+          <input id="mediaUploadInput" type="file" accept="image/*,.pdf,application/pdf" multiple>
+          <button id="defaultsButton" class="menu-item" type="button" role="menuitem" title="Choose the GEDCOM file and media folder that open automatically">Set Default</button>
+          <button id="clearButton" class="menu-item" type="button" role="menuitem" disabled>Start Again</button>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -31,7 +48,8 @@
     <aside class="roster-panel" aria-label="People in tree">
       <div class="panel-intro">
         <div class="eyebrow">DIRECTORY <span class="eyebrow-rule"></span></div>
-        <div class="roster-count"><strong id="peopleCount">0</strong><span>people</span></div>
+        <div class="roster-count"><span>Showing</span><strong id="visibleCount">0</strong><span>/</span><strong id="peopleCount">0</strong><span>people</span></div>
+        <button id="clearSurnameFilter" class="roster-clear" type="button" hidden>Clear surname filter</button>
       </div>
       <label class="search-box" for="peopleSearch">
         <span class="search-glyph" aria-hidden="true">⌕</span>
@@ -59,7 +77,7 @@
     <main class="main-panel">
       <div class="main-heading">
         <div class="heading-copy">
-          <div class="eyebrow">RELATIONSHIP MAP <span class="eyebrow-rule"></span><span id="generationLabel">FIVE GENERATIONS</span></div>
+            <div class="eyebrow"><span id="viewEyebrow">RELATIONSHIP MAP</span> <span class="eyebrow-rule"></span><span id="generationLabel">FIVE GENERATIONS</span></div>
           <h1 id="focusTitle">A family, in context.</h1>
           <p id="focusSubtitle">Open a GEDCOM to explore recorded relationships.</p>
         </div>
@@ -73,7 +91,7 @@
         </div>
       </div>
       <div id="graphViewport" class="graph-viewport">
-        <div id="treeCanvas" class="tree-canvas">
+        <div id="mapView" hidden></div>        <div id="treeCanvas" class="tree-canvas">
           <div class="welcome-state">
             <div class="welcome-art" aria-hidden="true">
               <span class="orbit orbit-a"></span><span class="orbit orbit-b"></span>
@@ -119,6 +137,29 @@
         <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="unlinkMediaDialog">Cancel</button>
       </div>
     </section>
+  </dialog>
+  <dialog id="defaultsDialog" class="app-dialog" aria-labelledby="defaultsTitle">
+    <form id="defaultsForm" class="dialog-panel new-gedcom-panel" method="dialog">
+      <h2 id="defaultsTitle">Default GEDCOM and media folder</h2>
+      <p>The app opens these automatically at start-up. The details are saved in <strong>kinship-defaults.json</strong> and the browser remembers access to the file and folder. Nothing is uploaded.</p>
+      <div class="new-gedcom-fields">
+        <div class="new-gedcom-field">GEDCOM file
+          <div class="defaults-row"><span id="defaultsGedcomName" class="defaults-name">None selected</span><button id="defaultsPickGedcom" class="dialog-button" type="button">Choose file…</button></div>
+          <input id="defaultsGedcomPath" type="text" maxlength="500" placeholder="Full path, for your records (optional)" aria-label="GEDCOM full path">
+        </div>
+        <div class="new-gedcom-field">Media folder (optional)
+          <div class="defaults-row"><span id="defaultsMediaName" class="defaults-name">None selected</span><button id="defaultsPickMedia" class="dialog-button" type="button">Choose folder…</button><button id="defaultsRemoveMedia" class="dialog-button dialog-button-quiet" type="button" hidden>Remove</button></div>
+          <input id="defaultsMediaPath" type="text" maxlength="500" placeholder="Full path, for your records (optional)" aria-label="Media folder full path">
+        </div>
+      </div>
+      <p class="dialog-hint">Browsers do not reveal full paths, so type them if you want them recorded. They are not used to open the files.</p>
+      <p id="defaultsError" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button id="defaultsSave" class="dialog-button dialog-button-primary" type="button">Save default</button>
+        <button id="defaultsClear" class="dialog-button dialog-button-quiet" type="button">Clear default</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="defaultsDialog">Cancel</button>
+      </div>
+    </form>
   </dialog>
   <dialog id="mediaFolderDialog" class="app-dialog" aria-labelledby="mediaFolderTitle">
     <section class="dialog-panel">
@@ -180,6 +221,29 @@
       </div>
     </form>
   </dialog>
+  <dialog id="lifeEventDialog" class="app-dialog" aria-labelledby="lifeEventTitle">
+    <form id="lifeEventForm" class="dialog-panel new-gedcom-panel">
+      <h2 id="lifeEventTitle">Add life event</h2>
+      <p id="lifeEventIntro">Choose the kind of event, then enter a GEDCOM date such as ABT 1883, or use the calendar for an exact date.</p>
+      <div class="new-gedcom-fields">
+        <label class="new-gedcom-field" for="lifeEventType">Event type<select id="lifeEventType"></select></label>
+        <label id="lifeEventCustomTypeField" class="new-gedcom-field" for="lifeEventCustomType" hidden>Event name<input id="lifeEventCustomType" type="text" maxlength="90" placeholder="e.g. Census, Probate" autocomplete="off"></label>
+        <label id="lifeEventSpouseField" class="new-gedcom-field life-event-wide" for="lifeEventSpouse" hidden>Spouse<select id="lifeEventSpouse"></select></label>
+        <label id="lifeEventNewSpouseGivenField" class="new-gedcom-field" for="lifeEventNewSpouseGiven" hidden>New spouse given name(s)<input id="lifeEventNewSpouseGiven" type="text" maxlength="120" autocomplete="off"></label>
+        <label id="lifeEventNewSpouseSurnameField" class="new-gedcom-field" for="lifeEventNewSpouseSurname" hidden>New spouse surname<input id="lifeEventNewSpouseSurname" type="text" maxlength="120" autocomplete="off"></label>
+        <label class="new-gedcom-field" for="lifeEventDate">Date (GEDCOM)<input id="lifeEventDate" type="text" maxlength="40" placeholder="e.g. ABT 1883"><input id="lifeEventDatePicker" type="date" aria-label="Choose exact event date"></label>
+        <label class="new-gedcom-field" for="lifeEventPlace">Place<input id="lifeEventPlace" type="text" maxlength="200" autocomplete="off"></label>
+        <label id="lifeEventMarriageTypeField" class="new-gedcom-field life-event-wide" for="lifeEventMarriageType" hidden>Marriage type<input id="lifeEventMarriageType" type="text" maxlength="60" list="lifeEventMarriageTypes" placeholder="e.g. Religious, Civil" autocomplete="off"><datalist id="lifeEventMarriageTypes"><option value="Religious"><option value="Civil"><option value="Common law"><option value="Registered partnership"><option value="Same-sex marriage"></datalist></label>
+        <label id="lifeEventDescriptionField" class="new-gedcom-field life-event-wide" for="lifeEventDescription"><span id="lifeEventDescriptionLabel">Notes</span><input id="lifeEventDescription" type="text" maxlength="250" autocomplete="off"></label>
+      </div>
+      <p id="lifeEventError" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="dialog-button dialog-button-primary" type="submit">Save</button>
+        <button id="lifeEventDelete" class="dialog-button" type="button" hidden>Delete event</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="lifeEventDialog">Cancel</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="personSummaryDialog" class="app-dialog" aria-labelledby="personSummaryTitle">
     <form id="personSummaryForm" class="dialog-panel new-gedcom-panel">
       <h2 id="personSummaryTitle">Edit person details</h2>
@@ -220,6 +284,26 @@
       <div class="dialog-actions">
         <button class="dialog-button dialog-button-primary" type="submit">Add person</button>
         <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="addRelativeDialog">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="relationshipDialog" class="app-dialog" aria-labelledby="relationshipTitle">
+    <form id="relationshipForm" class="dialog-panel new-gedcom-panel">
+      <h2 id="relationshipTitle">Edit relationship</h2>
+      <p id="relationshipSummary"></p>
+      <div class="new-gedcom-fields">
+        <label class="new-gedcom-field" id="relationshipRoleField" for="relationshipRole">Parent role<select id="relationshipRole"><option value="HUSB">Father / HUSB</option><option value="WIFE">Mother / WIFE</option></select></label>
+        <label class="new-gedcom-field" id="relationshipPediField" for="relationshipPedi">Relationship to parents<select id="relationshipPedi"><option value="">Not specified</option><option value="birth">Birth</option><option value="adopted">Adopted</option><option value="foster">Foster</option><option value="sealing">Sealing</option></select></label>
+        <label class="new-gedcom-field" id="relationshipDateField" for="relationshipDate">Marriage date<input id="relationshipDate" type="text" maxlength="60" placeholder="e.g. 15 JUN 1920"></label>
+        <label class="new-gedcom-field" id="relationshipPlaceField" for="relationshipPlace">Marriage place<input id="relationshipPlace" type="text" maxlength="200"></label>
+        <label class="new-gedcom-field" id="relationshipMarriageTypeField" for="relationshipMarriageType">Marriage type<input id="relationshipMarriageType" type="text" maxlength="60"         list="lifeEventMarriageTypes"></label>
+      </div>
+      <p id="relationshipError" class="form-error" role="alert" hidden></p>
+      <p id="relationshipDeleteWarning" class="form-error" hidden></p>
+      <div class="dialog-actions">
+        <button id="relationshipDelete" class="dialog-button dialog-button-quiet" type="button">Delete relationship</button>
+        <button class="dialog-button dialog-button-primary" type="submit">Save</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="relationshipDialog">Cancel</button>
       </div>
     </form>
   </dialog>
