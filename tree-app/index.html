@@ -24,6 +24,13 @@
     </div>
     <div class="topbar-meta"><span class="privacy-indicator"><span class="privacy-dot"></span> ON THIS DEVICE</span><span class="topbar-divider"></span><span id="treeLabel">No tree loaded</span></div>
     <div class="topbar-actions">
+      <div id="primaryPersonBar" class="primary-person-bar" hidden>
+        <button id="primaryHomeButton" class="button button-quiet primary-home-button" type="button" title="Go to the primary person's record">
+          <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 9.5V20h13V9.5"/><path d="M10 20v-5.5h4V20"/></svg>
+          Home
+        </button>
+        <span class="primary-person-label"><span class="primary-person-kicker">PRIMARY PERSON</span><strong id="primaryPersonName"></strong></span>
+      </div>
       <div class="settings-menu" id="settingsMenu">
         <button id="settingsButton" class="button button-quiet" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="settingsPanel">
           <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
@@ -88,6 +95,10 @@
           <button id="zoomOutButton" class="icon-button zoom-button" type="button" title="Zoom out" aria-label="Zoom out" disabled>−</button>
           <span id="zoomLabel" class="zoom-label">100%</span>
           <button id="zoomInButton" class="icon-button zoom-button" type="button" title="Zoom in" aria-label="Zoom in" disabled>+</button>
+          <span class="history-divider print-map-divider"></span>
+          <button id="printMapButton" class="icon-button print-map-button" type="button" title="Print relationship map (A4)" aria-label="Print relationship map" disabled>
+            <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v7H6z"/></svg>
+          </button>
         </div>
       </div>
       <div id="graphViewport" class="graph-viewport">
@@ -128,6 +139,7 @@
     </aside>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="printFooter" class="print-footer" aria-hidden="true"></div>
   <dialog id="unlinkMediaDialog" class="app-dialog" aria-labelledby="unlinkMediaTitle">
     <section class="dialog-panel">
       <h2 id="unlinkMediaTitle">Remove media from this person?</h2>

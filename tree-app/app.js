@@ -43,7 +43,7 @@
     pendingUploadPersonId: null, pendingResearchPersonId: null,
     pendingPersonSummaryId: null,
     pendingLifeEvent: null,
-    primaryMediaKey: '', primaryMedia: new Map(), additionalMedia: new Map(),
+    primaryMediaKey: '', primaryMedia: new Map(), additionalMedia: new Map(), primaryPersonId: '',
     gedcomRecords: [], gedcomDirty: false, gedcomText: '', sessionSaveQueue: Promise.resolve(),
     directoryFilters: { birthCountry: '', deathCountry: '', birthMin: null, birthMax: null, deathMin: null, deathMax: null },
     directoryYearBounds: { birth: null, death: null },
@@ -101,13 +101,22 @@
     details: document.querySelector('#detailsContent'), back: document.querySelector('#backButton'),
     forward: document.querySelector('#forwardButton'), zoomIn: document.querySelector('#zoomInButton'),
     zoomOut: document.querySelector('#zoomOutButton'), zoomLabel: document.querySelector('#zoomLabel'),
-    toast: document.querySelector('#toast')
+    toast: document.querySelector('#toast'),
+    primaryPersonBar: document.querySelector('#primaryPersonBar'),
+    primaryHomeButton: document.querySelector('#primaryHomeButton'),
+    primaryPersonName: document.querySelector('#primaryPersonName'),
+    printMapButton: document.querySelector('#printMapButton'),
+    printFooter: document.querySelector('#printFooter')
   };
   let toastTimer = 0;
   let wikiTreeSearchAbort = null;
 
   function splitXref(value) {
     return value ? value.replace(/^@|@$/g, '') : '';
+  }
+
+  function normalizeDirectoryName(value) {
+    return String(value || '').toLocaleLowerCase();
   }
 
   function createEvent(type, value = '') {
@@ -471,6 +480,147 @@
       if (family) family.childIds.forEach((id) => { if (state.people.has(id)) children.add(id); });
     }
     return [...children];
+  }
+
+  // Built from FAM records directly so links still count when only one side records them (CHIL without FAMC, etc.).
+  function kinshipGraph() {
+    const graph = { parents: new Map(), children: new Map(), partners: new Map() };
+    const link = (map, from, to) => {
+      if (!map.has(from)) map.set(from, new Set());
+      map.get(from).add(to);
+    };
+    for (const family of state.families.values()) {
+      const couple = [family.husbandId, family.wifeId].filter((id) => id && state.people.has(id));
+      if (couple.length === 2 && couple[0] !== couple[1]) {
+        link(graph.partners, couple[0], couple[1]);
+        link(graph.partners, couple[1], couple[0]);
+      }
+      for (const childId of family.childIds) {
+        if (!state.people.has(childId)) continue;
+        for (const parentId of couple) {
+          if (parentId === childId) continue;
+          link(graph.parents, childId, parentId);
+          link(graph.children, parentId, childId);
+        }
+      }
+    }
+    return graph;
+  }
+
+  function ancestorDepths(graph, personId) {
+    const depths = new Map([[personId, 0]]);
+    const queue = [personId];
+    for (let index = 0; index < queue.length; index += 1) {
+      const current = queue[index];
+      for (const parentId of graph.parents.get(current) || []) {
+        if (depths.has(parentId)) continue;
+        depths.set(parentId, depths.get(current) + 1);
+        queue.push(parentId);
+      }
+    }
+    return depths;
+  }
+
+  // up = generations from fromId to the closest common ancestor; down = generations from toId to it.
+  function bloodRelation(graph, fromId, toId) {
+    const fromDepths = ancestorDepths(graph, fromId);
+    const toDepths = ancestorDepths(graph, toId);
+    let best = null;
+    for (const [ancestorId, up] of fromDepths) {
+      const down = toDepths.get(ancestorId);
+      if (down === undefined) continue;
+      if (!best || up + down < best.up + best.down) best = { up, down, ancestors: [ancestorId] };
+      else if (up === best.up && down === best.down) best.ancestors.push(ancestorId);
+    }
+    if (best && best.up === 1 && best.down === 1) {
+      // Only call siblings "half" when both have two recorded parents, so missing data is not mistaken for a half relationship.
+      best.half = best.ancestors.length === 1 && (graph.parents.get(fromId)?.size || 0) >= 2 && (graph.parents.get(toId)?.size || 0) >= 2;
+    }
+    return best;
+  }
+
+  function genderedTerm(sex, male, female, neutral) {
+    return sex === 'M' ? male : sex === 'F' ? female : neutral;
+  }
+
+  function ordinalNumber(value) {
+    const suffix = value % 100 >= 11 && value % 100 <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' })[value % 10] || 'th';
+    return `${value}${suffix}`;
+  }
+
+  function bloodTerm(up, down, sex, half = false) {
+    const term = (male, female, neutral) => genderedTerm(sex, male, female, neutral);
+    const greats = (count) => count <= 0 ? '' : count <= 2 ? 'great-'.repeat(count) : `${count}× great-`;
+    if (!up) return down === 1 ? term('son', 'daughter', 'child') : `${greats(down - 2)}grand${term('son', 'daughter', 'child')}`;
+    if (!down) return up === 1 ? term('father', 'mother', 'parent') : `${greats(up - 2)}grand${term('father', 'mother', 'parent')}`;
+    if (up === 1 && down === 1) return `${half ? 'half-' : ''}${term('brother', 'sister', 'sibling')}`;
+    if (up === 1) return `${greats(down - 2)}${term('nephew', 'niece', 'niece/nephew')}`;
+    if (down === 1) return `${greats(up - 2)}${term('uncle', 'aunt', 'aunt/uncle')}`;
+    const removed = Math.abs(up - down);
+    const removedText = !removed ? '' : removed === 1 ? ' once removed' : removed === 2 ? ' twice removed' : ` ${removed} times removed`;
+    return `${ordinalNumber(Math.min(up, down) - 1)} cousin${removedText}`;
+  }
+
+  function affinalTerm(match, sex) {
+    const { rel, side } = match;
+    const term = (male, female, neutral) => genderedTerm(sex, male, female, neutral);
+    if (side === 'primary') {
+      // The person is a blood relative of the primary person's partner.
+      if (rel.up === 1 && rel.down === 0) return term('father-in-law', 'mother-in-law', 'parent-in-law');
+      if (rel.up === 1 && rel.down === 1) return term('brother-in-law', 'sister-in-law', 'sibling-in-law');
+      if (rel.up === 0 && rel.down === 1) return term('stepson', 'stepdaughter', 'stepchild');
+      if (rel.up === 0 && rel.down === 2) return term('step-grandson', 'step-granddaughter', 'step-grandchild');
+      return `spouse/partner's ${bloodTerm(rel.up, rel.down, sex, rel.half)}`;
+    }
+    // The person is the partner of one of the primary person's blood relatives.
+    const relativeSex = state.people.get(match.via)?.sex;
+    if (rel.up === 1 && rel.down === 0) return term('stepfather', 'stepmother', 'step-parent');
+    if (rel.up === 1 && rel.down === 1) return term('brother-in-law', 'sister-in-law', 'sibling-in-law');
+    if (rel.up === 0 && rel.down === 1) return term('son-in-law', 'daughter-in-law', 'child-in-law');
+    if (rel.up === 0 && rel.down === 2) return term('grandson-in-law', 'granddaughter-in-law', 'grandchild-in-law');
+    if (rel.up >= 2 && rel.down === 1) return `${bloodTerm(rel.up, 1, sex)} by marriage`;
+    return `${bloodTerm(rel.up, rel.down, relativeSex, rel.half)}'s spouse/partner`;
+  }
+
+  function describeKinship(graph, primaryId, personId) {
+    const person = state.people.get(personId);
+    const blood = bloodRelation(graph, primaryId, personId);
+    if (blood) {
+      return {
+        kind: 'blood', term: bloodTerm(blood.up, blood.down, person.sex, blood.half),
+        ancestors: blood.up && blood.down ? blood.ancestors : []
+      };
+    }
+    if (graph.partners.get(primaryId)?.has(personId)) {
+      return { kind: 'partner', term: genderedTerm(person.sex, 'husband/partner', 'wife/partner', 'spouse/partner') };
+    }
+    let best = null;
+    const consider = (rel, via, side) => {
+      if (rel && (!best || rel.up + rel.down < best.rel.up + best.rel.down)) best = { rel, via, side };
+    };
+    for (const partnerId of graph.partners.get(primaryId) || []) consider(bloodRelation(graph, partnerId, personId), partnerId, 'primary');
+    for (const partnerId of graph.partners.get(personId) || []) consider(bloodRelation(graph, primaryId, partnerId), partnerId, 'person');
+    if (best) return { kind: 'affinal', term: affinalTerm(best, person.sex), via: best.via };
+    return { kind: 'distant' };
+  }
+
+  function kinshipPath(graph, fromId, toId) {
+    const previous = new Map([[fromId, null]]);
+    const queue = [fromId];
+    for (let index = 0; index < queue.length && !previous.has(toId); index += 1) {
+      const current = queue[index];
+      for (const [type, links] of [['parent', graph.parents], ['child', graph.children], ['partner', graph.partners]]) {
+        for (const nextId of links.get(current) || []) {
+          if (previous.has(nextId)) continue;
+          previous.set(nextId, { from: current, type });
+          queue.push(nextId);
+        }
+      }
+    }
+    if (!previous.has(toId)) return null;
+    const steps = [];
+    for (let id = toId; id !== fromId; id = previous.get(id).from) steps.unshift({ id, type: previous.get(id).type });
+    return steps;
   }
 
   function siblingsOf(personId) {
@@ -1279,6 +1429,7 @@
     state.additionalMedia = loadAdditionalMedia(storageKey, state.people);
     state.primaryMedia = loadPrimaryMedia(storageKey, state.people);
     state.fileName = fileName;
+    loadPrimaryPerson();
     state.searchText = '';
     state.history = [];
     state.historyIndex = -1;
@@ -1286,6 +1437,7 @@
     elements.search.disabled = false;
     elements.clear.disabled = false;
     elements.mapViewButton.disabled = false;
+    elements.printMapButton.disabled = false;
     document.querySelector('#openGedcomLabel').hidden = true;
     state.zoom = 1;
     elements.zoomIn.disabled = false;
@@ -1570,10 +1722,10 @@
   }
 
   function renderRoster() {
-    const query = state.searchText.trim().toLocaleLowerCase();
+    const query = normalizeDirectoryName(state.searchText.trim());
     const matches = [...state.people.values()].filter((person) => {
-      if (query && !person.name.toLocaleLowerCase().includes(query)) return false;
-      if (state.surnameFilter.size && !state.surnameFilter.has(person.surname || 'Unknown surname')) return false;
+      if (query && !normalizeDirectoryName(person.name).includes(query)) return false;
+      if (state.surnameFilter.size && !state.surnameFilter.has(normalizeDirectoryName(person.surname || 'Unknown surname'))) return false;
       for (const [eventType, countryFilter, minFilter, maxFilter] of [
         ['BIRT', 'birthCountry', 'birthMin', 'birthMax'], ['DEAT', 'deathCountry', 'deathMin', 'deathMax']
       ]) {
@@ -1608,24 +1760,25 @@
     const groups = new Map();
     for (const person of matches) {
       const surname = person.surname || 'Unknown surname';
-      if (!groups.has(surname)) groups.set(surname, []);
-      groups.get(surname).push(person);
+      const surnameKey = normalizeDirectoryName(surname);
+      if (!groups.has(surnameKey)) groups.set(surnameKey, { surname, people: [] });
+      groups.get(surnameKey).people.push(person);
     }
-    for (const [surname, people] of groups) {
+    for (const [surnameKey, { surname, people }] of groups) {
       const group = document.createElement('section');
       group.className = 'surname-group';
-      const expanded = state.expandedSurnames.has(surname) || Boolean(query);
+      const expanded = state.expandedSurnames.has(surnameKey) || Boolean(query);
       const header = document.createElement('div');
       header.className = 'surname-group-header';
       const check = document.createElement('input');
       check.type = 'checkbox';
       check.className = 'surname-group-check';
-      check.dataset.surnameFilter = surname;
-      check.checked = state.surnameFilter.has(surname);
+      check.dataset.surnameFilter = surnameKey;
+      check.checked = state.surnameFilter.has(surnameKey);
       check.title = `Show only people with the surname ${surname}`;
       check.setAttribute('aria-label', `Show only ${surname}`);
       const toggle = makeButton('', 'surname-group-toggle');
-      toggle.dataset.surnameToggle = surname;
+      toggle.dataset.surnameToggle = surnameKey;
       toggle.setAttribute('aria-expanded', String(expanded));
       const indicator = document.createElement('span');
       indicator.className = 'surname-group-indicator';
@@ -1923,9 +2076,129 @@
     return eventSection;
   }
 
+  function renderKinship(person) {
+    const primary = state.people.get(state.primaryPersonId);
+    if (!primary) return null;
+    const kinSection = section('Relationship to primary person');
+    const summary = document.createElement('p');
+    summary.className = 'kinship-summary';
+    if (primary.id === person.id) {
+      summary.textContent = `${person.name} is the primary person.`;
+      kinSection.append(summary);
+      return kinSection;
+    }
+    const graph = kinshipGraph();
+    const result = describeKinship(graph, primary.id, person.id);
+    if (result.term) {
+      const term = document.createElement('strong');
+      term.className = 'kinship-term';
+      term.textContent = result.term;
+      summary.append(`${person.name} is ${primary.name}'s `, term, '.');
+    } else {
+      summary.textContent = `${person.name} is not a blood relative or close in-law of ${primary.name} in the recorded tree.`;
+    }
+    kinSection.append(summary);
+
+    const addPeople = (label, ids) => {
+      const group = document.createElement('div');
+      group.className = 'relation-group';
+      const heading = document.createElement('div');
+      heading.className = 'relation-label';
+      heading.textContent = label;
+      const list = document.createElement('div');
+      list.className = 'relation-list';
+      for (const id of ids) {
+        const button = makeButton(personName(id), 'relation-button');
+        button.dataset.personId = id;
+        list.append(button);
+      }
+      group.append(heading, list);
+      kinSection.append(group);
+    };
+    if (result.ancestors?.length) addPeople(result.ancestors.length === 1 ? 'Closest common ancestor' : 'Closest common ancestors', result.ancestors);
+    if (result.via) addPeople('Connected through', [result.via]);
+
+    const path = kinshipPath(graph, primary.id, person.id);
+    if (!path) {
+      const none = document.createElement('div');
+      none.className = 'event-detail';
+      none.textContent = `No recorded family links connect ${person.name} to ${primary.name}.`;
+      kinSection.append(none);
+    } else {
+      const group = document.createElement('div');
+      group.className = 'relation-group';
+      const heading = document.createElement('div');
+      heading.className = 'relation-label';
+      heading.textContent = `Recorded path (${path.length} link${path.length === 1 ? '' : 's'})`;
+      const list = document.createElement('div');
+      list.className = 'kinship-path';
+      const start = makeButton(primary.name, 'relation-button');
+      start.dataset.personId = primary.id;
+      list.append(start);
+      for (const step of path) {
+        const sex = state.people.get(step.id)?.sex;
+        const label = document.createElement('span');
+        label.className = 'kinship-step';
+        label.textContent = `→ ${step.type === 'parent' ? genderedTerm(sex, 'father', 'mother', 'parent')
+          : step.type === 'child' ? genderedTerm(sex, 'son', 'daughter', 'child') : 'spouse/partner'}`;
+        const button = makeButton(personName(step.id), 'relation-button');
+        button.dataset.personId = step.id;
+        list.append(label, button);
+      }
+      group.append(heading, list);
+      kinSection.append(group);
+    }
+    const note = document.createElement('div');
+    note.className = 'event-source';
+    note.textContent = 'Calculated from relationships recorded in this GEDCOM; confirm against sources before relying on it.';
+    kinSection.append(note);
+    return kinSection;
+  }
+
+  function primaryPersonStorageKey() {
+    return state.fileName ? `kinship-atlas:primary-person:v1:${state.fileName}` : '';
+  }
+
+  function loadPrimaryPerson() {
+    state.primaryPersonId = '';
+    try {
+      const saved = JSON.parse(localStorage.getItem(primaryPersonStorageKey()) || 'null');
+      if (saved?.id && state.people.has(saved.id)) state.primaryPersonId = saved.id;
+    } catch { }
+    syncPrimaryPersonBar();
+  }
+
+  function syncPrimaryPersonBar() {
+    const primary = state.people.get(state.primaryPersonId);
+    elements.primaryPersonBar.hidden = !primary;
+    elements.primaryPersonName.textContent = primary ? primary.name : '';
+    elements.primaryPersonName.title = primary ? primary.name : '';
+    elements.primaryHomeButton.setAttribute('aria-current', String(Boolean(primary) && primary.id === state.selectedId));
+  }
+
+  function togglePrimaryPerson(personId) {
+    const person = state.people.get(personId);
+    if (!person) return;
+    const clearing = state.primaryPersonId === personId;
+    state.primaryPersonId = clearing ? '' : personId;
+    let saved = true;
+    try {
+      const key = primaryPersonStorageKey();
+      if (clearing) localStorage.removeItem(key);
+      else localStorage.setItem(key, JSON.stringify({ id: person.id, name: person.name }));
+    } catch {
+      saved = false;
+    }
+    syncPrimaryPersonBar();
+    renderDetails();
+    const suffix = saved ? '' : ' This browser could not remember it after closing.';
+    showToast(clearing ? `Primary person cleared.${suffix}` : `${person.name} is now the primary person.${suffix}`);
+  }
+
   function renderDetails() {
     const person = state.people.get(state.selectedId);
     elements.details.replaceChildren();
+    syncPrimaryPersonBar();
     if (!person) {
       const empty = document.createElement('div');
       empty.className = 'details-empty';
@@ -1947,13 +2220,30 @@
     hero.append(monogram, kicker, title, life, id);
     const personActions = document.createElement('div');
     personActions.className = 'person-action-row';
-    const summaryEditButton = makeButton('Edit person details', 'research-button');
+    const iconButton = (icon, text, className = 'research-button') => {
+      const button = makeButton('', className);
+      setButtonContent(button, icon, text);
+      return button;
+    };
+    const summaryEditButton = iconButton('edit', 'Edit person details');
     summaryEditButton.dataset.editPersonSummary = person.id;
-    const addEventButton = makeButton('Add Life Event', 'research-button');
+    const addEventButton = iconButton('calendarPlus', 'Add Life Event');
     addEventButton.dataset.addLifeEvent = person.id;
-    const addRelativeButton = makeButton('Add relative', 'research-button');
+    const addRelativeButton = iconButton('userPlus', 'Add relative');
     addRelativeButton.dataset.addRelative = person.id;
     personActions.append(summaryEditButton, addEventButton, addRelativeButton);
+    const isPrimaryPerson = state.primaryPersonId === person.id;
+    const primaryPersonButton = iconButton(isPrimaryPerson ? 'targetClear' : 'target', isPrimaryPerson ? 'Clear primary person' : 'Set as primary person', `research-button primary-person-toggle${isPrimaryPerson ? ' is-primary' : ''}`);
+    primaryPersonButton.dataset.primaryPerson = person.id;
+    primaryPersonButton.setAttribute('aria-pressed', String(isPrimaryPerson));
+    primaryPersonButton.title = isPrimaryPerson
+      ? 'Stop using this person as the primary person'
+      : state.primaryPersonId ? `Replace ${personName(state.primaryPersonId)} as the primary person` : 'Show relationships to this person and add a Home button';
+    personActions.append(primaryPersonButton);
+    const printButton = iconButton('print', 'Print record');
+    printButton.dataset.printPerson = person.id;
+    printButton.title = 'Print this person record on A4 (attached media is left out)';
+    personActions.append(printButton);
     if (state.defaultRecord?.gedcomHandle && state.defaultRecord.gedcomName === state.fileName) {
       const isHome = state.defaultRecord.homePersonId === person.id;
       const homeButton = makeButton(isHome ? '★ Home person' : '☆ Set as home person', 'research-button');
@@ -1962,14 +2252,14 @@
       personActions.append(homeButton);
     }
     if (isRecordedDeceased(person)) {
-      const researchButton = makeButton('Search WikiTree', 'research-button');
+      const researchButton = iconButton('search', 'Search WikiTree');
       researchButton.dataset.wikitreeSearch = person.id;
       personActions.append(researchButton);
     }
     hero.append(personActions);
     elements.details.append(hero);
-    const media = renderMedia(person);
-    if (media) elements.details.append(media);
+    const kinship = renderKinship(person);
+    if (kinship) elements.details.append(kinship);
     elements.details.append(renderEvents(person));
     const relationSection = section('Relationships');
     for (const [label, items] of relationshipGroups(person)) addRelationGroup(relationSection, label, items);
@@ -1990,11 +2280,13 @@
       sourceSection.append(list);
     }
     elements.details.append(sourceSection);
+    const media = renderMedia(person);
+    if (media) elements.details.append(media);
   }
 
   function renderMedia(person) {
     const mediaSection = document.createElement('section');
-    mediaSection.className = 'detail-section';
+    mediaSection.className = 'detail-section detail-media-section';
     const heading = document.createElement('h3');
     heading.className = 'detail-section-title';
     heading.textContent = `Attached media (${person.mediaPaths.length})`;
@@ -2042,6 +2334,7 @@
     const grid = document.createElement('div');
     grid.className = 'media-grid';
     mediaSection.append(grid);
+    const mediaItems = [];
     const primaryImage = primaryImageFor(person);
     let missing = 0;
     for (const path of person.mediaPaths) {
@@ -2075,6 +2368,8 @@
         unlinkButton.setAttribute('aria-label', 'Unlink image from this person; file will remain in the media folder');
         unlinkButton.title = 'Unlink from person (file remains in folder)';
         item.append(link, primaryButton, unlinkButton);
+        item.hidden = mediaItems.length >= 4;
+        mediaItems.push(item);
         grid.append(item);
       } else {
         const item = document.createElement('div');
@@ -2091,8 +2386,21 @@
         unlinkButton.setAttribute('aria-label', 'Unlink media from this person; file will remain in the media folder');
         unlinkButton.title = 'Unlink from person (file remains in folder)';
         item.append(link, unlinkButton);
+        item.hidden = mediaItems.length >= 4;
+        mediaItems.push(item);
         grid.append(item);
       }
+    }
+    if (mediaItems.length > 4) {
+      const showMoreButton = makeButton('Show more', 'media-show-more');
+      showMoreButton.setAttribute('aria-expanded', 'false');
+      showMoreButton.addEventListener('click', () => {
+        const expanded = showMoreButton.getAttribute('aria-expanded') !== 'true';
+        mediaItems.slice(4).forEach((item) => { item.hidden = !expanded; });
+        showMoreButton.setAttribute('aria-expanded', String(expanded));
+        showMoreButton.textContent = expanded ? 'Show less' : 'Show more';
+      });
+      mediaSection.append(showMoreButton);
     }
     if (missing === person.mediaPaths.length) {
       const note = document.createElement('div');
@@ -2164,7 +2472,14 @@
   const buttonIcons = {
     map: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.4 4 5.6 4 9s-1.4 6.6-4 9c-2.6-2.4-4-5.6-4-9s1.4-6.6 4-9z"/>',
     tree: '<rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/>',
-    restart: '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>'
+    restart: '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>',
+    edit: '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+    calendarPlus: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4M12 13v5M9.5 15.5h5"/>',
+    userPlus: '<circle cx="9" cy="8" r="4"/><path d="M2 21v-1a6 6 0 0 1 6-6h2a6 6 0 0 1 6 6v1"/><path d="M19 8v6M16 11h6"/>',
+    target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/>',
+    targetClear: '<circle cx="12" cy="12" r="9"/><path d="M8.5 8.5l7 7M15.5 8.5l-7 7"/>',
+    print: '<path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v7H6z"/>',
+    search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>'
   };
 
   function setButtonContent(button, icon, text) {
@@ -3263,12 +3578,14 @@
     state.additionalMedia.clear();
     state.gedcomRecords = [];     state.gedcomDirty = false;
     state.people.clear(); state.families.clear(); state.sources.clear(); state.selectedId = null;
+    state.primaryPersonId = ''; syncPrimaryPersonBar();
     refreshDirectoryFilters(true);
     state.fileName = ''; state.gedcomText = ''; state.history = []; state.historyIndex = -1; state.searchText = '';
     state.rememberedMediaDirectoryHandle = null;
     elements.fileInput.value = ''; elements.mediaInput.value = ''; elements.mediaButton.disabled = true; elements.search.value = ''; elements.search.disabled = true;
     document.querySelector('#openGedcomLabel').hidden = false;
     elements.clear.disabled = true; elements.back.disabled = true; elements.forward.disabled = true;
+    elements.printMapButton.disabled = true;
     elements.zoomIn.disabled = true; elements.zoomOut.disabled = true;
     elements.treeLabel.textContent = 'No tree loaded'; elements.peopleCount.textContent = '0';
     elements.loadStatus.textContent = 'WAITING FOR FILE'; elements.statusPip.classList.remove('ready');
@@ -3347,6 +3664,15 @@
     const homeButton = event.target.closest('button[data-home-person]');
     if (homeButton) {
       toggleHomePerson(homeButton.dataset.homePerson);
+      return;
+    }
+    const primaryPersonButton = event.target.closest('button[data-primary-person]');
+    if (primaryPersonButton) {
+      togglePrimaryPerson(primaryPersonButton.dataset.primaryPerson);
+      return;
+    }
+    if (event.target.closest('button[data-print-person]')) {
+      printSection('person');
       return;
     }
     const editButton = event.target.closest('button[data-add-life-event]');
@@ -3436,6 +3762,9 @@
   });
   elements.mediaUploadInput.addEventListener('change', (event) => {
     saveUploadedMedia([...(event.target.files || [])]);
+  });
+  elements.primaryHomeButton.addEventListener('click', () => {
+    if (state.people.has(state.primaryPersonId)) setFocus(state.primaryPersonId);
   });
   elements.addGedcomField.addEventListener('click', () => appendGedcomFieldRow());
   elements.personFieldsEditor.addEventListener('click', (event) => {
@@ -3556,6 +3885,88 @@
   });
   elements.zoomIn.addEventListener('click', () => setZoom(state.zoom + 0.1));
   elements.zoomOut.addEventListener('click', () => setZoom(state.zoom - 0.1));
+  elements.printMapButton.addEventListener('click', () => printSection('map'));
+
+  // A4 landscape with 12 mm margins leaves about 273 x 186 mm, i.e. roughly 1030 x 700 CSS px.
+  // The height budget leaves room for the map heading and print footer on the same page.
+  const printPageWidth = 1030;
+  const printMapHeightBudget = 520;
+  let printCleanup = null;
+
+  function setPrintPageOrientation(orientation) {
+    let style = document.getElementById('printPageStyle');
+    if (!orientation) {
+      if (style) style.remove();
+      return;
+    }
+    if (!style) {
+      style = document.createElement('style');
+      style.id = 'printPageStyle';
+      document.head.appendChild(style);
+    }
+    style.textContent = `@page { size: A4 ${orientation}; margin: 12mm; }`;
+  }
+
+  function preparePrintMap() {
+    const canvas = elements.canvas;
+    const svg = canvas.querySelector('.connector-layer');
+    canvas.style.zoom = '1';
+    canvas.style.minWidth = '0';
+    canvas.style.minHeight = '0';
+    if (svg) {
+      svg.setAttribute('width', '0');
+      svg.setAttribute('height', '0');
+    }
+    // Try each cards-per-row wrap width and keep the layout that can be printed largest on the landscape page.
+    const widestCount = Math.max(1, ...[...canvas.querySelectorAll('.generation-nodes')].map((row) => row.querySelectorAll('.person-node').length));
+    const rowWidth = (count) => count * 192 + Math.max(0, count - 1) * 11 + 8;
+    const fitScale = (width) => {
+      canvas.style.width = `${width}px`;
+      return Math.min(1, printPageWidth / Math.max(width, canvas.scrollWidth), printMapHeightBudget / Math.max(1, canvas.scrollHeight));
+    };
+    let best = { width: printPageWidth, scale: fitScale(printPageWidth) };
+    for (let count = widestCount; count >= 1; count -= 1) {
+      const width = rowWidth(count);
+      if (width <= printPageWidth) break;
+      const scale = fitScale(width);
+      if (scale > best.scale) best = { width, scale };
+    }
+    const scale = fitScale(best.width);
+    if (svg) drawConnectors(svg, new Set([...canvas.querySelectorAll('.person-card')].map((card) => `${card.dataset.generation}|${card.dataset.personId}`)), state.selectedId, partnersOf(state.selectedId).map((item) => item.id));
+    canvas.style.zoom = String(scale);
+    return () => {
+      canvas.style.width = '';
+      canvas.style.minWidth = '';
+      canvas.style.minHeight = '';
+      if (svg) {
+        svg.setAttribute('width', '0');
+        svg.setAttribute('height', '0');
+      }
+      setZoom(state.zoom);
+    };
+  }
+
+  function printSection(kind) {
+    const person = state.people.get(state.selectedId);
+    if (!person || (kind === 'map' && state.mapMode)) return;
+    if (printCleanup) printCleanup();
+    const printedOn = new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+    elements.printFooter.textContent = `${kind === 'map' ? 'Relationship map' : 'Person record'} · ${person.name} · ${state.fileName} · Printed ${printedOn} from Kinship Atlas · Private family research; may include living people.`;
+    document.body.classList.add(kind === 'map' ? 'print-map' : 'print-person');
+    setPrintPageOrientation(kind === 'map' ? 'landscape' : null);
+    const restoreMap = kind === 'map' ? preparePrintMap() : null;
+    printCleanup = () => {
+      printCleanup = null;
+      window.removeEventListener('afterprint', printCleanup);
+      document.body.classList.remove('print-map', 'print-person');
+      setPrintPageOrientation(null);
+      elements.printFooter.textContent = '';
+      if (restoreMap) restoreMap();
+    };
+    window.addEventListener('afterprint', printCleanup);
+    window.print();
+  }
+
   function setZoom(value) {
     state.zoom = Math.max(0.65, Math.min(1.35, Math.round(value * 10) / 10));
     elements.canvas.style.zoom = String(state.zoom);

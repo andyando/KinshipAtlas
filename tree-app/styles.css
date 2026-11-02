@@ -209,6 +209,7 @@ button { color: inherit; }
 .detail-id { display: inline-flex; align-items: center; margin-top: 12px; padding: 4px 7px; color: #72837b; background: #e4eee8; border-radius: 3px; font-family: Consolas, monospace; font-size: 10px; }
 .research-button { min-height: 32px; display: inline-flex; align-items: center; margin-top: 14px; padding: 0 10px; border: 1px solid #c8d8ce; border-radius: 4px; color: #315d4d; background: #fff; cursor: pointer; font-size: 11px; font-weight: 700; }
 .research-button:hover { border-color: #7eaa94; background: #f0f7f2; }
+.research-button .button-icon { width: 14px; height: 14px; margin-right: 6px; }
 .person-action-row { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
 .person-action-row .research-button { margin-top: 0; }
 .detail-section { padding: 17px 19px 16px; border-bottom: 1px solid #e7ece8; }
@@ -228,6 +229,10 @@ button { color: inherit; }
 .media-folder-button:hover, .media-add-button:hover:not(:disabled) { border-color: #8fb7a5; background: #ebf5ef; }
 .media-add-button:disabled { color: #98a39d; background: #f5f6f5; cursor: not-allowed; }
 .media-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.media-grid > [hidden] { display: none; }
+.media-show-more { margin-top: 9px; padding: 0; border: 0; color: #426357; background: transparent; cursor: pointer; font-size: 11px; text-decoration: underline; }
+.media-show-more:hover { color: var(--green); }
+.media-show-more:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .media-image-item { min-width: 0; position: relative; }
 .media-image-link { display: block; overflow: hidden; border: 1px solid #dce6df; border-radius: 3px; background: #f5f8f5; }
 .media-image-link img { width: 100%; aspect-ratio: 4 / 3; display: block; object-fit: cover; }
@@ -379,6 +384,7 @@ button { color: inherit; }
   .brand-kicker { font-size: 9px; }
   .brand-mark { transform: scale(.88); }
   .topbar-actions { gap: 5px; }
+  .primary-person-label { display: none; }
   .button { min-height: 35px; padding-inline: 10px; font-size: 11px; }
   .main-heading { align-items: flex-start; padding: 14px 12px 11px; }
   .heading-copy h1 { font-size: 22px; }
@@ -406,6 +412,17 @@ button { color: inherit; }
 
 .topbar-left { display: flex; align-items: center; gap: 22px; min-width: 0; }
 .settings-menu { position: relative; }
+.primary-person-bar { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.primary-person-bar[hidden] { display: none; }
+.primary-home-button[aria-current="true"] { border-color: #f2bf75; color: #f2bf75; }
+.primary-person-label { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.primary-person-kicker { color: #a8c0b9; font-size: 9px; font-weight: 700; letter-spacing: 1.2px; }
+.primary-person-label strong { max-width: 180px; overflow: hidden; color: #f7faf6; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.research-button.primary-person-toggle.is-primary { border-color: #c49a45; color: #725619; background: #fff1c8; }
+.kinship-summary { margin: 0 0 12px; color: #3a554b; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.kinship-term { color: var(--ink); }
+.kinship-path { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.kinship-step { color: #7c8d84; font-size: 10px; }
 .menu-caret { font-size: 11px; }
 .settings-panel { position: absolute; right: 0; top: calc(100% + 8px); z-index: 50; min-width: 220px; display: flex; flex-direction: column; padding: 6px; background: #fff; border: 1px solid #c9d8cf; border-radius: 6px; box-shadow: 0 12px 30px rgba(20, 40, 33, .25); }
 .settings-panel[hidden], .menu-item[hidden] { display: none; }
@@ -414,3 +431,49 @@ button { color: inherit; }
 .menu-item:disabled { opacity: .45; cursor: default; }
 .menu-item.media-button-needed:not(:disabled) { background: #fff3c4; color: #5c4600; }
 .menu-item .button-icon { color: #234536; }
+.print-footer { display: none; }
+.main-panel.map-mode .print-map-button, .main-panel.map-mode .print-map-divider { display: none; }
+
+@page { size: A4 portrait; margin: 12mm; }
+@media print {
+  html, body { width: auto; min-width: 0; height: auto; min-height: 0; overflow: visible; background: #fff; }
+  body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .topbar, .toast, dialog, .settings-panel { display: none !important; }
+  .app-shell { height: auto; min-height: 0; display: block; }
+  .main-panel, .details-panel, .details-content, .details-empty { min-height: 0 !important; max-height: none !important; }
+  .print-footer { display: block; margin-top: 6mm; padding-top: 2mm; border-top: 0.5pt solid #c8d4cd; color: #6d8078; font-size: 7.5pt; line-height: 1.4; }
+
+  body.print-map .roster-panel, body.print-map .details-panel, body.print-map .history-controls { display: none !important; }
+  body.print-map .main-panel { display: block; overflow: visible; background: #fff; }
+  body.print-map .main-heading { min-height: 0; padding: 0 0 4mm; margin-bottom: 5mm; background: none; border-bottom: 0.75pt solid #c8d4cd; }
+  body.print-map .heading-copy p { white-space: normal; overflow: visible; }
+  body.print-map .graph-viewport { overflow: visible; padding: 0; }
+  body.print-map .tree-canvas { margin: 0 auto; break-inside: avoid; }
+  body.print-map .generation-shift { display: none; }
+  body.print-map .person-card, body.print-map .person-card[aria-current="true"] { box-shadow: none; transform: none; }
+  body.print-map .connector-layer path { stroke: #9fb0a7; }
+  body.print-map .graph-footer { min-height: 0; margin-top: 4mm; padding: 0; background: none; border: 0; }
+  body.print-map .graph-footer-right { display: none; }
+
+  body.print-person .roster-panel, body.print-person .main-panel { display: none !important; }
+  body.print-person .details-panel { display: block; overflow: visible; border: 0; background: #fff; }
+  body.print-person .details-content { overflow: visible; }
+  body.print-person .person-action-row, body.print-person .detail-media-section, body.print-person .relation-edit { display: none !important; }
+  body.print-person .detail-hero { padding: 0 0 5mm; background: none; border-bottom: 0.75pt solid #c8d4cd; }
+  body.print-person .detail-monogram { width: 12mm; height: 12mm; margin-bottom: 3mm; font-size: 15pt; }
+  body.print-person .detail-hero h2 { font-size: 22pt; }
+  body.print-person .detail-life { font-size: 10.5pt; }
+  body.print-person .detail-id { margin-top: 2mm; font-size: 8pt; }
+  body.print-person .detail-section { padding: 4mm 0 3.5mm; border-bottom: 0.5pt solid #dce4df; }
+  body.print-person .detail-section-title { margin-bottom: 2.5mm; font-size: 8.5pt; break-after: avoid; }
+  body.print-person .event-list { gap: 2.5mm; }
+  body.print-person .event-item, body.print-person .relation-group, body.print-person .kinship-summary { break-inside: avoid; }
+  body.print-person .event-marker { margin-top: 1.6mm; }
+  body.print-person .event-label { font-size: 10pt; }
+  body.print-person .event-detail, body.print-person .kinship-summary { font-size: 10pt; }
+  body.print-person .event-source { font-size: 8pt; }
+  body.print-person .relation-label { font-size: 8pt; }
+  body.print-person .relation-button, body.print-person .kinship-step { font-size: 9pt; cursor: default; }
+  body.print-person .relation-detail { font-size: 8pt; }
+  body.print-person .source-chip { font-size: 8.5pt; }
+}
