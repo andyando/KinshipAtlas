@@ -16,15 +16,14 @@
     </a>
     <div class="topbar-meta"><span class="privacy-indicator"><span class="privacy-dot"></span> ON THIS DEVICE</span><span class="topbar-divider"></span><span id="treeLabel">No tree loaded</span></div>
     <div class="topbar-actions">
-      <label class="button button-primary" for="gedcomInput">
+      <label id="openGedcomLabel" class="button button-primary" for="gedcomInput">
         <span class="button-plus" aria-hidden="true">+</span> Open GEDCOM
         <input id="gedcomInput" type="file" accept=".ged,.gedcom,text/plain">
       </label>
-      <button id="saveGedcomButton" class="button button-quiet save-gedcom-button" type="button" disabled>Save GEDCOM</button>
       <button id="mediaButton" class="button button-quiet media-button" type="button" disabled>Select Media Folder</button>
       <input id="mediaInput" type="file" webkitdirectory directory multiple>
       <input id="mediaUploadInput" type="file" accept="image/*,.pdf,application/pdf" multiple>
-      <button id="clearButton" class="button button-quiet" type="button" disabled>Clear</button>
+      <button id="clearButton" class="button button-quiet" type="button" disabled>Start Again</button>
     </div>
   </header>
 
@@ -89,6 +88,7 @@
             <p>Choose a local GEDCOM file to open its family relationships in this tab.</p>
             <div class="welcome-actions">
               <label class="button button-primary welcome-button" for="gedcomInput"><span class="button-plus" aria-hidden="true">+</span> Open GEDCOM</label>
+              <span class="welcome-or">or</span>
               <button class="button button-secondary" type="button" data-create-gedcom>Create new GEDCOM</button>
             </div>
             <span class="welcome-note">Your file is read locally and is not uploaded or saved by this app.</span>
@@ -110,10 +110,21 @@
     </aside>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <dialog id="unlinkMediaDialog" class="app-dialog" aria-labelledby="unlinkMediaTitle">
+    <section class="dialog-panel">
+      <h2 id="unlinkMediaTitle">Remove media from this person?</h2>
+      <p>This media will be <strong>de-linked from the person's record</strong>, but the file will <strong>not be deleted</strong> from the source media folder.</p>
+      <div class="dialog-actions">
+        <button id="confirmUnlinkMedia" class="dialog-button dialog-button-primary" type="button">Proceed</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="unlinkMediaDialog">Cancel</button>
+      </div>
+    </section>
+  </dialog>
   <dialog id="mediaFolderDialog" class="app-dialog" aria-labelledby="mediaFolderTitle">
     <section class="dialog-panel">
       <h2 id="mediaFolderTitle">Link media folder</h2>
       <p>Choose an existing folder or create <strong id="newMediaFolderName">a GEDCOM media folder</strong> inside a parent folder you select.</p>
+      <p class="dialog-hint">Your browser will then ask "Allow this site to edit files?" This is a standard browser security prompt. Choose <strong>Allow</strong> so photos and PDFs can be saved into the folder. The app only uses the folder you pick.</p>
       <div class="dialog-actions">
         <button id="linkExistingMediaFolder" class="dialog-button" type="button">Link existing folder</button>
         <button id="createMediaFolder" class="dialog-button dialog-button-primary" type="button">Create new media folder</button>
@@ -138,7 +149,7 @@
   <dialog id="newGedcomDialog" class="app-dialog" aria-labelledby="newGedcomTitle">
     <form id="createGedcomForm" class="dialog-panel new-gedcom-panel">
       <h2 id="newGedcomTitle">Create a GEDCOM starter</h2>
-      <p>Enter the first person. The app creates and downloads a GEDCOM file, then opens it here.</p>
+      <p id="newGedcomIntro">Enter the first person. The app creates a GEDCOM file and an empty media folder beside it, then opens it here.</p>
       <div class="new-gedcom-fields">
         <label class="new-gedcom-field" for="newGedcomFileName">File name<input id="newGedcomFileName" type="text" value="Family Tree" required maxlength="80"></label>
         <label class="new-gedcom-field" for="newGedcomGivenName">Given name(s)<input id="newGedcomGivenName" type="text" required maxlength="120" autocomplete="given-name"></label>
@@ -147,8 +158,10 @@
         <label class="new-gedcom-field" for="newGedcomBirthDate">Birth date<input id="newGedcomBirthDate" type="date"></label>
         <label class="new-gedcom-field" for="newGedcomBirthPlace">Birth place<input id="newGedcomBirthPlace" type="text" maxlength="200"></label>
       </div>
+      <div id="newGedcomNotice" class="dialog-notice" hidden></div>
+      <p id="newGedcomError" class="dialog-error" role="alert" hidden></p>
       <div class="dialog-actions">
-        <button class="dialog-button dialog-button-primary" type="submit">Create &amp; download</button>
+        <button class="dialog-button dialog-button-primary" type="submit">Create</button>
         <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="newGedcomDialog">Cancel</button>
       </div>
     </form>

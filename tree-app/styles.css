@@ -65,6 +65,9 @@ button { color: inherit; }
 .button-quiet { color: #d7e3dd; background: transparent; border-color: rgba(227, 239, 232, .24); }
 .button-quiet:hover:not(:disabled) { background: rgba(255,255,255,.08); }
 .button:disabled { opacity: .45; cursor: default; }
+.button[hidden] { display: none; }
+.button.media-button-needed:not(:disabled) { background: #fff3c4; border-color: #e3c866; color: #5c4600; }
+.button.media-button-needed:not(:disabled):hover { background: #ffe9a0; }
 .button-plus { font-size: 18px; font-weight: 400; line-height: .8; }
 #gedcomInput, #mediaInput, #mediaUploadInput { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
 
@@ -180,6 +183,12 @@ button { color: inherit; }
 .welcome-state p { max-width: 340px; margin: 0 0 18px; color: #74847d; font-size: 12px; line-height: 1.6; }
 .welcome-button { cursor: pointer; }
 .welcome-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
+.welcome-or { color: var(--muted, #5f736d); font-size: 0.9rem; }
+.dialog-error { margin: 0 0 12px; padding: 8px 10px; border-radius: 6px; background: #fdecea; color: #8a1c12; font-size: 0.85rem; }
+.dialog-hint { color: #5d6b64; font-size: 0.8rem; line-height: 1.5; }
+.dialog-notice { margin: 0 0 12px; padding: 8px 12px; border-radius: 6px; background: #fff6e0; color: #6b4a00; font-size: 0.85rem; line-height: 1.5; }
+.dialog-notice p, .dialog-notice ol { margin: 4px 0; }
+.dialog-notice ol { padding-left: 20px; }
 .welcome-note { margin-top: 13px; color: #909d96; font-size: 9px; }
 
 .details-panel { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: rgba(255,255,255,.95); border-left: 1px solid var(--line); }
@@ -225,6 +234,10 @@ button { color: inherit; }
 .media-image-item > .media-remove-button { position: absolute; top: 5px; right: 5px; }
 .media-remove-button:hover { border-color: #c57d70; color: #7d3327; background: #fff0ec; }
 .media-remove-button:focus-visible { outline: 2px solid var(--coral); outline-offset: 2px; }
+.media-reveal-button { width: 25px; height: 25px; display: grid; place-items: center; padding: 0; border: 1px solid #d7dfd9; border-radius: 3px; color: #536e65; background: rgba(255,255,255,.96); cursor: pointer; font-size: 13px; line-height: 1; }
+.media-image-item > .media-reveal-button { position: absolute; top: 5px; left: 5px; }
+.media-reveal-button:hover { border-color: var(--green); background: #f2faf6; }
+.media-reveal-button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .media-file-item { min-width: 0; display: flex; align-items: flex-start; gap: 5px; }
 .media-file-item .media-file-link { flex: 1; }
 .media-file-link { min-width: 0; padding: 7px; overflow-wrap: anywhere; border: 1px solid #dce6df; border-radius: 3px; color: #426357; background: #f5f9f6; font-size: 9px; }
@@ -324,7 +337,6 @@ button { color: inherit; }
   .button { min-height: 35px; padding-inline: 10px; font-size: 10px; }
   .button-quiet { display: none; }
   .media-button { display: inline-flex; padding-inline: 8px; }
-  .save-gedcom-button { display: inline-flex; padding-inline: 8px; }
   .main-heading { align-items: flex-start; padding: 14px 12px 11px; }
   .heading-copy h1 { font-size: 21px; }
   .heading-copy p { max-width: 210px; font-size: 9px; }

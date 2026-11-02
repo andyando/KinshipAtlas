@@ -38,7 +38,7 @@
     people: new Map(), families: new Map(), sources: new Map(), selectedId: null,
     fileName: '', searchText: '', history: [], historyIndex: -1, zoom: 1,
     mediaIndex: null, mediaUrls: new Map(), mediaRelativePaths: new WeakMap(), mediaDirectoryHandle: null,
-    rememberedMediaDirectoryHandle: null,
+    rememberedMediaDirectoryHandle: null, mediaFolderPicked: false, mediaHelper: null,
     pendingUploadPersonId: null, pendingResearchPersonId: null,
     pendingPersonSummaryId: null,
     primaryMediaKey: '', primaryMedia: new Map(), additionalMedia: new Map(),
@@ -83,7 +83,6 @@
     confirmWikiTreeSearch: document.querySelector('#confirmWikiTreeSearch'),
     newGedcomDialog: document.querySelector('#newGedcomDialog'),
     createGedcomForm: document.querySelector('#createGedcomForm'),
-    saveGedcom: document.querySelector('#saveGedcomButton'),
     clear: document.querySelector('#clearButton'),
     treeLabel: document.querySelector('#treeLabel'), peopleCount: document.querySelector('#peopleCount'),
     search: document.querySelector('#peopleSearch'), peopleList: document.querySelector('#peopleList'),
@@ -516,13 +515,21 @@
     const firstName = fullName.toLocaleLowerCase().endsWith(` ${surname.toLocaleLowerCase()}`)
       ? fullName.slice(0, -(surname.length + 1)).trim()
       : fullName;
+    const parents = parentsOf(person.id).map((id) => state.people.get(id));
+    const father = parents.find((parent) => parent.sex === 'M');
+    const mother = parents.find((parent) => parent.sex === 'F');
     return {
       firstName: firstName.slice(0, 120),
       lastName: surname.slice(0, 120),
       birthYear: yearFrom(birth?.date),
       deathYear: yearFrom(death?.date),
       birthCountry: countryFlagForPlace(birth?.place)?.country || '',
-      deathCountry: countryFlagForPlace(death?.place)?.country || ''
+      deathCountry: countryFlagForPlace(death?.place)?.country || '',
+      sex: person.sex === 'M' ? 'Male' : person.sex === 'F' ? 'Female' : '',
+      fatherFirstName: (father?.givenName || '').trim().slice(0, 120),
+      fatherLastName: (father?.surname || '').trim().slice(0, 120),
+      motherFirstName: (mother?.givenName || '').trim().slice(0, 120),
+      motherLastName: (mother?.maidenName || mother?.surname || '').trim().slice(0, 120)
     };
   }
 
@@ -533,7 +540,12 @@
       ['Year born', query.birthYear],
       ['Year died', query.deathYear],
       ['Country born', query.birthCountry],
-      ['Country died', query.deathCountry]
+      ['Country died', query.deathCountry],
+      ['Sex at birth', query.sex],
+      ['Father first name', query.fatherFirstName],
+      ['Father last name', query.fatherLastName],
+      ['Mother first name', query.motherFirstName],
+      ['Mother last name', query.motherLastName]
     ];
     elements.wikiTreeQueryPreview.replaceChildren();
     for (const [label, value] of fields) {
@@ -559,6 +571,11 @@
     if (query.deathYear) parameters.set('DeathDate', query.deathYear);
     if (query.birthCountry) parameters.set('BirthLocation', query.birthCountry);
     if (query.deathCountry) parameters.set('DeathLocation', query.deathCountry);
+    if (query.sex) parameters.set('Gender', query.sex);
+    if (query.fatherFirstName) parameters.set('FatherFirstName', query.fatherFirstName);
+    if (query.fatherLastName) parameters.set('FatherLastName', query.fatherLastName);
+    if (query.motherFirstName) parameters.set('MotherFirstName', query.motherFirstName);
+    if (query.motherLastName) parameters.set('MotherLastName', query.motherLastName);
     return parameters;
   }
 
@@ -573,12 +590,22 @@
 
     const fields = [
       ['wpSearch', '1'],
+      ['wpSearchButton', 'Search'],
+      ['date_spread', '2'],
+      ['date_include', 'neither'],
+      ['last_name_match', 'all'],
+      ['skip_variants', '0'],
       ['wpFirst', query.firstName],
       ['wpLast', query.lastName],
       ['wpBirthDate', query.birthYear],
       ['wpDeathDate', query.deathYear],
       ['birth_location', query.birthCountry],
-      ['death_location', query.deathCountry]
+      ['death_location', query.deathCountry],
+      ['father_first_name', query.fatherFirstName],
+      ['father_last_name', query.fatherLastName],
+      ['mother_first_name', query.motherFirstName],
+      ['mother_last_name', query.motherLastName],
+      ['gender', query.sex]
     ];
     for (const [name, value] of fields) {
       if (!value) continue;
@@ -954,13 +981,13 @@
 
   function mediaFolderName() {
     const baseName = state.fileName.replace(/\.[^.]+$/, '').trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[. ]+$/, '');
-    return `${baseName || 'Family Tree'}_media`;
+    return `${baseName || 'Family Tree'}_Media`;
   }
 
   function syncMediaButton() {
-    elements.mediaButton.textContent = state.mediaDirectoryHandle || state.rememberedMediaDirectoryHandle
-      ? 'Update Media Folder'
-      : 'Select Media Folder';
+    const hasFolder = Boolean(state.mediaDirectoryHandle || state.rememberedMediaDirectoryHandle || state.mediaFolderPicked);
+    elements.mediaButton.textContent = hasFolder ? 'Update Media Folder' : 'Select Media Folder';
+    elements.mediaButton.classList.toggle('media-button-needed', !hasFolder);
   }
 
   async function chooseMediaDirectory(createNew = false) {
@@ -1015,12 +1042,60 @@
     elements.mediaFolderDialog.showModal();
   }
 
+  async function probeMediaHelper() {
+    if (!/^https?:$/.test(location.protocol)) return;
+    try {
+      const response = await fetch('/api/media-info', { cache: 'no-store' });
+      const info = response.ok ? await response.json() : null;
+      state.mediaHelper = info?.available ? { folder: info.folder } : null;
+    } catch {
+      state.mediaHelper = null;
+    }
+  }
+
+  async function uploadToMediaHelper(file) {
+    const response = await fetch('/api/media', {
+      method: 'POST',
+      headers: { 'X-File-Name': encodeURIComponent(file.name), 'Content-Type': 'application/octet-stream' },
+      body: file
+    });
+    if (!response.ok) throw new Error('Upload failed.');
+    return (await response.json()).name;
+  }
+
+  async function loadHelperMedia() {
+    if (!state.mediaHelper || state.mediaDirectoryHandle) return;
+    const names = new Set();
+    for (const paths of state.additionalMedia.values()) paths.forEach((name) => names.add(name));
+    let loaded = false;
+    for (const name of names) {
+      if (resolveMediaFile(name)) continue;
+      try {
+        const response = await fetch(`/media/${encodeURIComponent(name)}`);
+        if (!response.ok) continue;
+        const blob = await response.blob();
+        addFileToMediaIndex(new File([blob], name, { type: blob.type }), name);
+        loaded = true;
+      } catch {
+        // The link stays; the file is picked up when the media folder is selected.
+      }
+    }
+    if (loaded) render();
+  }
+
+  function mediaSaveMode() {
+    if (state.mediaDirectoryHandle) return 'folder';
+    if (state.mediaHelper) return 'helper';
+    return typeof window.showDirectoryPicker === 'function' ? 'none' : 'unsupported';
+  }
+
   async function saveUploadedMedia(files) {
     const person = state.people.get(state.pendingUploadPersonId);
     const directoryHandle = state.mediaDirectoryHandle;
+    const mode = mediaSaveMode();
     state.pendingUploadPersonId = null;
     elements.mediaUploadInput.value = '';
-    if (!person || !directoryHandle) return;
+    if (!person || mode === 'none' || mode === 'unsupported') return;
 
     let savedCount = 0;
     let failedCount = 0;
@@ -1030,13 +1105,18 @@
         continue;
       }
       try {
-        const fileName = await uniqueMediaFileName(directoryHandle, file.name);
-        const fileHandle = await directoryHandle.getFileHandle(fileName, { create: true });
-        const writable = await fileHandle.createWritable();
-        await writable.write(file);
-        await writable.close();
-        const savedFile = await fileHandle.getFile();
-        addFileToMediaIndex(savedFile, fileName);
+        let fileName;
+        if (mode === 'folder') {
+          fileName = await uniqueMediaFileName(directoryHandle, file.name);
+          const fileHandle = await directoryHandle.getFileHandle(fileName, { create: true });
+          const writable = await fileHandle.createWritable();
+          await writable.write(file);
+          await writable.close();
+          addFileToMediaIndex(await fileHandle.getFile(), fileName);
+        } else {
+          fileName = await uploadToMediaHelper(file);
+          addFileToMediaIndex(new File([file], fileName, { type: file.type }), fileName);
+        }
         if (!person.mediaPaths.includes(fileName)) person.mediaPaths.push(fileName);
         const paths = state.additionalMedia.get(person.id) || [];
         if (!paths.includes(fileName)) paths.push(fileName);
@@ -1052,7 +1132,10 @@
       const linked = saveAdditionalMedia();
       await persistActiveSession();
       const linkStatus = linked ? 'Person links saved in this browser.' : 'Links will last only for this tab because browser storage is unavailable.';
-      showToast(`${savedCount} media item${savedCount === 1 ? '' : 's'} saved to the selected folder. ${linkStatus}${failedCount ? ` ${failedCount} item${failedCount === 1 ? '' : 's'} could not be saved.` : ''}`);
+      const destination = mode === 'folder'
+        ? 'saved to the selected folder'
+        : `saved to the helper's media folder (${state.mediaHelper.folder})`;
+      showToast(`${savedCount} media item${savedCount === 1 ? '' : 's'} ${destination}. ${linkStatus}${failedCount ? ` ${failedCount} item${failedCount === 1 ? '' : 's'} could not be saved.` : ''}`);
     } else if (failedCount) {
       render();
       showToast(`${failedCount} item${failedCount === 1 ? '' : 's'} could not be saved. Choose an image or PDF and try again.`);
@@ -1070,6 +1153,49 @@
       if (file && isImageFile(file)) return { path, file };
     }
     return null;
+  }
+
+  let pendingUnlink = null;
+
+  // Browsers never expose a folder's real disk path. Prefer an absolute path recorded in the GEDCOM,
+  // then a path the user saved earlier; prompt only when neither exists.
+  function openMediaFolderInTab(mediaPath, forcePrompt) {
+    const folderName = state.mediaDirectoryHandle?.name || 'media';
+    const storageKey = `kinship-atlas:media-path:${folderName}`;
+    const recorded = String(mediaPath || '').trim().replace(/^["']|["']$/g, '');
+    const recordedDir = /^(?:[a-z]:[\\/]|\\\\|\/\/|file:)/i.test(recorded) ? recorded.replace(/[\\/][^\\/]*$/, '') : '';
+    let folderPath = forcePrompt ? '' : recordedDir;
+    let saved = '';
+    try { saved = localStorage.getItem(storageKey) || ''; } catch { }
+    if (!folderPath && !forcePrompt) folderPath = saved;
+    if (!folderPath) {
+      const entered = window.prompt(`The full location of "${folderName}" isn't recorded in this GEDCOM and browsers can't read it. Enter the folder path once (for example G:\\Family\\${folderName}); it is remembered. Shift+click the folder button to change it.`, saved);
+      if (!entered || !entered.trim()) return;
+      folderPath = entered.trim().replace(/^["']|["']$/g, '');
+      try { localStorage.setItem(storageKey, folderPath); } catch { }
+    }
+    const normalized = folderPath.replaceAll('\\', '/').replace(/^file:\/+/i, '').replace(/\/*$/, '/');
+    const opened = window.open(`file:///${encodeURI(normalized)}`, '_blank');
+    if (!opened) showToast('The browser blocked the new tab. Allow pop-ups for this page and try again.');
+  }
+
+  async function revealMediaInExplorer(path, forcePrompt = false) {
+    const file = resolveMediaFile(path);
+    if (!file) return;
+    if (!state.mediaHelper) {
+      openMediaFolderInTab(path, forcePrompt);
+      return;
+    }
+    try {
+      const response = await fetch('/api/reveal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: file.name })
+      });
+      if (!response.ok) throw new Error('not found');
+    } catch {
+      showToast(`File Explorer could not show "${file.name}". It may not be in the helper's media folder.`);
+    }
   }
 
   function unlinkPersonMedia(personId, path) {
@@ -1119,6 +1245,7 @@
   function setLoaded(fileName, data, storageKey, gedcomText = '') {
     releaseMediaUrls();
     state.mediaIndex = null;
+    state.mediaFolderPicked = false;
     state.mediaRelativePaths = new WeakMap();
     state.mediaDirectoryHandle = null;
     state.rememberedMediaDirectoryHandle = null;
@@ -1132,7 +1259,6 @@
     state.gedcomRecords = data.gedcomRecords;
     state.gedcomDirty = false;
     state.gedcomText = gedcomText || serializeGedcomRecords(data.gedcomRecords);
-    elements.saveGedcom.disabled = true;
     state.primaryMediaKey = storageKey;
     state.additionalMedia = loadAdditionalMedia(storageKey, state.people);
     state.primaryMedia = loadPrimaryMedia(storageKey, state.people);
@@ -1143,6 +1269,7 @@
     elements.search.value = '';
     elements.search.disabled = false;
     elements.clear.disabled = false;
+    document.querySelector('#openGedcomLabel').hidden = true;
     state.zoom = 1;
     elements.zoomIn.disabled = false;
     elements.zoomOut.disabled = false;
@@ -1170,7 +1297,6 @@
       const storageKey = await primaryMediaStorageKey(file, session.gedcomText);
       setLoaded(session.fileName, parsed, storageKey, session.gedcomText);
       state.gedcomDirty = Boolean(session.gedcomDirty);
-      elements.saveGedcom.disabled = !state.gedcomDirty;
       if (state.gedcomDirty) elements.loadStatus.textContent = 'UNSAVED CHANGES';
       await restoreMediaDirectoryHandle(session.mediaDirectoryHandle);
       if (session.selectedId && state.people.has(session.selectedId)) setFocus(session.selectedId, true);
@@ -1182,41 +1308,8 @@
   function markGedcomDirty() {
     state.gedcomDirty = true;
     state.gedcomText = serializeGedcomRecords(state.gedcomRecords);
-    elements.saveGedcom.disabled = false;
     elements.loadStatus.textContent = 'UNSAVED CHANGES';
     persistActiveSession();
-  }
-
-  async function saveGedcomToFile() {
-    if (!state.gedcomDirty) return;
-    const text = serializeGedcomRecords(state.gedcomRecords);
-    const suggestedName = state.fileName.toLowerCase().endsWith('.ged') ? state.fileName : `${state.fileName || 'Family Tree'}.ged`;
-    try {
-      if (typeof window.showSaveFilePicker === 'function') {
-        const handle = await window.showSaveFilePicker({
-          suggestedName,
-          types: [{ description: 'GEDCOM file', accept: { 'text/plain': ['.ged'] } }]
-        });
-        const writable = await handle.createWritable();
-        await writable.write(text);
-        await writable.close();
-      } else {
-        const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = suggestedName;
-        link.click();
-        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      }
-      state.gedcomDirty = false;
-      elements.saveGedcom.disabled = true;
-      elements.loadStatus.textContent = 'TREE SAVED LOCALLY';
-      state.gedcomText = text;
-      await persistActiveSession();
-      showToast('GEDCOM saved.');
-    } catch (error) {
-      if (error.name !== 'AbortError') showToast('The GEDCOM could not be saved.');
-    }
   }
 
   function setFocus(personId, replaceHistory = false) {
@@ -1765,11 +1858,18 @@
 
     const actions = document.createElement('div');
     actions.className = 'media-actions';
-    const addButton = makeButton('Add photo or PDF', 'media-add-button');
-    addButton.dataset.addMediaFor = person.id;
-    addButton.disabled = !state.mediaDirectoryHandle;
-    addButton.title = state.mediaDirectoryHandle ? 'Add photo or PDF to the selected folder' : 'Select a media folder before adding files';
-    actions.append(addButton);
+    const saveMode = mediaSaveMode();
+    if (saveMode !== 'unsupported') {
+      const addButton = makeButton('Add photo or PDF', 'media-add-button');
+      addButton.dataset.addMediaFor = person.id;
+      addButton.disabled = saveMode === 'none';
+      addButton.title = saveMode === 'folder'
+        ? 'Add photo or PDF to the selected folder'
+        : saveMode === 'helper'
+          ? `Add photo or PDF; saved by the local helper to ${state.mediaHelper.folder}`
+          : 'Select a media folder before adding files';
+      actions.append(addButton);
+    }
     mediaSection.append(actions);
 
     if (!person.mediaPaths.length) {
@@ -1788,6 +1888,13 @@
       return mediaSection;
     }
 
+    const makeRevealButton = (mediaPath) => {
+      const revealButton = makeButton('📂', 'media-reveal-button');
+      revealButton.dataset.revealMedia = mediaPath;
+      revealButton.setAttribute('aria-label', 'Open the media folder in a new tab');
+      revealButton.title = 'Open media folder in a new tab (Shift+click to change the saved path)';
+      return revealButton;
+    };
     const grid = document.createElement('div');
     grid.className = 'media-grid';
     mediaSection.append(grid);
@@ -2194,7 +2301,10 @@
     welcomeButton.replaceWith(actions);
     const createButton = makeButton('Create new GEDCOM', 'button button-secondary');
     createButton.dataset.createGedcom = 'true';
-    actions.append(welcomeButton, createButton);
+    const orLabel = document.createElement('span');
+    orLabel.className = 'welcome-or';
+    orLabel.textContent = 'or';
+    actions.append(welcomeButton, orLabel, createButton);
   }
 
   elements.fileInput.addEventListener('change', async (event) => {
@@ -2218,7 +2328,6 @@
       showToast(error instanceof Error ? error.message : 'The GEDCOM could not be read.');
     }
   });
-  elements.saveGedcom.addEventListener('click', saveGedcomToFile);
   elements.createGedcomForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     const fileNameInput = document.querySelector('#newGedcomFileName');
@@ -2254,15 +2363,51 @@
     const file = new File([gedcomText], fileName, { type: 'text/plain' });
     const parsed = parseGedcom(gedcomText);
     let saveAction = 'downloaded';
+    let mediaHandle = null;
+    let helperFolder = '';
+    let mediaProblem = '';
+    const errorBox = document.querySelector('#newGedcomError');
+    const showCreateError = (message) => { errorBox.textContent = message; errorBox.hidden = false; };
+    errorBox.hidden = true;
     try {
-      if (typeof window.showSaveFilePicker === 'function') {
-        const handle = await window.showSaveFilePicker({
-          suggestedName: fileName,
-          types: [{ description: 'GEDCOM file', accept: { 'text/plain': ['.ged'] } }]
-        });
+      if (typeof window.showDirectoryPicker === 'function') {
+        let parent;
+        try {
+          parent = await window.showDirectoryPicker({ id: 'kinship-new-tree', mode: 'readwrite', startIn: 'documents' });
+        } catch (error) {
+          if (error.name === 'AbortError') return;
+          showCreateError(error.name === 'SecurityError'
+            ? 'The browser will not allow that folder (protected folders such as Documents, Desktop and Downloads are blocked). Choose or create a sub-folder inside it and try again.'
+            : `The folder could not be opened for writing (${error.name}: ${error.message}).`);
+          return;
+        }
+        const exists = await parent.getFileHandle(fileName).then(() => true, () => false);
+        if (exists) {
+          showCreateError(`${fileName} already exists in that folder. Choose another folder or change the file name.`);
+          return;
+        }
+        const handle = await parent.getFileHandle(fileName, { create: true });
         const writable = await handle.createWritable();
         await writable.write(gedcomText);
         await writable.close();
+        saveAction = 'saved';
+        try {
+          mediaHandle = await parent.getDirectoryHandle(`${safeBase}_Media`, { create: true });
+        } catch (error) {
+          mediaProblem = `${error.name}: ${error.message}`;
+        }
+      } else if (state.mediaHelper) {
+        const response = await fetch('/api/new-tree', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: safeBase, text: gedcomText })
+        });
+        if (response.status === 409) {
+          showCreateError(`${fileName} already exists in the helper's folder. Change the file name.`);
+          return;
+        }
+        if (!response.ok) throw new Error('The helper could not create the files.');
+        helperFolder = (await response.json()).folder;
         saveAction = 'saved';
       } else {
         const downloadUrl = URL.createObjectURL(file);
@@ -2273,17 +2418,56 @@
         window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
       }
     } catch (error) {
-      if (error.name !== 'AbortError') showToast('The GEDCOM file could not be saved.');
+      showCreateError(`The GEDCOM file could not be saved (${error.name}: ${error.message}).`);
       return;
     }
 
     const storageKey = await primaryMediaStorageKey(file, gedcomText);
     setLoaded(fileName, parsed, storageKey, gedcomText);
+    if (mediaHandle) {
+      state.mediaDirectoryHandle = mediaHandle;
+      syncMediaButton();
+      await indexMediaDirectory(mediaHandle);
+      render();
+    } else if (helperFolder) {
+      state.mediaHelper = { folder: helperFolder };
+      render();
+    }
     await persistActiveSession();
     elements.newGedcomDialog.close();
-    showToast(`Created a new GEDCOM starter with one person and ${saveAction} the file.`);
+    const mediaNote = mediaHandle || helperFolder
+      ? ` and linked an empty media folder (${mediaHandle ? mediaHandle.name : helperFolder}).`
+      : mediaProblem
+        ? `, but the media folder could not be created (${mediaProblem}).`
+        : '. No media folder was made because this browser has folder access turned off. Create a folder named "' + safeBase + '_Media" next to the downloaded file, then use Select Media Folder. (Brave: enable brave://flags/#file-system-access-api and relaunch for automatic creation.)';
+    showToast(`Created a new GEDCOM starter with one person and ${saveAction} the file${mediaNote}`);
   });
   ensureCreateGedcomWelcomeAction();
+
+  function showNewGedcomNotice() {
+    const notice = document.querySelector('#newGedcomNotice');
+    document.querySelector('#newGedcomError').hidden = true;
+    if (typeof window.showDirectoryPicker === 'function') {
+      notice.hidden = true;
+      return;
+    }
+    const isBrave = Boolean(navigator.brave);
+    const helperLine = state.mediaHelper
+      ? '<p>The local helper is running, so the files will be created in its media folder\'s parent folder.</p>'
+      : '';
+    notice.innerHTML = `
+      <p><strong>This browser can't create folders on your computer, so the media folder can't be made automatically.</strong></p>
+      ${isBrave ? '<p>To fix this in Brave: open <code>brave://flags/#file-system-access-api</code>, set it to <em>Enabled</em>, relaunch Brave, and reopen this page. Edge and Chrome work without changes.</p>' : '<p>Use a Chromium browser such as Edge or Chrome, which supports folder access.</p>'}
+      ${helperLine}
+      <p>To continue anyway, create the file and then set up the media folder by hand:</p>
+      <ol>
+        <li>Move the downloaded <code>.ged</code> file to where you want to keep it.</li>
+        <li>Next to it, create a folder named the same, with <code>_Media</code> added (for example <code>Family Tree_Media</code>).</li>
+        <li>Copy photos and PDFs into that folder yourself.</li>
+        <li>Use <em>Select Media Folder</em> in the top bar to view them. Uploading from the app needs folder access.</li>
+      </ol>`;
+    notice.hidden = false;
+  }
 
   elements.mediaButton.addEventListener('click', showMediaFolderDialog);
   elements.linkExistingMediaFolder.addEventListener('click', () => {
@@ -2291,6 +2475,11 @@
   });
   elements.createMediaFolder.addEventListener('click', () => {
     chooseMediaDirectory(true).finally(() => elements.mediaFolderDialog.close());
+  });
+  document.querySelector('#confirmUnlinkMedia').addEventListener('click', () => {
+    document.querySelector('#unlinkMediaDialog').close();
+    if (pendingUnlink) unlinkPersonMedia(pendingUnlink.personId, pendingUnlink.path);
+    pendingUnlink = null;
   });
   document.querySelectorAll('button[data-close-dialog]').forEach((button) => {
     button.addEventListener('click', () => document.querySelector(`#${button.dataset.closeDialog}`).close());
@@ -2301,6 +2490,7 @@
     if (!files.length) return;
     state.mediaDirectoryHandle = null;
     state.rememberedMediaDirectoryHandle = null;
+    state.mediaFolderPicked = true;
     syncMediaButton();
     state.mediaRelativePaths = new WeakMap();
     releaseMediaUrls();
@@ -2320,21 +2510,22 @@
       }
     }
     render();
-    showToast(`Matched ${matched.toLocaleString()} of ${references.toLocaleString()} media references. Files remain in this tab.`);
+    showToast(`Matched ${matched.toLocaleString()} of ${references.toLocaleString()} media references. This browser cannot write to folders, so media is view-only here. Use Edge or Chrome to add files.`);
   });
 
   elements.clear.addEventListener('click', () => {
-    releaseMediaUrls(); state.mediaIndex = null;
+    releaseMediaUrls(); state.mediaIndex = null; state.mediaFolderPicked = false;
     state.mediaRelativePaths = new WeakMap(); state.mediaDirectoryHandle = null; state.pendingUploadPersonId = null;
     syncMediaButton();
     state.primaryMediaKey = ''; state.primaryMedia.clear();
     state.additionalMedia.clear();
-    state.gedcomRecords = []; state.gedcomDirty = false; elements.saveGedcom.disabled = true;
+    state.gedcomRecords = [];     state.gedcomDirty = false;
     state.people.clear(); state.families.clear(); state.sources.clear(); state.selectedId = null;
     refreshDirectoryFilters(true);
     state.fileName = ''; state.gedcomText = ''; state.history = []; state.historyIndex = -1; state.searchText = '';
     state.rememberedMediaDirectoryHandle = null;
     elements.fileInput.value = ''; elements.mediaInput.value = ''; elements.mediaButton.disabled = true; elements.search.value = ''; elements.search.disabled = true;
+    document.querySelector('#openGedcomLabel').hidden = false;
     elements.clear.disabled = true; elements.back.disabled = true; elements.forward.disabled = true;
     elements.zoomIn.disabled = true; elements.zoomOut.disabled = true;
     elements.treeLabel.textContent = 'No tree loaded'; elements.peopleCount.textContent = '0';
@@ -2375,6 +2566,7 @@
   });
   elements.canvas.addEventListener('click', (event) => {
     if (event.target.closest('button[data-create-gedcom]')) {
+      showNewGedcomNotice();
       elements.newGedcomDialog.showModal();
       return;
     }
@@ -2442,7 +2634,13 @@
     }
     const unlinkButton = event.target.closest('button[data-unlink-media]');
     if (unlinkButton) {
-      unlinkPersonMedia(unlinkButton.dataset.personId, unlinkButton.dataset.unlinkMedia);
+      pendingUnlink = { personId: unlinkButton.dataset.personId, path: unlinkButton.dataset.unlinkMedia };
+      document.querySelector('#unlinkMediaDialog').showModal();
+      return;
+    }
+    const revealButton = event.target.closest('button[data-reveal-media]');
+    if (revealButton) {
+      revealMediaInExplorer(revealButton.dataset.revealMedia, event.shiftKey);
       return;
     }
     const button = event.target.closest('button[data-person-id]');
@@ -2532,5 +2730,5 @@
     }
   });
   window.addEventListener('pagehide', () => { persistActiveSession(); });
-  restoreActiveSession();
+  probeMediaHelper().then(restoreActiveSession).then(loadHelperMedia);
 })();
