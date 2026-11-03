@@ -45,7 +45,7 @@
     ['prussia', 'de-prussia', 'Prussia', 'png'], ['preussen', 'de-prussia', 'Prussia', 'png']
   ].sort((a, b) => b[0].length - a[0].length);
   const state = {
-    mapMode: false, mapStats: null, directoryMatches: [], reportsMode: false,
+    mapMode: false, mapStats: null, directoryMatches: [], reportsMode: false, mediaLibraryMode: false,
     people: new Map(), families: new Map(), sources: new Map(), selectedId: null,
     fileName: '', searchText: '', history: [], historyIndex: -1, zoom: 1,
     mediaIndex: null, mediaUrls: new Map(), mediaRelativePaths: new WeakMap(), mediaDirectoryHandle: null,
@@ -53,7 +53,7 @@
     pendingUploadPersonId: null, pendingResearchPersonId: null,
     pendingPersonSummaryId: null,
     pendingLifeEvent: null,
-    primaryMediaKey: '', primaryMedia: new Map(), additionalMedia: new Map(), primaryPersonId: '',
+    primaryMediaKey: '', primaryMedia: new Map(), additionalMedia: new Map(), mediaTypes: new Map(), primaryPersonId: '',
     gedcomRecords: [], gedcomDirty: false, gedcomText: '', sessionSaveQueue: Promise.resolve(),
     gedcomSource: '', gedcomFileHandle: null, gedcomBaseHash: '', gedcomSaving: false,
     gedcomSaveQueue: Promise.resolve(), gedcomPickerDeclined: false,
@@ -99,6 +99,8 @@
     createGedcomForm: document.querySelector('#createGedcomForm'),
     clear: document.querySelector('#clearButton'), mapViewButton: document.querySelector('#mapViewButton'),
     reportsButton: document.querySelector('#reportsButton'), reportsView: document.querySelector('#reportsView'),
+    mediaLibraryButton: document.querySelector('#mediaLibraryButton'), mediaLibraryView: document.querySelector('#mediaLibraryView'),
+    mediaLibraryContent: document.querySelector('#mediaLibraryContent'),
     reportsContent: document.querySelector('#reportsContent'), appShell: document.querySelector('.app-shell'),
     treeLabel: document.querySelector('#treeLabel'), peopleCount: document.querySelector('#peopleCount'),
     visibleCount: document.querySelector('#visibleCount'), clearSurnameFilter: document.querySelector('#clearSurnameFilter'),
@@ -923,12 +925,25 @@
     return `kinship-atlas:primary-media:v1:${file.name}:${file.size}:${(hash >>> 0).toString(16)}`;
   }
 
+  function mediaPathsForPerson(personId) {
+    const person = state.people.get(personId);
+    if (!person) return [];
+    const paths = [...person.mediaPaths];
+    const familyIds = new Set([...person.parentFamilyIds, ...person.spouseFamilyIds]);
+    for (const familyId of familyIds) {
+      const family = state.families.get(familyId);
+      if (!family) continue;
+      for (const event of [family.marriage, family.divorce]) paths.push(...(event?.mediaPaths || []));
+    }
+    return [...new Set(paths)];
+  }
+
   function loadPrimaryMedia(storageKey, people) {
     const primaryMedia = new Map();
     try {
       const saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
       for (const [personId, path] of Object.entries(saved)) {
-        if (typeof path === 'string' && people.get(personId)?.mediaPaths.includes(path)) primaryMedia.set(personId, path);
+        if (typeof path === 'string' && people.has(personId) && mediaPathsForPerson(personId).includes(path)) primaryMedia.set(personId, path);
       }
     } catch { }
     return primaryMedia;
@@ -972,10 +987,45 @@
     }
   }
 
+  const mediaTypeOptions = [
+    ['unclassified', 'Unclassified'], ['portrait', 'Portrait'], ['family-photo', 'Family photo'],
+    ['document', 'Document'], ['certificate', 'Certificate'], ['letter', 'Letter'],
+    ['newspaper', 'Newspaper'], ['map-plan', 'Map / plan'], ['will-probate', 'Will / Probate'],
+    ['wedding', 'Wedding'], ['birth', 'Birth'], ['death', 'Death'], ['census', 'Census'],
+    ['directory', 'Directory'], ['other', 'Other']
+  ];
+  const mediaTypeStorageKey = (storageKey) => `kinship-atlas:media-types:v1:${storageKey}`;
+
+  function loadMediaTypes(storageKey) {
+    const types = new Map();
+    try {
+      const saved = JSON.parse(localStorage.getItem(mediaTypeStorageKey(storageKey)) || '{}');
+      const validTypes = new Set(mediaTypeOptions.map(([value]) => value));
+      for (const [path, type] of Object.entries(saved)) {
+        if (typeof path === 'string' && validTypes.has(type)) types.set(path, type);
+      }
+    } catch { }
+    return types;
+  }
+
+  function saveMediaTypes() {
+    if (!state.primaryMediaKey) return false;
+    try {
+      localStorage.setItem(mediaTypeStorageKey(state.primaryMediaKey), JSON.stringify(Object.fromEntries(state.mediaTypes)));
+      syncSelectionsToHelper();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   // Card image, extra media and primary person choices live in localStorage, which is tied to the exact
   // origin (http://127.0.0.1:<port>) and browser. The local helper mirrors them to kinship-selections.json
   // beside the app so they survive moving or copying the app folder and switching browsers.
-  const selectionKeyPrefixes = ['kinship-atlas:primary-media:v1:', 'kinship-atlas:primary-person:v1:'];
+  const selectionKeyPrefixes = [
+    'kinship-atlas:primary-media:v1:', 'kinship-atlas:primary-person:v1:',
+    'kinship-atlas:media-types:v1:'
+  ];
 
   function syncSelectionsToHelper() {
     if (!state.mediaHelper || !/^https?:$/.test(location.protocol)) return;
@@ -1010,7 +1060,7 @@
         let local = null;
         try { local = JSON.parse(localStorage.getItem(key) || 'null'); } catch { }
         // Entries saved in this browser win; the file fills in whatever this browser does not know about.
-        const merged = key.startsWith('kinship-atlas:primary-media:v1:')
+        const merged = key.startsWith('kinship-atlas:primary-media:v1:') || key.startsWith('kinship-atlas:media-types:v1:')
           ? { ...value, ...(local && typeof local === 'object' ? local : {}) }
           : (local ?? value);
         localStorage.setItem(key, JSON.stringify(merged));
@@ -1277,7 +1327,7 @@
       const file = resolveMediaFile(preferredPath);
       if (file && isImageFile(file)) return { path: preferredPath, file };
     }
-    for (const path of person.mediaPaths) {
+    for (const path of mediaPathsForPerson(person.id)) {
       const file = resolveMediaFile(path);
       if (file && isImageFile(file)) return { path, file };
     }
@@ -1565,6 +1615,9 @@
     state.primaryMediaKey = storageKey;
     state.additionalMedia = loadAdditionalMedia(storageKey, state.people);
     state.primaryMedia = loadPrimaryMedia(storageKey, state.people);
+    state.mediaTypes = loadMediaTypes(storageKey);
+    document.querySelector('#mediaLibrarySearch').value = '';
+    document.querySelector('#mediaLibraryTypeFilter').value = '';
     state.fileName = fileName;
     loadPrimaryPerson();
     state.searchText = '';
@@ -1576,6 +1629,8 @@
     document.querySelector('#importGedcomButton').disabled = false;
     elements.mapViewButton.disabled = false;
     elements.reportsButton.disabled = false;
+    elements.mediaLibraryButton.disabled = false;
+    document.querySelector('#mediaLibraryMenuButton').disabled = false;
     elements.printMapButton.disabled = false;
     document.querySelector('#openGedcomLabel').hidden = true;
     state.zoom = 1;
@@ -1789,6 +1844,8 @@
           const value = localStorage.getItem(state.primaryMediaKey + suffix);
           if (value !== null) localStorage.setItem(newKey + suffix, value);
         }
+        const savedTypes = localStorage.getItem(mediaTypeStorageKey(state.primaryMediaKey));
+        if (savedTypes !== null) localStorage.setItem(mediaTypeStorageKey(newKey), savedTypes);
       } catch { }
       state.primaryMediaKey = newKey;
       syncSelectionsToHelper();
@@ -2874,6 +2931,271 @@
     return mediaSection;
   }
 
+  function mediaLibraryEntries() {
+    const entries = new Map();
+    const entriesByFile = new Map();
+    const ensureEntry = (path) => {
+      if (!path) return null;
+      const file = resolveMediaFile(path);
+      const displayPath = file ? state.mediaRelativePaths.get(file) || file.name : path;
+      const key = normalizeMediaPath(path);
+      if (!key) return null;
+      let entry = file ? entriesByFile.get(file) : null;
+      if (!entry) entry = entries.get(key);
+      if (!entry) {
+        entry = { key, path: displayPath, file, aliases: new Set(), people: new Map(), events: new Set() };
+        entries.set(key, entry);
+      }
+      entry.aliases.add(key);
+      if (file) entry.file = file;
+      if (file) entriesByFile.set(file, entry);
+      return entry;
+    };
+    const linkPerson = (path, personId, mediaPath = path, event = '') => {
+      const entry = ensureEntry(path);
+      if (!entry) return;
+      const person = state.people.get(personId);
+      if (person) {
+        if (!entry.people.has(personId)) entry.people.set(personId, { person, path: mediaPath });
+        if (event) entry.events.add(`${person.name} · ${event}`);
+      }
+    };
+    const sourcePeople = new Map();
+    const linkSourcePeople = (sourceIds, personIds) => {
+      for (const sourceId of sourceIds || []) {
+        if (!sourcePeople.has(sourceId)) sourcePeople.set(sourceId, new Set());
+        for (const personId of personIds) if (state.people.has(personId)) sourcePeople.get(sourceId).add(personId);
+      }
+    };
+    for (const person of state.people.values()) {
+      linkSourcePeople(person.sourceIds, [person.id]);
+      for (const event of person.events) linkSourcePeople(event.sources, [person.id]);
+    }
+    for (const family of state.families.values()) {
+      const familyPeople = [family.husbandId, family.wifeId, ...(family.childIds || [])];
+      linkSourcePeople(family.sourceIds, familyPeople);
+      for (const event of [family.marriage, family.divorce]) linkSourcePeople(event?.sources, familyPeople);
+    }
+    const linkedPeopleForSource = (sourceId) => [...(sourcePeople.get(sourceId) || [])];
+    const linkedFiles = mediaRecordFiles(state.gedcomRecords);
+
+    for (const [objectId, paths] of linkedFiles) {
+      for (const path of paths) ensureEntry(path);
+    }
+
+    for (const person of state.people.values()) {
+      for (const path of person.mediaPaths) linkPerson(path, person.id, path);
+      for (const event of person.events) {
+        for (const path of event.mediaPaths || []) linkPerson(path, person.id, path, eventTitle(event));
+      }
+    }
+    for (const family of state.families.values()) {
+      const personIds = [family.husbandId, family.wifeId, ...(family.childIds || [])].filter((id) => state.people.has(id));
+      for (const event of [family.marriage, family.divorce].filter(Boolean)) {
+        for (const path of event.mediaPaths || []) {
+          ensureEntry(path);
+          for (const personId of personIds) linkPerson(path, personId, path, eventTitle(event));
+        }
+      }
+    }
+
+    for (const record of state.gedcomRecords) {
+      const paths = new Set();
+      for (const line of record.lines.slice(1)) {
+        const field = parseGedcomField(line);
+        if (field?.tag === 'FILE' && field.value.trim()) paths.add(field.value.trim());
+        if (field?.tag === 'OBJE') {
+          const objectPaths = linkedFiles.get(splitXref(field.value)) || [];
+          for (const path of objectPaths) paths.add(path);
+        }
+      }
+      if (!paths.size) continue;
+      let personIds = [];
+      let eventLabel = '';
+      if (record.tag === 'INDI') {
+        if (state.people.has(record.xref)) personIds = [record.xref];
+      } else if (record.tag === 'FAM') {
+        const family = state.families.get(record.xref);
+        personIds = family ? [family.husbandId, family.wifeId, ...(family.childIds || [])].filter((id) => state.people.has(id)) : [];
+      } else if (record.tag === 'SOUR') {
+        personIds = linkedPeopleForSource(record.xref);
+      }
+      for (const path of paths) {
+        ensureEntry(path);
+        for (const personId of personIds) linkPerson(path, personId, path, eventLabel);
+      }
+    }
+    return [...entries.values()].sort((a, b) => (a.file?.name || a.path).localeCompare(b.file?.name || b.path, undefined, { sensitivity: 'base' }));
+  }
+
+  function renderMediaLibrary() {
+    if (!state.people.size) {
+      elements.mediaLibraryContent.replaceChildren();
+      return;
+    }
+    document.querySelector('#mediaLibraryFileName').textContent = state.fileName;
+    const search = document.querySelector('#mediaLibrarySearch').value.trim().toLocaleLowerCase();
+    const selectedType = document.querySelector('#mediaLibraryTypeFilter').value;
+    const allEntries = mediaLibraryEntries();
+    const entries = allEntries.filter((entry) => {
+      const type = state.mediaTypes.get(entry.key) || 'unclassified';
+      if (selectedType && type !== selectedType) return false;
+      const names = [...entry.people.values()].map(({ person }) => person.name).join(' ');
+      return !search || `${entry.file?.name || entry.path} ${names}`.toLocaleLowerCase().includes(search);
+    });
+    const total = allEntries.length;
+    document.querySelector('#mediaLibraryCount').textContent = `${entries.length.toLocaleString()} of ${total.toLocaleString()} items`;
+    document.querySelector('#mediaLibrarySummary').textContent = `${total.toLocaleString()} media item${total === 1 ? '' : 's'} linked or referenced in this tree.`;
+    elements.mediaLibraryContent.replaceChildren();
+    if (!entries.length) {
+      const empty = document.createElement('p');
+      empty.className = 'media-library-empty';
+      empty.textContent = total ? 'No media matches these filters.' : 'No attached media was found in this GEDCOM.';
+      elements.mediaLibraryContent.append(empty);
+      return;
+    }
+    for (const entry of entries) {
+      const card = document.createElement('article');
+      card.className = 'media-library-card';
+      const preview = document.createElement('div');
+      preview.className = 'media-library-preview';
+      if (entry.file && isImageFile(entry.file)) {
+        const link = document.createElement('a');
+        link.href = mediaUrl(entry.file);
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.setAttribute('aria-label', `View ${entry.file.name}`);
+        const image = document.createElement('img');
+        image.src = mediaUrl(entry.file);
+        image.alt = entry.file.name;
+        link.append(image);
+        preview.append(link);
+      } else if (entry.file) {
+        const link = document.createElement('a');
+        link.className = 'media-library-document';
+        link.href = mediaUrl(entry.file);
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.textContent = 'Open document';
+        preview.append(link);
+      } else {
+        const missing = document.createElement('span');
+        missing.className = 'media-library-missing';
+        missing.textContent = 'File not found';
+        preview.append(missing);
+      }
+
+      const details = document.createElement('div');
+      details.className = 'media-library-details';
+      const heading = document.createElement('h2');
+      heading.textContent = entry.file?.name || entry.path.split(/[\\/]/).pop() || entry.path;
+      heading.title = entry.path;
+      const pathLabel = document.createElement('p');
+      pathLabel.className = 'media-library-path';
+      pathLabel.textContent = entry.path;
+      details.append(heading, pathLabel);
+
+      const typeLabel = document.createElement('label');
+      typeLabel.className = 'media-library-type';
+      typeLabel.textContent = 'Classify';
+      const typeSelect = document.createElement('select');
+      typeSelect.dataset.mediaTypeKey = entry.key;
+      const currentType = state.mediaTypes.get(entry.key) || 'unclassified';
+      for (const [value, label] of mediaTypeOptions) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        option.selected = value === currentType;
+        typeSelect.append(option);
+      }
+      typeSelect.addEventListener('change', () => {
+        state.mediaTypes.set(entry.key, typeSelect.value);
+        const saved = saveMediaTypes();
+        renderMediaLibrary();
+        if (!saved) showToast('Classification saved for this tab only; browser storage is unavailable.');
+      });
+      typeLabel.append(typeSelect);
+      details.append(typeLabel);
+
+      const linked = document.createElement('div');
+      linked.className = 'media-library-links';
+      const linkedLabel = document.createElement('strong');
+      linkedLabel.textContent = 'Linked people';
+      linked.append(linkedLabel);
+      const peopleList = document.createElement('div');
+      peopleList.className = 'media-library-people';
+      if (entry.people.size) {
+        for (const { person, path } of [...entry.people.values()].sort((a, b) => a.person.name.localeCompare(b.person.name))) {
+          const personLink = makeButton(person.name, 'media-library-person');
+          personLink.dataset.mediaPerson = person.id;
+          personLink.dataset.mediaPath = path;
+          personLink.addEventListener('click', () => {
+            setMediaLibraryMode(false);
+            setFocus(person.id);
+          });
+          peopleList.append(personLink);
+          const selected = state.primaryMedia.get(person.id);
+          const primary = selected && (entry.file ? resolveMediaFile(selected) === entry.file : normalizeMediaPath(selected) === entry.key);
+          if (primary) {
+            const badge = document.createElement('span');
+            badge.className = 'media-library-primary-badge';
+            badge.textContent = 'Primary card image';
+            peopleList.append(badge);
+          }
+          if (entry.events.size) {
+            const eventNote = document.createElement('span');
+            eventNote.className = 'media-library-event-note';
+            eventNote.textContent = [...entry.events].filter((item) => item.startsWith(`${person.name} · `)).map((item) => item.slice(person.name.length + 3)).join(', ');
+            if (eventNote.textContent) peopleList.append(eventNote);
+          }
+        }
+      } else {
+        const none = document.createElement('span');
+        none.className = 'media-library-unlinked';
+        none.textContent = 'No person link recorded';
+        peopleList.append(none);
+      }
+      linked.append(peopleList);
+      details.append(linked);
+
+      const actions = document.createElement('div');
+      actions.className = 'media-library-actions';
+      if (entry.file && isImageFile(entry.file) && entry.people.size) {
+        const primaryPerson = document.createElement('select');
+        primaryPerson.className = 'media-library-primary-person';
+        primaryPerson.setAttribute('aria-label', 'Person to assign this card image to');
+        for (const { person } of entry.people.values()) {
+          const option = document.createElement('option');
+          option.value = person.id;
+          option.textContent = person.name;
+          primaryPerson.append(option);
+        }
+        const setPrimary = makeButton('Set as card image', 'media-library-primary-action');
+        setPrimary.addEventListener('click', () => {
+          const personId = primaryPerson.value;
+          const path = entry.people.get(personId)?.path;
+          if (!path) return;
+          state.primaryMedia.set(personId, path);
+          const saved = savePrimaryMedia();
+          render();
+          renderMediaLibrary();
+          showToast(saved ? `${entry.file.name} is now ${state.people.get(personId)?.name}'s primary card image.` : 'Primary card image selected for this tab; browser storage is unavailable.');
+        });
+        actions.append(primaryPerson, setPrimary);
+      }
+      const deleteButton = makeButton('Delete file', 'media-library-delete');
+      deleteButton.disabled = !canDeleteMediaFile(entry.file);
+      deleteButton.title = deleteButton.disabled
+        ? entry.file ? 'Select a writable media folder or use the local helper to delete files.' : 'The file is unavailable in the linked media folder.'
+        : 'Permanently delete this file and remove its links from the GEDCOM.';
+      deleteButton.addEventListener('click', () => openMediaLibraryDeleteDialog(entry));
+      actions.append(deleteButton);
+      details.append(actions);
+      card.append(preview, details);
+      elements.mediaLibraryContent.append(card);
+    }
+  }
+
   function render() {
     if (state.reportsMode) renderReports();
     const person = state.people.get(state.selectedId);
@@ -2979,13 +3301,36 @@
   function setReportsMode(on) {
     if (on && !state.people.size) return;
     state.reportsMode = on;
-    elements.reportsView.hidden = !on;
-    elements.appShell.hidden = on;
+    if (on && state.mediaLibraryMode) {
+      state.mediaLibraryMode = false;
+      elements.mediaLibraryView.hidden = true;
+      elements.mediaLibraryButton.setAttribute('aria-pressed', 'false');
+    }
+    elements.reportsView.hidden = !on || state.mediaLibraryMode;
+    elements.appShell.hidden = on || state.mediaLibraryMode;
     setButtonContent(elements.reportsButton, on ? 'tree' : 'chart', on ? 'Back to tree' : 'Reports');
     elements.reportsButton.setAttribute('aria-pressed', String(on));
     if (on) {
       renderReports();
       elements.reportsView.scrollTop = 0;
+    }
+  }
+
+  function setMediaLibraryMode(on) {
+    if (on && !state.people.size) return;
+    state.mediaLibraryMode = on;
+    if (on && state.reportsMode) {
+      state.reportsMode = false;
+      setButtonContent(elements.reportsButton, 'chart', 'Reports');
+      elements.reportsButton.setAttribute('aria-pressed', 'false');
+    }
+    elements.mediaLibraryView.hidden = !on;
+    elements.appShell.hidden = on || state.reportsMode;
+    elements.reportsView.hidden = on || !state.reportsMode;
+    elements.mediaLibraryButton.setAttribute('aria-pressed', String(on));
+    if (on) {
+      renderMediaLibrary();
+      elements.mediaLibraryView.scrollTop = 0;
     }
   }
 
@@ -3836,6 +4181,7 @@
   }
 
   let pendingEventMediaDelete = null;
+  let pendingMediaLibraryDelete = null;
   let pendingPersonDelete = null;
 
   function openEventMediaRemoveDialog(path) {
@@ -3854,6 +4200,21 @@
         ? 'Unavailable: the file was not found in the linked media folder.'
         : 'Unavailable: select the media folder with write access (Chrome or Edge), or use the local helper, to delete files.';
     document.querySelector('#eventMediaRemoveDialog').showModal();
+  }
+
+  function openMediaLibraryDeleteDialog(entry) {
+    if (!entry?.file || !canDeleteMediaFile(entry.file)) return;
+    const linkedPeople = [...entry.people.values()].map(({ person }) => person.name);
+    pendingMediaLibraryDelete = {
+      path: entry.path,
+      key: entry.key,
+      name: entry.file.name,
+      personId: entry.people.keys().next().value || state.selectedId || state.people.keys().next().value
+    };
+    document.querySelector('#mediaLibraryDeleteName').textContent = entry.file.name;
+    document.querySelector('#mediaLibraryDeleteText').textContent =
+      `This file will be permanently deleted from the media folder and cannot be recovered from Kinship Atlas.${linkedPeople.length ? ` It is linked to ${linkedPeople.join(', ')}; all links to it in this GEDCOM will be removed.` : ' No person links are recorded for this file.'}`;
+    document.querySelector('#mediaLibraryDeleteDialog').showModal();
   }
 
   function setLifeEventMediaNotice(message) {
@@ -4241,7 +4602,7 @@
       if (person) for (const path of paths) if (!person.mediaPaths.includes(path)) person.mediaPaths.push(path);
     }
     for (const id of state.primaryMedia.keys()) {
-      if (!state.people.get(id)?.mediaPaths.includes(state.primaryMedia.get(id))) state.primaryMedia.delete(id);
+      if (!mediaPathsForPerson(id).includes(state.primaryMedia.get(id))) state.primaryMedia.delete(id);
     }
     elements.peopleCount.textContent = state.people.size.toLocaleString();
     state.history = [];
@@ -5106,14 +5467,17 @@
   });
 
   elements.clear.addEventListener('click', () => {
+    if (state.mediaLibraryMode) setMediaLibraryMode(false);
     if (state.mapMode) setMapMode(false);
     if (state.reportsMode) setReportsMode(false);
     elements.mapViewButton.disabled = true;
     elements.reportsButton.disabled = true;
+    elements.mediaLibraryButton.disabled = true;
+    document.querySelector('#mediaLibraryMenuButton').disabled = true;
     releaseMediaUrls(); state.mediaIndex = null; state.mediaFolderPicked = false;
     state.mediaRelativePaths = new WeakMap(); state.mediaDirectoryHandle = null; state.pendingUploadPersonId = null;
     syncMediaButton();
-    state.primaryMediaKey = ''; state.primaryMedia.clear();
+    state.primaryMediaKey = ''; state.primaryMedia.clear(); state.mediaTypes.clear();
     state.additionalMedia.clear();
     state.gedcomRecords = [];     state.gedcomDirty = false;
     state.gedcomSource = ''; state.gedcomFileHandle = null; state.gedcomBaseHash = ''; state.gedcomPickerDeclined = false;
@@ -5142,11 +5506,24 @@
   });
 
   elements.search.addEventListener('input', () => { state.searchText = elements.search.value; renderRoster(); });
+  const mediaTypeFilter = document.querySelector('#mediaLibraryTypeFilter');
+  for (const [value, label] of mediaTypeOptions) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    mediaTypeFilter.append(option);
+  }
   elements.mapViewButton.addEventListener('click', () => {
+    if (state.mediaLibraryMode) setMediaLibraryMode(false);
     if (state.reportsMode) setReportsMode(false);
     setMapMode(!state.mapMode);
   });
   elements.reportsButton.addEventListener('click', () => setReportsMode(!state.reportsMode));
+  elements.mediaLibraryButton.addEventListener('click', () => setMediaLibraryMode(!state.mediaLibraryMode));
+  document.querySelector('#mediaLibraryMenuButton').addEventListener('click', () => setMediaLibraryMode(true));
+  document.querySelector('#mediaLibraryBackButton').addEventListener('click', () => setMediaLibraryMode(false));
+  document.querySelector('#mediaLibrarySearch').addEventListener('input', renderMediaLibrary);
+  document.querySelector('#mediaLibraryTypeFilter').addEventListener('change', renderMediaLibrary);
   document.querySelector('#printReportsButton').addEventListener('click', printReports);
   elements.reportsContent.addEventListener('click', (event) => {
     const more = event.target.closest('[data-report-more]');
@@ -5468,6 +5845,28 @@
       document.querySelector('#eventMediaDeleteConfirmDialog').close();
       if (lifeEvent.dialog.open) lifeEvent.mediaAdd.focus();
     }
+  });
+  document.querySelector('#confirmMediaLibraryDelete').addEventListener('click', async () => {
+    const pending = pendingMediaLibraryDelete;
+    const button = document.querySelector('#confirmMediaLibraryDelete');
+    if (!pending || button.disabled) return;
+    button.disabled = true;
+    try {
+      const result = await deleteMediaFileEverywhere(pending.path, pending.personId);
+      state.mediaTypes.delete(pending.key);
+      saveMediaTypes();
+      if (state.mediaLibraryMode) renderMediaLibrary();
+      showToast(`"${result.name}" was deleted and ${result.removedLinks} link${result.removedLinks === 1 ? ' was' : 's were'} removed.`);
+    } catch (error) {
+      showToast(`"${pending.name}" could not be deleted. ${error?.message || ''}`.trim());
+    } finally {
+      button.disabled = false;
+      pendingMediaLibraryDelete = null;
+      document.querySelector('#mediaLibraryDeleteDialog').close();
+    }
+  });
+  document.querySelector('#mediaLibraryDeleteDialog').addEventListener('close', () => {
+    if (!document.querySelector('#confirmMediaLibraryDelete').disabled) pendingMediaLibraryDelete = null;
   });
   // The close event is queued, so when "Delete the file permanently" was chosen the confirm prompt is already open.
   for (const id of ['eventMediaRemoveDialog', 'eventMediaDeleteConfirmDialog']) {

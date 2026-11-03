@@ -22,6 +22,7 @@
       </a>
       <button id="mapViewButton" class="button button-quiet" type="button" aria-pressed="false" disabled>Map View</button>
       <button id="reportsButton" class="button button-quiet" type="button" aria-pressed="false" disabled>Reports</button>
+      <button id="mediaLibraryButton" class="button button-quiet media-library-nav-button" type="button" aria-pressed="false" disabled>Media</button>
     </div>
     <div class="topbar-meta"><span class="privacy-indicator"><span class="privacy-dot"></span> ON THIS DEVICE</span><span class="topbar-divider"></span><span id="treeLabel">No tree loaded</span></div>
     <div class="topbar-actions">
@@ -48,6 +49,7 @@
           <button id="mediaButton" class="menu-item media-button" type="button" role="menuitem" disabled>Select Media Folder</button>
           <input id="mediaInput" type="file" webkitdirectory directory multiple>
           <input id="mediaUploadInput" type="file" accept="image/*,.pdf,application/pdf" multiple>
+          <button id="mediaLibraryMenuButton" class="menu-item" type="button" role="menuitem" disabled>Media library</button>
           <button id="defaultsButton" class="menu-item" type="button" role="menuitem" title="Choose the GEDCOM file and media folder that open automatically">Update defaults</button>
           <button id="clearButton" class="menu-item" type="button" role="menuitem" disabled>Start Again</button>
           <button id="exitButton" class="menu-item" type="button" role="menuitem">Exit Kinship Atlas</button>
@@ -143,6 +145,26 @@
       </div>
     </aside>
   </div>
+  <section id="mediaLibraryView" class="media-library-view" aria-labelledby="mediaLibraryTitle" hidden>
+    <div class="media-library-heading">
+      <div>
+        <div class="eyebrow">GEDCOM MEDIA <span class="eyebrow-rule"></span><span id="mediaLibraryFileName"></span></div>
+        <h1 id="mediaLibraryTitle">Attached media</h1>
+        <p id="mediaLibrarySummary">Images and documents linked anywhere in this tree.</p>
+      </div>
+      <button id="mediaLibraryBackButton" class="button button-secondary" type="button">Back to tree</button>
+    </div>
+    <div class="media-library-toolbar">
+      <label class="media-library-search" for="mediaLibrarySearch">Find media
+        <input id="mediaLibrarySearch" type="search" placeholder="Search filenames or people" autocomplete="off">
+      </label>
+      <label class="media-library-filter" for="mediaLibraryTypeFilter">Type
+        <select id="mediaLibraryTypeFilter"><option value="">All types</option></select>
+      </label>
+      <span id="mediaLibraryCount" class="media-library-count"></span>
+    </div>
+    <div id="mediaLibraryContent" class="media-library-content"></div>
+  </section>
   <section id="reportsView" class="reports-view" aria-labelledby="reportsTitle" hidden>
     <div class="reports-heading">
       <div>
@@ -334,6 +356,17 @@
       <div class="dialog-actions">
         <button id="confirmEventMediaDelete" class="dialog-button dialog-button-danger" type="button">Delete permanently</button>
         <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="eventMediaDeleteConfirmDialog">Cancel</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="mediaLibraryDeleteDialog" class="app-dialog" aria-labelledby="mediaLibraryDeleteTitle">
+    <section class="dialog-panel">
+      <h2 id="mediaLibraryDeleteTitle">Permanently delete this media?</h2>
+      <p id="mediaLibraryDeleteName" class="media-delete-name"></p>
+      <p id="mediaLibraryDeleteText" class="media-delete-warning"></p>
+      <div class="dialog-actions">
+        <button id="confirmMediaLibraryDelete" class="dialog-button dialog-button-danger" type="button">Delete permanently</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="mediaLibraryDeleteDialog">Cancel</button>
       </div>
     </section>
   </dialog>
