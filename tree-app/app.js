@@ -5957,6 +5957,38 @@
     settingsPanel.hidden = !open;
     settingsButton.setAttribute('aria-expanded', String(open));
   }
+  function showExitScreen() {
+    const main = document.createElement('main');
+    main.className = 'exit-screen';
+    const panel = document.createElement('section');
+    panel.className = 'exit-screen-panel';
+    const heading = document.createElement('h1');
+    heading.textContent = 'Kinship Atlas has exited';
+    const message = document.createElement('p');
+    message.textContent = 'The local helper has stopped. Your browser may block this app from closing a tab it did not open itself; close this tab to finish.';
+    const closeButton = document.createElement('button');
+    closeButton.className = 'dialog-button dialog-button-primary';
+    closeButton.type = 'button';
+    closeButton.textContent = 'Close tab';
+    closeButton.addEventListener('click', () => window.close());
+    panel.append(heading, message, closeButton);
+    main.append(panel);
+    document.body.replaceChildren(main);
+  }
+  async function exitKinshipAtlas() {
+    if ((state.gedcomDirty || state.gedcomSaving) && !window.confirm('There are unsaved GEDCOM changes. Exit without saving them?')) return;
+    const exitButton = document.querySelector('#exitButton');
+    exitButton.disabled = true;
+    exitButton.textContent = 'Exiting…';
+    setSettingsOpen(false);
+    await persistActiveSession();
+    window.clearInterval(mediaHeartbeat);
+    try {
+      await fetch('/api/exit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    } catch { }
+    window.close();
+    window.setTimeout(showExitScreen, 250);
+  }
   settingsButton.addEventListener('click', () => setSettingsOpen(settingsPanel.hidden));
   settingsPanel.addEventListener('click', () => window.setTimeout(() => setSettingsOpen(false), 0));
   document.addEventListener('click', (event) => { if (!settingsMenu.contains(event.target)) setSettingsOpen(false); });
@@ -6118,10 +6150,11 @@
   });
   document.querySelector('#defaultsSave').addEventListener('click', saveDefaults);
   document.querySelector('#defaultsClear').addEventListener('click', clearDefaults);
+  document.querySelector('#exitButton').addEventListener('click', exitKinshipAtlas);
 
   window.addEventListener('pagehide', () => { persistActiveSession(); });
   // Keeps Kinship Atlas.exe's local server alive while this tab is open.
-  window.setInterval(() => { if (state.mediaHelper) fetch('/api/media-info', { cache: 'no-store' }).catch(() => {}); }, 30000);
+  const mediaHeartbeat = window.setInterval(() => { if (state.mediaHelper) fetch('/api/media-info', { cache: 'no-store' }).catch(() => {}); }, 30000);
   // Syncing once at startup captures selections made before this feature (or while the helper was down).
   probeMediaHelper().then(loadHelperSelections).then(syncSelectionsToHelper).then(restoreActiveSession).then(applyDefaultOnStartup).then(loadHelperMedia);
 })();

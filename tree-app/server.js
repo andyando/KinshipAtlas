@@ -204,10 +204,24 @@ function deleteFile(request, response) {
   });
 }
 
-http.createServer((request, response) => {
+const startedAt = Date.now();
+let lastRequestAt = startedAt;
+let seenRequest = false;
+const server = http.createServer((request, response) => {
+  lastRequestAt = Date.now();
+  seenRequest = true;
   if (!isLocalRequest(request)) return send(response, 403, { error: 'Forbidden' });
   const url = new URL(request.url, `http://${request.headers.host}`);
   if (request.method === 'GET' && url.pathname === '/api/media-info') return send(response, 200, { available: true, folder: path.basename(mediaDir) });
+  if (request.method === 'POST' && url.pathname === '/api/exit') {
+    send(response, 200, { ok: true });
+    setTimeout(() => {
+      clearInterval(idleShutdown);
+      server.close(() => process.exit(0));
+      setTimeout(() => process.exit(0), 1000).unref();
+    }, 250).unref();
+    return;
+  }
   if (request.method === 'POST' && url.pathname === '/api/new-tree') return receiveNewTree(request, response);
   if (request.method === 'POST' && url.pathname === '/api/media') return receiveUpload(request, response);
   if (request.method === 'POST' && url.pathname === '/api/selections') return receiveSelections(request, response);
@@ -219,7 +233,19 @@ http.createServer((request, response) => {
   }
   if (request.method === 'GET') return serveFile(response, appDir, decodeURIComponent(url.pathname === '/' ? 'index.html' : url.pathname.slice(1)));
   send(response, 405, { error: 'Method not allowed' });
-}).listen(port, '127.0.0.1', () => {
+});
+
+const idleShutdown = setInterval(() => {
+  const idleFor = Date.now() - (seenRequest ? lastRequestAt : startedAt);
+  if (idleFor < 2 * 60 * 1000) return;
+  console.log('No browser activity for two minutes; stopping Kinship Atlas helper.');
+  clearInterval(idleShutdown);
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 5000).unref();
+}, 15000);
+idleShutdown.unref();
+
+server.listen(port, '127.0.0.1', () => {
   console.log(`Kinship Atlas helper running at http://localhost:${port}/`);
   console.log(`Saving uploaded media to: ${mediaDir}`);
 });

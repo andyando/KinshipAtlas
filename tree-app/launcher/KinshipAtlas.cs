@@ -348,6 +348,16 @@ static class KinshipAtlasLauncher
                 ",\"deletePaths\":true,\"saveGedcom\":true,\"gedcom\":" + Js(gedcom == null ? "" : Path.GetFileName(gedcom)) + "}");
             return;
         }
+        if (method == "POST" && path == "/api/exit")
+        {
+            SendJson(ctx, 200, "{\"ok\":true}");
+            System.Threading.ThreadPool.QueueUserWorkItem(delegate
+            {
+                System.Threading.Thread.Sleep(250);
+                Environment.Exit(0);
+            });
+            return;
+        }
         if (method == "POST" && path == "/api/media") { HandleUpload(ctx, mediaDir); return; }
         if (method == "POST" && path == "/api/media-delete") { HandleDelete(ctx, appDir, mediaDir); return; }
         if (method == "POST" && path == "/api/gedcom-save") { HandleGedcomSave(ctx, appDir); return; }
@@ -396,7 +406,7 @@ static class KinshipAtlasLauncher
             OpenUrl("http://127.0.0.1:" + port + "/");
             var timer = new System.Threading.Timer(delegate
             {
-                if (seenRequest && DateTime.UtcNow - lastRequest > TimeSpan.FromMinutes(5)) Environment.Exit(0);
+                if (seenRequest && DateTime.UtcNow - lastRequest > TimeSpan.FromMinutes(2)) Environment.Exit(0);
                 if (!seenRequest && DateTime.UtcNow - lastRequest > TimeSpan.FromMinutes(2)) Environment.Exit(0);
             }, null, 15000, 15000);
             GC.KeepAlive(timer);
