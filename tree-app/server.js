@@ -117,6 +117,41 @@ function receiveNewTree(request, response) {
   });
 }
 
+// Persists card image / primary person choices beside the app so they survive browser and folder changes.
+function receiveSelections(request, response) {
+  const chunks = [];
+  let size = 0;
+  request.on('data', (chunk) => {
+    size += chunk.length;
+    if (size > 5 * 1024 * 1024) {
+      send(response, 413, { error: 'Request is too large.' });
+      request.destroy();
+      return;
+    }
+    chunks.push(chunk);
+  });
+  request.on('end', () => {
+    if (response.writableEnded) return;
+    let body;
+    try {
+      body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    } catch {
+      return send(response, 400, { error: 'Invalid request.' });
+    }
+    if (!body || typeof body !== 'object' || !body.selections || typeof body.selections !== 'object') {
+      return send(response, 400, { error: 'Invalid request.' });
+    }
+    const target = path.join(appDir, 'kinship-selections.json');
+    try {
+      fs.writeFileSync(`${target}.saving`, JSON.stringify(body, null, 2));
+      fs.renameSync(`${target}.saving`, target);
+    } catch {
+      return send(response, 500, { error: 'The selections could not be written.' });
+    }
+    send(response, 200, { ok: true });
+  });
+}
+
 // Opens the system file manager on a file inside the media folder.
 function revealFile(request, response) {
   const chunks = [];
@@ -175,6 +210,7 @@ http.createServer((request, response) => {
   if (request.method === 'GET' && url.pathname === '/api/media-info') return send(response, 200, { available: true, folder: path.basename(mediaDir) });
   if (request.method === 'POST' && url.pathname === '/api/new-tree') return receiveNewTree(request, response);
   if (request.method === 'POST' && url.pathname === '/api/media') return receiveUpload(request, response);
+  if (request.method === 'POST' && url.pathname === '/api/selections') return receiveSelections(request, response);
   if (request.method === 'POST' && url.pathname === '/api/reveal') return revealFile(request, response);
   if (request.method === 'POST' && url.pathname === '/api/media-delete') return deleteFile(request, response);
   if (request.method === 'GET' && url.pathname.startsWith('/media/')) {

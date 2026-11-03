@@ -287,6 +287,47 @@ static class KinshipAtlasLauncher
         SendJson(ctx, 200, "{\"ok\":true,\"backup\":" + Js(backupName) + "}");
     }
 
+    static readonly object SelectionsLock = new object();
+
+    // Persists card image / primary person choices beside the app (kinship-selections.json) so they
+    // survive browser changes and moving or copying the app folder (localStorage is per origin).
+    static void HandleSelectionsSave(HttpListenerContext ctx, string appDir)
+    {
+        if (ctx.Request.ContentLength64 > 5L * 1024 * 1024) { SendJson(ctx, 413, "{\"error\":\"Request is too large.\"}"); return; }
+        string json;
+        try
+        {
+            using (var reader = new StreamReader(ctx.Request.InputStream, new UTF8Encoding(false, true)))
+                json = reader.ReadToEnd();
+        }
+        catch { SendJson(ctx, 400, "{\"error\":\"Invalid request.\"}"); return; }
+        string trimmed = json.Trim();
+        if (trimmed.Length > 5 * 1024 * 1024 || !trimmed.StartsWith("{") || !trimmed.EndsWith("}") || !trimmed.Contains("\"selections\""))
+        { SendJson(ctx, 400, "{\"error\":\"Invalid request.\"}"); return; }
+        string target = Path.Combine(appDir, "kinship-selections.json");
+        string temp = target + ".saving";
+        lock (SelectionsLock)
+        {
+            try
+            {
+                File.WriteAllText(temp, trimmed, new UTF8Encoding(false));
+                if (File.Exists(target))
+                {
+                    try { File.Replace(temp, target, null); }
+                    catch (PlatformNotSupportedException) { File.Copy(temp, target, true); File.Delete(temp); }
+                }
+                else File.Move(temp, target);
+            }
+            catch
+            {
+                try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+                SendJson(ctx, 500, "{\"error\":\"The selections could not be written.\"}");
+                return;
+            }
+        }
+        SendJson(ctx, 200, "{\"ok\":true}");
+    }
+
     static void Handle(HttpListenerContext ctx, string appDir, string mediaDir)
     {
         lastRequest = DateTime.UtcNow;
@@ -310,6 +351,7 @@ static class KinshipAtlasLauncher
         if (method == "POST" && path == "/api/media") { HandleUpload(ctx, mediaDir); return; }
         if (method == "POST" && path == "/api/media-delete") { HandleDelete(ctx, appDir, mediaDir); return; }
         if (method == "POST" && path == "/api/gedcom-save") { HandleGedcomSave(ctx, appDir); return; }
+        if (method == "POST" && path == "/api/selections") { HandleSelectionsSave(ctx, appDir); return; }
         if (method == "GET" && path.StartsWith("/media/"))
         {
             string name = SafeName(Uri.UnescapeDataString(path.Substring(7)));

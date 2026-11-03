@@ -22,6 +22,8 @@ This directory contains SVG images of country flags, organized by aspect ratio a
 
 All flags are licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
+The following PNG flags in `4x3/` were downloaded from [flagcolorcodes.com](https://www.flagcolorcodes.com/) and are subject to that site's terms, not the licence above: `am`, `bm`, `bo`, `cu`, `de-prussia` (State of Prussia 1918–1933), `jm`, `lv`, `pg`, `pr`, `ps`, `sd`, `to`, `ws`.
+
 function loadFlag(countryCode) {
   const flagPath = `flags/4x3/${countryCode}.svg`;
   // Load the flag using flagPath

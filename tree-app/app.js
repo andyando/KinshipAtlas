@@ -32,7 +32,17 @@
     ['china', 'CN', 'China'], ['mexico', 'MX', 'Mexico'], ['argentina', 'AR', 'Argentina'],
     ['iceland', 'IS', 'Iceland'], ['greece', 'GR', 'Greece'], ['ukraine', 'UA', 'Ukraine'],
     ['croatia', 'HR', 'Croatia'], ['slovakia', 'SK', 'Slovakia'], ['slovenia', 'SI', 'Slovenia'],
-    ['turkiye', 'TR', 'Turkiye'], ['turkey', 'TR', 'Turkey']
+    ['turkiye', 'TR', 'Turkiye'], ['turkey', 'TR', 'Turkey'],
+    ['australie', 'AU', 'Australia'], ['new zeland', 'NZ', 'New Zealand'], ['scotlamd', 'gb-sct', 'Scotland'],
+    // PNG flags below were sourced from flagcolorcodes.com; the optional fourth value is the file extension.
+    ['papua new guinea', 'PG', 'Papua New Guinea', 'png'], ['cuba', 'CU', 'Cuba', 'png'],
+    ['jamaica', 'JM', 'Jamaica', 'png'], ['sudan', 'SD', 'Sudan', 'png'], ['armenia', 'AM', 'Armenia', 'png'],
+    ['samoa', 'WS', 'Samoa', 'png'], ['puerto rico', 'PR', 'Puerto Rico', 'png'],
+    ['palestine', 'PS', 'Palestine', 'png'], ['palistine', 'PS', 'Palestine', 'png'],
+    ['tonga', 'TO', 'Tonga', 'png'], ['bolivia', 'BO', 'Bolivia', 'png'], ['bermuda', 'BM', 'Bermuda', 'png'],
+    ['latvia', 'LV', 'Latvia', 'png'],
+    // Listed after 'germany' so places naming both keep the German flag (equal-length ties keep array order).
+    ['prussia', 'de-prussia', 'Prussia', 'png'], ['preussen', 'de-prussia', 'Prussia', 'png']
   ].sort((a, b) => b[0].length - a[0].length);
   const state = {
     mapMode: false, mapStats: null, directoryMatches: [], reportsMode: false,
@@ -826,11 +836,11 @@
   }
 
   function countryFlagForPlace(place) {
-    const normalized = ` ${String(place || '').toLocaleLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
+    const normalized = ` ${String(place || '').toLocaleLowerCase().replace(/\u00df/g, 'ss').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim()} `;
     const match = countryFlagAliases.find(([alias]) => normalized.includes(` ${alias} `));
     if (!match) return null;
-    const [, code, country] = match;
-    return { code: code.toLocaleLowerCase(), country };
+    const [, code, country, extension = 'svg'] = match;
+    return { code: code.toLocaleLowerCase(), country, file: `${code.toLocaleLowerCase()}.${extension}` };
   }
 
   function initials(name) {
@@ -928,6 +938,7 @@
     if (!state.primaryMediaKey) return false;
     try {
       localStorage.setItem(state.primaryMediaKey, JSON.stringify(Object.fromEntries(state.primaryMedia)));
+      syncSelectionsToHelper();
       return true;
     } catch {
       return false;
@@ -954,9 +965,56 @@
     if (!state.primaryMediaKey) return false;
     try {
       localStorage.setItem(`${state.primaryMediaKey}:additional-media:v1`, JSON.stringify(Object.fromEntries(state.additionalMedia)));
+      syncSelectionsToHelper();
       return true;
     } catch {
       return false;
+    }
+  }
+
+  // Card image, extra media and primary person choices live in localStorage, which is tied to the exact
+  // origin (http://127.0.0.1:<port>) and browser. The local helper mirrors them to kinship-selections.json
+  // beside the app so they survive moving or copying the app folder and switching browsers.
+  const selectionKeyPrefixes = ['kinship-atlas:primary-media:v1:', 'kinship-atlas:primary-person:v1:'];
+
+  function syncSelectionsToHelper() {
+    if (!state.mediaHelper || !/^https?:$/.test(location.protocol)) return;
+    const selections = {};
+    try {
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index);
+        if (!selectionKeyPrefixes.some((prefix) => key.startsWith(prefix))) continue;
+        try { selections[key] = JSON.parse(localStorage.getItem(key)); } catch { }
+      }
+    } catch { return; }
+    fetch('/api/selections', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ app: 'Kinship Atlas', version: 1, selections })
+    }).catch(() => { });
+  }
+
+  async function loadHelperSelections() {
+    if (!state.mediaHelper) return;
+    let saved;
+    try {
+      const response = await fetch('/kinship-selections.json', { cache: 'no-store' });
+      if (!response.ok) return;
+      saved = (await response.json())?.selections;
+    } catch { return; }
+    if (!saved || typeof saved !== 'object') return;
+    for (const [key, value] of Object.entries(saved)) {
+      if (!selectionKeyPrefixes.some((prefix) => key.startsWith(prefix))) continue;
+      if (!value || typeof value !== 'object') continue;
+      try {
+        let local = null;
+        try { local = JSON.parse(localStorage.getItem(key) || 'null'); } catch { }
+        // Entries saved in this browser win; the file fills in whatever this browser does not know about.
+        const merged = key.startsWith('kinship-atlas:primary-media:v1:')
+          ? { ...value, ...(local && typeof local === 'object' ? local : {}) }
+          : (local ?? value);
+        localStorage.setItem(key, JSON.stringify(merged));
+      } catch { }
     }
   }
 
@@ -1733,6 +1791,7 @@
         }
       } catch { }
       state.primaryMediaKey = newKey;
+      syncSelectionsToHelper();
     }
     syncGedcomSaveUi();
     await persistActiveSession();
@@ -1790,7 +1849,7 @@
       const flag = document.createElement('span');
       flag.className = 'card-country-flag';
       const image = document.createElement('img');
-      image.src = `flags/4x3/${birthCountry.code}.svg`;
+      image.src = `flags/4x3/${birthCountry.file}`;
       image.alt = `Birth country: ${birthCountry.country}`;
       flag.title = birthCountry.country;
       flag.append(image);
@@ -2512,6 +2571,7 @@
       const key = primaryPersonStorageKey();
       if (clearing) localStorage.removeItem(key);
       else localStorage.setItem(key, JSON.stringify({ id: person.id, name: person.name }));
+      syncSelectionsToHelper();
     } catch {
       saved = false;
     }
@@ -4733,6 +4793,7 @@
     if (state.primaryPersonId === plan.personId) {
       state.primaryPersonId = '';
       try { localStorage.removeItem(primaryPersonStorageKey()); } catch { }
+      syncSelectionsToHelper();
     }
     if (state.defaultRecord?.homePersonId === plan.personId && state.defaultRecord.gedcomName === state.fileName) {
       const updated = { ...state.defaultRecord, homePersonId: '', homePersonName: '' };
@@ -6061,5 +6122,6 @@
   window.addEventListener('pagehide', () => { persistActiveSession(); });
   // Keeps Kinship Atlas.exe's local server alive while this tab is open.
   window.setInterval(() => { if (state.mediaHelper) fetch('/api/media-info', { cache: 'no-store' }).catch(() => {}); }, 30000);
-  probeMediaHelper().then(restoreActiveSession).then(applyDefaultOnStartup).then(loadHelperMedia);
+  // Syncing once at startup captures selections made before this feature (or while the helper was down).
+  probeMediaHelper().then(loadHelperSelections).then(syncSelectionsToHelper).then(restoreActiveSession).then(applyDefaultOnStartup).then(loadHelperMedia);
 })();
