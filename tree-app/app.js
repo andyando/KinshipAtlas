@@ -47,7 +47,7 @@
   const state = {
     mapMode: false, mapStats: null, directoryMatches: [], reportsMode: false, mediaLibraryMode: false,
     people: new Map(), families: new Map(), sources: new Map(), selectedId: null,
-    fileName: '', searchText: '', history: [], historyIndex: -1, zoom: 1,
+    fileName: '', searchText: '', history: [], historyIndex: -1, zoom: 1, showSiblings: false,
     mediaIndex: null, mediaUrls: new Map(), mediaRelativePaths: new WeakMap(), mediaDirectoryHandle: null,
     rememberedMediaDirectoryHandle: null, mediaFolderPicked: false, mediaHelper: null,
     pendingUploadPersonId: null, pendingResearchPersonId: null,
@@ -57,7 +57,7 @@
     gedcomRecords: [], gedcomDirty: false, gedcomText: '', sessionSaveQueue: Promise.resolve(),
     gedcomSource: '', gedcomFileHandle: null, gedcomBaseHash: '', gedcomSaving: false,
     gedcomSaveQueue: Promise.resolve(), gedcomPickerDeclined: false,
-    directoryFilters: { birthCountry: '', deathCountry: '', birthMin: null, birthMax: null, deathMin: null, deathMax: null },
+    directoryFilters: { birthCountry: '', deathCountry: '', occupationType: '', birthMin: null, birthMax: null, deathMin: null, deathMax: null },
     directoryYearBounds: { birth: null, death: null },
     expandedSurnames: new Set(), surnameFilter: new Set()
   };
@@ -107,6 +107,7 @@
     search: document.querySelector('#peopleSearch'), peopleList: document.querySelector('#peopleList'),
     birthCountryFilter: document.querySelector('#birthCountryFilter'),
     deathCountryFilter: document.querySelector('#deathCountryFilter'),
+    occupationTypeFilter: document.querySelector('#occupationTypeFilter'),
     birthYearMin: document.querySelector('#birthYearMin'), birthYearMax: document.querySelector('#birthYearMax'),
     deathYearMin: document.querySelector('#deathYearMin'), deathYearMax: document.querySelector('#deathYearMax'),
     birthYearLabel: document.querySelector('#birthYearLabel'), deathYearLabel: document.querySelector('#deathYearLabel'),
@@ -114,6 +115,7 @@
     title: document.querySelector('#focusTitle'), subtitle: document.querySelector('#focusSubtitle'),
     generationLabel: document.querySelector('#generationLabel'), graphSummary: document.querySelector('#graphSummary'),
     canvas: document.querySelector('#treeCanvas'), viewport: document.querySelector('#graphViewport'),
+    showSiblings: document.querySelector('#showSiblingsInput'),
     details: document.querySelector('#detailsContent'), back: document.querySelector('#backButton'),
     forward: document.querySelector('#forwardButton'), zoomIn: document.querySelector('#zoomInButton'),
     zoomOut: document.querySelector('#zoomOutButton'), zoomLabel: document.querySelector('#zoomLabel'),
@@ -941,7 +943,7 @@
   function loadPrimaryMedia(storageKey, people) {
     const primaryMedia = new Map();
     try {
-      const saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
+      const saved = readSelection(storageKey) || {};
       for (const [personId, path] of Object.entries(saved)) {
         if (typeof path === 'string' && people.has(personId) && mediaPathsForPerson(personId).includes(path)) primaryMedia.set(personId, path);
       }
@@ -951,19 +953,13 @@
 
   function savePrimaryMedia() {
     if (!state.primaryMediaKey) return false;
-    try {
-      localStorage.setItem(state.primaryMediaKey, JSON.stringify(Object.fromEntries(state.primaryMedia)));
-      syncSelectionsToHelper();
-      return true;
-    } catch {
-      return false;
-    }
+    return storeSelection(state.primaryMediaKey, Object.fromEntries(state.primaryMedia));
   }
 
   function loadAdditionalMedia(storageKey, people) {
     const additionalMedia = new Map();
     try {
-      const saved = JSON.parse(localStorage.getItem(`${storageKey}:additional-media:v1`) || '{}');
+      const saved = readSelection(`${storageKey}:additional-media:v1`) || {};
       for (const [personId, paths] of Object.entries(saved)) {
         const person = people.get(personId);
         if (!person || !Array.isArray(paths)) continue;
@@ -978,13 +974,7 @@
 
   function saveAdditionalMedia() {
     if (!state.primaryMediaKey) return false;
-    try {
-      localStorage.setItem(`${state.primaryMediaKey}:additional-media:v1`, JSON.stringify(Object.fromEntries(state.additionalMedia)));
-      syncSelectionsToHelper();
-      return true;
-    } catch {
-      return false;
-    }
+    return storeSelection(`${state.primaryMediaKey}:additional-media:v1`, Object.fromEntries(state.additionalMedia));
   }
 
   const mediaTypeOptions = [
@@ -1001,7 +991,7 @@
   function loadMediaTypes(storageKey) {
     const types = new Map();
     try {
-      const saved = JSON.parse(localStorage.getItem(mediaTypeStorageKey(storageKey)) || '{}');
+      const saved = readSelection(mediaTypeStorageKey(storageKey)) || {};
       const validTypes = new Set(mediaTypeOptions.map(([value]) => value));
       for (const [path, type] of Object.entries(saved)) {
         if (typeof path === 'string' && validTypes.has(type)) types.set(path, type);
@@ -1012,13 +1002,7 @@
 
   function saveMediaTypes() {
     if (!state.primaryMediaKey) return false;
-    try {
-      localStorage.setItem(mediaTypeStorageKey(state.primaryMediaKey), JSON.stringify(Object.fromEntries(state.mediaTypes)));
-      syncSelectionsToHelper();
-      return true;
-    } catch {
-      return false;
-    }
+    return storeSelection(mediaTypeStorageKey(state.primaryMediaKey), Object.fromEntries(state.mediaTypes));
   }
 
   // Card image, extra media and primary person choices live in localStorage, which is tied to the exact
@@ -1028,22 +1012,65 @@
     'kinship-atlas:primary-media:v1:', 'kinship-atlas:primary-person:v1:',
     'kinship-atlas:media-types:v1:'
   ];
+  let helperSelections = null;
+  const loadedSelectionKeys = new Set();
+  let selectionSyncQueue = Promise.resolve(true);
+
+  function readSelection(key) {
+    if (!helperSelections) return JSON.parse(localStorage.getItem(key) || 'null');
+    if (!loadedSelectionKeys.has(key)) {
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw !== null) {
+          const local = JSON.parse(raw);
+          if (local === null || (typeof local === 'object' && !Array.isArray(local))) {
+            helperSelections[key] = local === null || key.startsWith('kinship-atlas:primary-person:v1:')
+              ? local : { ...helperSelections[key], ...local };
+          }
+        }
+      } catch {
+        console.warn('Browser selection could not be read; using the selections file.');
+      }
+      loadedSelectionKeys.add(key);
+    }
+    return helperSelections[key] ?? null;
+  }
+
+  function storeSelection(key, value) {
+    let browserSaved = false;
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+      browserSaved = true;
+    } catch {
+      if (!helperSelections) console.warn('Browser storage could not save the selection.');
+    }
+    if (helperSelections) {
+      helperSelections[key] = value;
+      loadedSelectionKeys.add(key);
+      syncSelectionsToHelper();
+      return true;
+    }
+    return browserSaved;
+  }
 
   function syncSelectionsToHelper() {
-    if (!state.mediaHelper || !/^https?:$/.test(location.protocol)) return;
-    const selections = {};
-    try {
-      for (let index = 0; index < localStorage.length; index += 1) {
-        const key = localStorage.key(index);
-        if (!selectionKeyPrefixes.some((prefix) => key.startsWith(prefix))) continue;
-        try { selections[key] = JSON.parse(localStorage.getItem(key)); } catch { }
+    if (!state.mediaHelper || !helperSelections || !/^https?:$/.test(location.protocol)) return selectionSyncQueue;
+    selectionSyncQueue = selectionSyncQueue.then(async () => {
+      try {
+        const response = await fetch('/api/selections', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ app: 'Kinship Atlas', version: 1, selections: helperSelections })
+        });
+        if (!response.ok) throw new Error(`Helper returned HTTP ${response.status}.`);
+        return true;
+      } catch (error) {
+        console.error('Selection file save failed.', error);
+        showToast('Card images and media preferences could not be saved to kinship-selections.json. Keep this tab open and try again before closing or copying the app.');
+        return false;
       }
-    } catch { return; }
-    fetch('/api/selections', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ app: 'Kinship Atlas', version: 1, selections })
-    }).catch(() => { });
+    });
+    return selectionSyncQueue;
   }
 
   async function loadHelperSelections() {
@@ -1051,23 +1078,62 @@
     let saved;
     try {
       const response = await fetch('/kinship-selections.json', { cache: 'no-store' });
-      if (!response.ok) return;
-      saved = (await response.json())?.selections;
-    } catch { return; }
-    if (!saved || typeof saved !== 'object') return;
-    for (const [key, value] of Object.entries(saved)) {
-      if (!selectionKeyPrefixes.some((prefix) => key.startsWith(prefix))) continue;
-      if (!value || typeof value !== 'object') continue;
-      try {
-        let local = null;
-        try { local = JSON.parse(localStorage.getItem(key) || 'null'); } catch { }
-        // Entries saved in this browser win; the file fills in whatever this browser does not know about.
-        const merged = key.startsWith('kinship-atlas:primary-media:v1:') || key.startsWith('kinship-atlas:media-types:v1:')
-          ? { ...value, ...(local && typeof local === 'object' ? local : {}) }
-          : (local ?? value);
-        localStorage.setItem(key, JSON.stringify(merged));
-      } catch { }
+      if (response.status === 404) saved = {};
+      else {
+        if (!response.ok) throw new Error(`Helper returned HTTP ${response.status}.`);
+        saved = (await response.json())?.selections;
+        if (!saved || typeof saved !== 'object' || Array.isArray(saved)) throw new Error('Invalid selections file.');
+      }
+    } catch (error) {
+      console.error('Selection file load failed.', error);
+      showToast('kinship-selections.json could not be read. Its contents will not be overwritten. Check the file before changing media preferences.');
+      return;
     }
+    helperSelections = Object.fromEntries(Object.entries(saved).filter(([key, value]) =>
+      selectionKeyPrefixes.some((prefix) => key.startsWith(prefix)) && (value === null || (typeof value === 'object' && !Array.isArray(value)))));
+    // Read browser entries only for trees that are opened, not every historical GEDCOM revision.
+    loadedSelectionKeys.clear();
+  }
+
+  function moveMediaSelections(newKey) {
+    const oldKey = state.primaryMediaKey;
+    const entries = [
+      [oldKey, newKey, Object.fromEntries(state.primaryMedia)],
+      [`${oldKey}:additional-media:v1`, `${newKey}:additional-media:v1`, Object.fromEntries(state.additionalMedia)],
+      [mediaTypeStorageKey(oldKey), mediaTypeStorageKey(newKey), Object.fromEntries(state.mediaTypes)]
+    ];
+    let browserSaved = false;
+    const originals = new Map();
+    try {
+      for (const [old, next] of entries) {
+        originals.set(old, localStorage.getItem(old));
+        originals.set(next, localStorage.getItem(next));
+      }
+      for (const [old] of entries) localStorage.removeItem(old);
+      for (const [, next, value] of entries) localStorage.setItem(next, JSON.stringify(value));
+      browserSaved = true;
+    } catch {
+      try {
+        for (const key of originals.keys()) localStorage.removeItem(key);
+        for (const [key, value] of originals) if (value !== null) localStorage.setItem(key, value);
+      } catch {
+        console.error('Browser selections could not be restored after storage filled up.');
+      }
+    }
+    if (helperSelections) {
+      for (const [old, next, value] of entries) {
+        delete helperSelections[old];
+        helperSelections[next] = value;
+        loadedSelectionKeys.add(next);
+      }
+    }
+    if (!browserSaved && !helperSelections) {
+      showToast('The GEDCOM was saved, but browser storage is full. Media preferences could not be linked to the saved version. Keep this tab open and use the local helper to save them.');
+      return false;
+    }
+    state.primaryMediaKey = newKey;
+    syncSelectionsToHelper();
+    return true;
   }
 
   function addFileToMediaIndex(file, relativePath) {
@@ -1634,6 +1700,7 @@
     elements.mediaLibraryButton.disabled = false;
     document.querySelector('#mediaLibraryMenuButton').disabled = false;
     elements.printMapButton.disabled = false;
+    elements.showSiblings.disabled = false;
     document.querySelector('#openGedcomLabel').hidden = true;
     state.zoom = 1;
     elements.zoomIn.disabled = false;
@@ -1841,16 +1908,7 @@
     // Card images and extra media links are stored under a key derived from the file contents.
     const newKey = await primaryMediaStorageKey(new File([text], state.fileName, { type: 'text/plain' }), text);
     if (state.primaryMediaKey && newKey !== state.primaryMediaKey) {
-      try {
-        for (const suffix of ['', ':additional-media:v1']) {
-          const value = localStorage.getItem(state.primaryMediaKey + suffix);
-          if (value !== null) localStorage.setItem(newKey + suffix, value);
-        }
-        const savedTypes = localStorage.getItem(mediaTypeStorageKey(state.primaryMediaKey));
-        if (savedTypes !== null) localStorage.setItem(mediaTypeStorageKey(newKey), savedTypes);
-      } catch { }
-      state.primaryMediaKey = newKey;
-      syncSelectionsToHelper();
+      moveMediaSelections(newKey);
     }
     syncGedcomSaveUi();
     await persistActiveSession();
@@ -1912,7 +1970,7 @@
       image.alt = `Birth country: ${birthCountry.country}`;
       flag.title = birthCountry.country;
       flag.append(image);
-      nameLine.append(flag);
+      relationLabel.append(flag);
     }
     const years = document.createElement('span');
     years.className = 'card-years';
@@ -1938,7 +1996,7 @@
     container.append(node);
   }
 
-  function appendGeneration(canvas, label, generation, people, relation = '', navigation = {}) {
+  function appendGeneration(canvas, label, generation, people, relation = '', navigation = {}, familyGroups = null) {
     if (!people.length) return null;
     const section = document.createElement('section');
     section.className = 'tree-generation';
@@ -1949,7 +2007,18 @@
     const nodes = document.createElement('div');
     nodes.className = 'generation-nodes';
     nodes.dataset.generation = String(generation);
-    for (const person of people) addPersonControl(nodes, person.id, relation || '', navigation);
+    if (familyGroups) {
+      for (const { familyId, people: members } of familyGroups) {
+        const group = document.createElement('div');
+        group.className = 'ancestor-couple';
+        group.dataset.generation = String(generation);
+        if (familyId) group.dataset.familyId = familyId;
+        for (const person of members) addPersonControl(group, person.id, '', navigation);
+        nodes.append(group);
+      }
+    } else {
+      for (const person of people) addPersonControl(nodes, person.id, typeof relation === 'function' ? relation(person) : relation, navigation);
+    }
     section.append(heading, nodes);
     canvas.append(section);
     return nodes;
@@ -1988,10 +2057,11 @@
       if (state.people.size) renderTreeWelcome();
       return;
     }
-    const ancestors = generationLevels(selected.id, 'up', 2);
     const descendants = generationLevels(selected.id, 'down', 2);
+    const ancestors = generationLevels(selected.id, 'up', descendants.get(1)?.size ? 2 : 3);
     const partners = partnersOf(selected.id).map((item) => item.id);
-    const allIds = new Set([selected.id, ...partners]);
+    const siblingIds = new Set(state.showSiblings ? siblingsOf(selected.id) : []);
+    const allIds = new Set([selected.id, ...partners, ...siblingIds]);
     for (const ids of [...ancestors.values(), ...descendants.values()]) ids.forEach((id) => allIds.add(id));
     const nodeKeys = new Set();
 
@@ -2009,15 +2079,37 @@
     };
     const ancestorIds = (generation) => ancestors.get(generation) || new Set();
     const descendantIds = (generation) => descendants.get(generation) || new Set();
-    const rowZero = nameOrder(new Set([selected.id, ...partners]));
+    const selectedAndPartners = nameOrder(new Set([selected.id, ...partners]));
+    const rowZero = nameOrder(new Set([selected.id, ...partners, ...siblingIds]));
     const parentsRow = orderByRelatives(ancestorIds(-1), [selected], parentsOf);
     const grandparentsRow = orderByRelatives(ancestorIds(-2), parentsRow, parentsOf);
-    const childrenRow = orderByRelatives(descendantIds(1), rowZero, childrenOf);
+    const greatGrandparentsRow = orderByRelatives(ancestorIds(-3), grandparentsRow, parentsOf);
+    const greatGrandparentGroups = [];
+    const groupedFamilies = new Set();
+    const groupedAncestors = new Set();
+    for (const grandparent of grandparentsRow) {
+      for (const familyId of grandparent.parentFamilyIds) {
+        if (groupedFamilies.has(familyId)) continue;
+        groupedFamilies.add(familyId);
+        const family = state.families.get(familyId);
+        if (!family) continue;
+        const members = [...new Set([family.wifeId, family.husbandId])]
+          .filter((id) => ancestorIds(-3).has(id)).map((id) => state.people.get(id));
+        if (!members.length) continue;
+        greatGrandparentGroups.push({ familyId, people: members });
+        members.forEach((person) => groupedAncestors.add(person.id));
+      }
+    }
+    for (const person of greatGrandparentsRow) {
+      if (!groupedAncestors.has(person.id)) greatGrandparentGroups.push({ familyId: '', people: [person] });
+    }
+    const childrenRow = orderByRelatives(descendantIds(1), selectedAndPartners, childrenOf);
     const grandchildrenRow = orderByRelatives(descendantIds(2), childrenRow, childrenOf);
     const rows = [
+      { generation: -3, label: 'Great-grandparents', people: greatGrandparentsRow, familyGroups: greatGrandparentGroups },
       { generation: -2, label: 'Grandparents', people: grandparentsRow },
       { generation: -1, label: 'Parents', people: parentsRow },
-      { generation: 0, label: 'Selected person & partners', people: rowZero },
+      { generation: 0, label: siblingIds.size ? 'Selected person, partners & siblings' : 'Selected person & partners', people: rowZero },
       { generation: 1, label: 'Children', people: childrenRow },
       { generation: 2, label: 'Grandchildren', people: grandchildrenRow }
     ];
@@ -2029,10 +2121,10 @@
     const topGeneration = visibleRows[0].generation;
     const bottomGeneration = visibleRows.at(-1).generation;
     for (const row of visibleRows) {
-      appendGeneration(elements.canvas, row.label, row.generation, row.people, '', {
+      appendGeneration(elements.canvas, row.label, row.generation, row.people, row.generation === 0 ? (person) => siblingIds.has(person.id) ? 'Sibling' : '' : '', {
         up: row.generation === topGeneration,
         down: row.generation === bottomGeneration
-      });
+      }, row.familyGroups);
       for (const person of row.people) nodeKeys.add(`${row.generation}|${person.id}`);
     }
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -2052,6 +2144,10 @@
     svg.setAttribute('height', String(height));
     svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
     svg.replaceChildren();
+
+    const grandchildCards = [...elements.canvas.querySelectorAll('.person-card[data-generation="2"]')];
+    const firstGrandchildTop = grandchildCards[0]?.getBoundingClientRect().top;
+    const grandchildrenWrap = grandchildCards.some((card) => Math.abs(card.getBoundingClientRect().top - firstGrandchildTop) > 1);
 
     function cardFor(generation, id) {
       return elements.canvas.querySelector(`.person-card[data-generation="${generation}"][data-person-id="${CSS.escape(id)}"]`);
@@ -2081,15 +2177,18 @@
       svg.append(path);
     }
 
-    for (const family of state.families.values()) {
-      for (const generation of [-2, -1, 0, 1]) {
+    for (const [familyId, family] of state.families) {
+      for (const generation of [-3, -2, -1, 0, 1]) {
+        if (generation === 1 && grandchildrenWrap) continue;
         const parentPoints = [family.husbandId, family.wifeId].filter(Boolean)
           .filter((parentId) => nodeKeys.has(`${generation}|${parentId}`))
           .map((parentId) => point(cardFor(generation, parentId), 'bottom'))
           .filter(Boolean);
         if (!parentPoints.length) continue;
         // One line from the couple's midpoint when both parents are shown.
-        const origin = {
+        const couple = generation === -3
+          ? elements.canvas.querySelector(`.ancestor-couple[data-family-id="${CSS.escape(familyId)}"]`) : null;
+        const origin = couple ? point(couple, 'bottom') : {
           x: parentPoints.reduce((sum, item) => sum + item.x, 0) / parentPoints.length,
           y: Math.max(...parentPoints.map((item) => item.y))
         };
@@ -2108,6 +2207,7 @@
     const matches = [...state.people.values()].filter((person) => {
       if (query && !normalizeDirectoryName(person.name).includes(query)) return false;
       if (state.surnameFilter.size && !state.surnameFilter.has(normalizeDirectoryName(person.surname || 'Unknown surname'))) return false;
+      if (!matchesOccupationType(person, state.directoryFilters.occupationType)) return false;
       for (const [eventType, countryFilter, minFilter, maxFilter] of [
         ['BIRT', 'birthCountry', 'birthMin', 'birthMax'], ['DEAT', 'deathCountry', 'deathMin', 'deathMax']
       ]) {
@@ -2278,14 +2378,16 @@
 
   function refreshDirectoryFilters(reset = false) {
     if (reset) {
-      state.directoryFilters = { birthCountry: '', deathCountry: '', birthMin: null, birthMax: null, deathMin: null, deathMax: null };
+      state.directoryFilters = { birthCountry: '', deathCountry: '', occupationType: '', birthMin: null, birthMax: null, deathMin: null, deathMax: null };
       state.expandedSurnames.clear();
       state.surnameFilter.clear();
       elements.birthCountryFilter.value = '';
       elements.deathCountryFilter.value = '';
+      elements.occupationTypeFilter.value = '';
     }
     populateCountryFilter(elements.birthCountryFilter, 'BIRT');
     populateCountryFilter(elements.deathCountryFilter, 'DEAT');
+    populateOccupationFilter();
     setupYearFilter('BIRT');
     setupYearFilter('DEAT');
   }
@@ -2606,7 +2708,7 @@
   function loadPrimaryPerson() {
     state.primaryPersonId = '';
     try {
-      const saved = JSON.parse(localStorage.getItem(primaryPersonStorageKey()) || 'null');
+      const saved = readSelection(primaryPersonStorageKey());
       if (saved?.id && state.people.has(saved.id)) state.primaryPersonId = saved.id;
     } catch { }
     syncPrimaryPersonBar();
@@ -2625,15 +2727,7 @@
     if (!person) return;
     const clearing = state.primaryPersonId === personId;
     state.primaryPersonId = clearing ? '' : personId;
-    let saved = true;
-    try {
-      const key = primaryPersonStorageKey();
-      if (clearing) localStorage.removeItem(key);
-      else localStorage.setItem(key, JSON.stringify({ id: person.id, name: person.name }));
-      syncSelectionsToHelper();
-    } catch {
-      saved = false;
-    }
+    const saved = storeSelection(primaryPersonStorageKey(), clearing ? null : { id: person.id, name: person.name });
     syncPrimaryPersonBar();
     renderDetails();
     const suffix = saved ? '' : ' This browser could not remember it after closing.';
@@ -2724,7 +2818,7 @@
     primaryPersonButton.setAttribute('aria-pressed', String(isPrimaryPerson));
     primaryPersonButton.title = isPrimaryPerson
       ? 'Stop using this person as the primary person'
-      : state.primaryPersonId ? `Replace ${personName(state.primaryPersonId)} as the primary person` : 'Show relationships to this person and add a Home button';
+      : state.primaryPersonId ? `Replace ${personName(state.primaryPersonId)} as the primary person` : 'Show relationships to this person and add a Home Person button';
     personActions.append(primaryPersonButton);
     const printButton = iconButton('print', 'Print record');
     printButton.dataset.printPerson = person.id;
@@ -3350,6 +3444,158 @@
     return { key: Number(match[3]) * 10000 + month * 100 + day, year: Number(match[3]), approximate: /\b(ABT|ABOUT|BEF|BEFORE|AFT|AFTER|EST|CAL|BET|FROM|TO|C|CIRCA)\b/.test(text) };
   }
 
+  // Specific roles precede generic terms: bank/railway clerks, marine engineers and printing directors.
+  const reportOccupationTaxonomy = [
+    ['Protective Services', [
+      ['Police Officer', /\bpolice\b/]
+    ]],
+    ['Law & Judiciary', [
+      ['Solicitor/Barrister', /\b(?:barrister.*solicitor|solicitor.*barrister)\b/],
+      ['Barrister', /\bbarrister\b/], ['Solicitor', /\bsolicitor\b/],
+      ['Judge', /\bjudge\b/], ['Doctor of Laws', /\bdoctor of laws\b/]
+    ]],
+    ['Healthcare & Medical', [
+      ['Dental Nurse', /\bdental nurse\b/], ['Nurse', /\bnurse\b/],
+      ['Medical Officer', /\bmedical officer\b/], ['Morbid Anatomist', /\bmorbid anatomist\b/],
+      ['Medical Research Staff', /\b(?:research medical|medical research) staff\b/],
+      ['Homeopath', /\bhom[eo]+opath\b/], ['Physician', /\b(?:doctor|physician)\b/]
+    ]],
+    ['Science & Research', [
+      ['Analytical Chemist', /\banalytical chemist\b/], ['Chemist', /\bchemist\b/],
+      ['Geophysicist', /\bgeophysicist\b/], ['Scientist', /\bscientist\b/], ['Researcher', /\bresearcher\b/]
+    ]],
+    ['Printing & Publishing', [
+      ['Printing Director', /\bprinting director\b/], ['Printer', /\bprinter\b/],
+      ['Compositor', /\bcompositor\b/], ['Bookbinder', /\bbook[\s-]?binder\b/]
+    ]],
+    ['Manufacturing & Industrial', [
+      ['Wood Machinist', /\bwood machinist\b/], ['Blast Furnace Worker', /\bblast furnace\b/],
+      ['Chemical Manufacturing', /\bchemical manufactur(?:ing|er)\b/],
+      ['Extract Manufacturer', /\bextract manufacturer\b/], ['Draft Maker', /\bdraft maker\b/],
+      ['Spinner', /\bspinner\b/]
+    ]],
+    ['Engineering & Technical', [
+      ['Marine Engineer', /\b(?:engineer.*(?:marine|ship)|(?:marine|ship).*engineer)\b/],
+      ['Engineer', /\bengineer\b/], ['Telegraphist', /\btelegraphist\b/],
+      ['Mechanic', /\bmechanic\b/], ['Machinist', /\bmachinist\b/]
+    ]],
+    ['Education & Academia', [
+      ['Student Teacher', /\bstudent teacher\b/], ['Head Teacher', /\bhead teacher\b/],
+      ['Teacher', /\b(?:teacher|schoolmaster|schoolmistress|assistant master)\b/],
+      ['Principal', /\bprincipal\b/], ['Lecturer', /\blecturer\b/], ['Professor', /\bprofessor\b/]
+    ]],
+    ['Agriculture & Farming', [
+      ['Farm Labourer', /\bfarm[\s-]*(?:labourer|worker)\b/], ['Farmer', /\bfarmer\b/],
+      ['Crofter', /\bcrofter\b/], ['Shepherd', /\bshepherd\b/],
+      ['Market Gardener', /\bmarket gardener\b/], ['Horticulturist', /\bhorticulturist\b/],
+      ['Seedsman', /\bseedsman\b/]
+    ]],
+    ['Mining & Resources', [
+      ['Mine Manager', /\bmine manager\b/], ['Miner', /\bminer\b/]
+    ]],
+    ['Transport & Railways', [
+      ['Railway Clerk', /\brailway clerk\b/], ['Railway Porter', /\brailway porter\b/],
+      ['Railway Worker', /\brailway (?:employee|worker)\b/],
+      ['Locomotive Fireman', /\bloc(?:omotive|o) fireman\b/], ['Motor Driver', /\bmotor driver\b/]
+    ]],
+    ['Sales & Business Development', [
+      ['Commercial Traveller', /\bcommercial traveller\b/],
+      ['Sales Traveller', /\btraveller.*sales\b/], ['Sales Manager', /\bsales manager\b/],
+      ['Salesperson', /\b(?:salesman|saleswoman|salesperson)\b/]
+    ]],
+    ['Clerical & Administration', [
+      ['Clerk', /\bclerk\b/], ['Secretary', /\bsecretary\b/],
+      ['Receptionist', /\breceptionist\b/], ['Cashier', /\bcashier\b/]
+    ]],
+    ['Merchants, Import & Export', [
+      ['Merchant', /\bmerchants?\b/], ['Importer', /\bimporters?\b/],
+      ['Exporter', /\bexporters?\b/], ['Manufacturing Agent', /\bmanufacturing agent\b/]
+    ]],
+    ['Finance & Banking', [
+      ['Accountant', /\baccountant\b/], ['Bookkeeper', /\bbook[\s-]?keeper\b/],
+      ['Bank Manager', /\bbank manager\b/], ['Underwriter', /\bunderwriter\b/], ['Treasurer', /\btreasurer\b/]
+    ]],
+    ['Government & Public Service', [
+      ['Public Servant', /\bpublic servant\b/], ['Civil Servant', /\bcivil servant\b/],
+      ['Customs Officer', /\bcustoms officer\b/], ['Public Trustee', /\bpublic trustee\b/],
+      ['Inspector', /\binspector\b/]
+    ]],
+    ['Construction & Building Trades', [
+      ['Builder', /\bbuilder\b/], ['Bricklayer', /\bbricklayer\b/],
+      ['Mason', /\b(?:mason|stoneworker)\b/], ['Joiner', /\bjoiner\b/], ['Plumber', /\bplumber\b/]
+    ]],
+    ['Maritime & Shipping', [
+      ['Shipmaster', /\bship[\s-]?master\b/], ['Master Mariner', /\bmaster mariner\b/],
+      ['Shipwright', /\bship[\s-]?wright\b/], ['Seaman', /\bsea[\s-]?m[ae]n\b/],
+      ['Sailor', /\bsailor\b/], ['Shipping Worker', /\bshipping\b/]
+    ]],
+    ['Retail & Commerce', [
+      ['Grocer', /\bgrocer\b/], ['Shopkeeper', /\bshop[\s-]?keeper\b/],
+      ['Draper', /\bdraper\b/], ['Wool Buyer', /\bwool buyer\b/],
+      ['Book Store Employee', /\bbook[\s-]?store employee\b/]
+    ]],
+    ['Hospitality & Tourism', [
+      ['Hotel Keeper', /\bhotel[\s-]?keeper\b/], ['Publican', /\bpublican\b/],
+      ['Hostess', /\bhostess\b/], ['Innkeeper', /\binn[\s-]?keeper\b/],
+      ['Cafe Operator', /\bcafe operator\b/]
+    ]],
+    ['Management & Executive', [
+      ['Managing Director', /\bmanaging director\b/], ['Director', /\bdirector\b/],
+      ['General Manager', /\bgeneral manager\b/], ['Manager', /\bmanager\b/], ['Chairman', /\bchairman\b/]
+    ]],
+    ['Trades & Craftsmanship', [
+      ['Baker', /\bbaker\b/], ['Basket Maker', /\bbasket maker\b/], ['Blacksmith', /\bblacksmith\b/],
+      ['Coachbuilder', /\bcoach[\s-]?builder\b/], ['Mantelpiece Maker', /\bmantelpiece maker\b/],
+      ['Tailor', /\b(?:tailor|tailoress)\b/], ['Sailmaker', /\bsailmaker\b/]
+    ]],
+    ['Arts, Music & Media', [
+      ['Band Member', /\bband member\b/], ['Choir Member', /\bchoir member\b/],
+      ['News Correspondent', /\b(?:foreign )?news correspondent\b/], ['Librarian', /\blibrarian\b/]
+    ]],
+    ['Labouring & General Work', [
+      ['Labourer', /\blabourers?\b/], ['Yardman', /\byardman\b/],
+      ['Storeman', /\bstoreman\b/], ['Bushman', /\bbushman\b/]
+    ]],
+    ['Religious Occupations', [
+      ['Priest', /\bpriest\b/]
+    ]],
+    ['Domestic / Unpaid', [
+      ['Home Duties', /\bhome duties\b/], ['Spinster', /^spinster$/]
+    ]],
+    ['Unknown / Miscellaneous', []]
+  ];
+
+  function reportOccupation(value) {
+    const original = value;
+    const description = value.trim().replace(/\s+/g, ' ');
+    const occupation = description.split(',')[0].normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .toLocaleLowerCase().replace(/\blaborers?\b/g, (word) => word.replace('labor', 'labour'));
+    // Bank clerk must precede the general clerk rule without moving every finance role ahead of merchants.
+    if (/\bbank clerk\b/.test(occupation)) return { original, standard: 'Bank Clerk', category: 'Finance & Banking' };
+    for (const [category, rules] of reportOccupationTaxonomy) {
+      for (const [standard, pattern] of rules) {
+        if (pattern.test(occupation)) return { original, standard, category };
+      }
+    }
+    return { original, standard: description, category: 'Unknown / Miscellaneous' };
+  }
+
+  function matchesOccupationType(person, category) {
+    return !category || person.events.some((event) =>
+      event.type === 'OCCU' && event.value.trim() && reportOccupation(event.value).category === category);
+  }
+
+  function populateOccupationFilter() {
+    const select = elements.occupationTypeFilter;
+    const selected = state.directoryFilters.occupationType;
+    select.replaceChildren(new Option('All occupation types', ''));
+    const categories = reportOccupationTaxonomy.map(([category]) => category).sort((a, b) => a.localeCompare(b));
+    for (const category of categories) select.add(new Option(category, category));
+    select.disabled = !state.people.size;
+    select.value = categories.includes(selected) ? selected : '';
+    state.directoryFilters.occupationType = select.value;
+  }
+
   function buildReportStats() {
     const people = [...state.people.values()];
     const stats = {
@@ -3358,7 +3604,8 @@
       women: people.filter((person) => person.sex === 'F').length,
       withMedia: people.filter((person) => person.mediaPaths.length).length,
       mediaFiles: new Set(people.flatMap((person) => person.mediaPaths)).size,
-      countries: new Map(), unmatchedPlaces: new Set(), births: [], decades: new Map()
+      countries: new Map(), unmatchedPlaces: new Set(), births: [], decades: new Map(),
+      occupations: new Map(), withOccupation: 0
     };
     stats.unknownSex = stats.total - stats.men - stats.women;
     stats.withoutMedia = stats.total - stats.withMedia;
@@ -3371,6 +3618,19 @@
     };
     for (const person of people) {
       for (const event of person.events) addPlace(event.place, [person.id]);
+      const occupations = new Set();
+      for (const event of person.events) {
+        if (event.type !== 'OCCU') continue;
+        if (!event.value.trim()) continue;
+        const { original, standard, category: label } = reportOccupation(event.value);
+        const key = label.toLocaleLowerCase();
+        if (!stats.occupations.has(key)) stats.occupations.set(key, { label, count: 0, descriptions: new Set() });
+        stats.occupations.get(key).descriptions.add(`${original} -> ${standard}`);
+        if (occupations.has(key)) continue;
+        occupations.add(key);
+        stats.occupations.get(key).count += 1;
+      }
+      if (occupations.size) stats.withOccupation += 1;
       const birth = person.events.find((event) => event.type === 'BIRT');
       const parsed = reportDateKey(birth?.date);
       if (parsed) {
@@ -3466,6 +3726,29 @@
     return button;
   }
 
+  function appendReportBars(panel, rows, category) {
+    const bars = reportElement('div', 'report-bars');
+    const top = rows[0][1];
+    rows.forEach(([label, value, descriptions], index) => {
+      const row = reportElement('div', `report-bar-row${index >= 10 ? ' is-extra' : ''}`);
+      row.hidden = index >= 10;
+      row.title = `${label}: ${value.toLocaleString()} ${value === 1 ? 'person' : 'people'}`;
+      if (descriptions) row.title += `\nRecorded descriptions: ${descriptions}`;
+      const track = reportElement('div', 'report-bar-track');
+      const fill = reportElement('div', 'report-bar-fill');
+      fill.style.width = `${(value / top) * 100}%`;
+      track.append(fill);
+      row.append(reportElement('span', 'report-bar-label', label), track, reportElement('span', 'report-bar-value', value.toLocaleString()));
+      bars.append(row);
+    });
+    panel.append(bars);
+    if (rows.length > 10) {
+      const more = makeButton(`Show all ${rows.length} ${category}`, 'report-more');
+      more.dataset.reportMore = more.textContent;
+      panel.append(more);
+    }
+  }
+
   function renderReports() {
     if (!state.reportsMode) return;
     const stats = buildReportStats();
@@ -3555,31 +3838,23 @@
     const countryRows = [...stats.countries.entries()].map(([country, ids]) => [country, ids.size])
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
     if (countryRows.length) {
-      const bars = reportElement('div', 'report-bars');
-      const top = countryRows[0][1];
-      countryRows.forEach(([country, value], index) => {
-        const row = reportElement('div', `report-bar-row${index >= 10 ? ' is-extra' : ''}`);
-        row.hidden = index >= 10;
-        row.title = `${country}: ${value.toLocaleString()} ${value === 1 ? 'person' : 'people'}`;
-        const track = reportElement('div', 'report-bar-track');
-        const fill = reportElement('div', 'report-bar-fill');
-        fill.style.width = `${(value / top) * 100}%`;
-        track.append(fill);
-        row.append(reportElement('span', 'report-bar-label', country), track, reportElement('span', 'report-bar-value', value.toLocaleString()));
-        bars.append(row);
-      });
-      countryPanel.append(bars);
-      if (countryRows.length > 10) {
-        const more = makeButton(`Show all ${countryRows.length} countries`, 'report-more');
-        more.dataset.reportMore = more.textContent;
-        countryPanel.append(more);
-      }
+      appendReportBars(countryPanel, countryRows, 'countries');
       countryPanel.append(reportElement('p', 'report-note', `People are counted once per country where any of their life events took place, so totals can exceed the number of people.${stats.unmatchedPlaces.size ? ` ${stats.unmatchedPlaces.size.toLocaleString()} distinct place ${stats.unmatchedPlaces.size === 1 ? 'name does' : 'names do'} not include a recognised country.` : ''}`));
     } else {
       countryPanel.append(reportElement('p', 'report-empty', 'No recognised countries were found in the recorded places.'));
     }
 
-    charts.append(sexPanel, mediaPanel, earliestPanel, birthsPanel, countryPanel);
+    const occupationPanel = reportPanel('Most popular occupations', true);
+    const occupationRows = [...stats.occupations.values()].map(({ label, count, descriptions }) => [label, count, [...descriptions].sort().join('; ')])
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    if (occupationRows.length) {
+      appendReportBars(occupationPanel, occupationRows, 'categories');
+      occupationPanel.append(reportElement('p', 'report-note', `${stats.withOccupation.toLocaleString()} people have an occupation entry. Each person is counted once per category using a 27-category report taxonomy; totals can exceed the number of people. Hover over a bar to see original descriptions -> standard occupations. Grouping is inferred from keywords, not a verified fact. Unknown / Miscellaneous includes unmapped entries; Spinster is grouped under Domestic / Unpaid but is a recorded status, not proof of an occupation. Original GEDCOM entries are unchanged.`));
+    } else {
+      occupationPanel.append(reportElement('p', 'report-empty', 'No occupations are recorded in this tree.'));
+    }
+
+    charts.append(sexPanel, mediaPanel, earliestPanel, birthsPanel, countryPanel, occupationPanel);
     elements.reportsContent.replaceChildren(cards, charts);
   }
 
@@ -5157,8 +5432,7 @@
     if (state.primaryMedia.delete(plan.personId)) savePrimaryMedia();
     if (state.primaryPersonId === plan.personId) {
       state.primaryPersonId = '';
-      try { localStorage.removeItem(primaryPersonStorageKey()); } catch { }
-      syncSelectionsToHelper();
+      if (!storeSelection(primaryPersonStorageKey(), null)) showToast('The cleared primary person could not be saved in browser storage.');
     }
     if (state.defaultRecord?.homePersonId === plan.personId && state.defaultRecord.gedcomName === state.fileName) {
       const updated = { ...state.defaultRecord, homePersonId: '', homePersonName: '' };
@@ -5495,6 +5769,9 @@
     elements.clear.disabled = true; elements.back.disabled = true; elements.forward.disabled = true;
     document.querySelector('#importGedcomButton').disabled = true;
     elements.printMapButton.disabled = true;
+    state.showSiblings = false;
+    elements.showSiblings.checked = false;
+    elements.showSiblings.disabled = true;
     elements.zoomIn.disabled = true; elements.zoomOut.disabled = true;
     elements.treeLabel.textContent = 'No tree loaded'; elements.peopleCount.textContent = '0';
     elements.loadStatus.textContent = 'WAITING FOR FILE'; elements.statusPip.classList.remove('ready');
@@ -5510,6 +5787,10 @@
   });
 
   elements.search.addEventListener('input', () => { state.searchText = elements.search.value; renderRoster(); });
+  elements.showSiblings.addEventListener('change', () => {
+    state.showSiblings = elements.showSiblings.checked;
+    renderGraph();
+  });
   const mediaTypeFilter = document.querySelector('#mediaLibraryTypeFilter');
   for (const [value, label] of mediaTypeOptions) {
     const option = document.createElement('option');
@@ -5549,6 +5830,10 @@
   });
   elements.deathCountryFilter.addEventListener('change', () => {
     state.directoryFilters.deathCountry = elements.deathCountryFilter.value;
+    renderRoster();
+  });
+  elements.occupationTypeFilter.addEventListener('change', () => {
+    state.directoryFilters.occupationType = elements.occupationTypeFilter.value;
     renderRoster();
   });
   elements.birthYearMin.addEventListener('input', () => handleYearFilterInput('birth', 'min'));
@@ -5718,7 +6003,11 @@
     saveUploadedMedia([...(event.target.files || [])]);
   });
   elements.primaryHomeButton.addEventListener('click', () => {
-    if (state.people.has(state.primaryPersonId)) setFocus(state.primaryPersonId);
+    if (!state.people.has(state.primaryPersonId)) return;
+    if (state.mediaLibraryMode) setMediaLibraryMode(false);
+    if (state.reportsMode) setReportsMode(false);
+    if (state.mapMode) setMapMode(false);
+    setFocus(state.primaryPersonId);
   });
   elements.addGedcomField.addEventListener('click', () => appendGedcomFieldRow());
   elements.personFieldsEditor.addEventListener('click', (event) => {
@@ -6034,8 +6323,9 @@
       svg.setAttribute('height', '0');
     }
     // Try each cards-per-row wrap width and keep the layout that can be printed largest on the landscape page.
-    const widestCount = Math.max(1, ...[...canvas.querySelectorAll('.generation-nodes')].map((row) => row.querySelectorAll('.person-node').length));
-    const rowWidth = (count) => count * 192 + Math.max(0, count - 1) * 11 + 8;
+    const widestCount = Math.max(1, ...[...canvas.querySelectorAll('.generation-nodes')].map((row) => row.children.length));
+    const cardWidth = canvas.querySelector('.person-node')?.offsetWidth || 240;
+    const rowWidth = (count) => count * cardWidth + Math.max(0, count - 1) * 11 + 8;
     const fitScale = (width) => {
       canvas.style.width = `${width}px`;
       return Math.min(1, printPageWidth / Math.max(width, canvas.scrollWidth), heightBudget / Math.max(1, canvas.scrollHeight));
@@ -6089,11 +6379,16 @@
     elements.zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
     elements.zoomOut.disabled = state.zoom <= 0.65;
     elements.zoomIn.disabled = state.zoom >= 1.35;
-    requestAnimationFrame(() => {
-      const svg = elements.canvas.querySelector('.connector-layer');
-      if (svg) drawConnectors(svg, new Set([...elements.canvas.querySelectorAll('.person-card')].map((card) => `${card.dataset.generation}|${card.dataset.personId}`)), state.selectedId, partnersOf(state.selectedId).map((item) => item.id));
-    });
+    requestAnimationFrame(redrawGraphConnectors);
   }
+
+  function redrawGraphConnectors() {
+    if (state.mapMode || state.reportsMode || state.mediaLibraryMode) return;
+    const svg = elements.canvas.querySelector('.connector-layer');
+    if (svg) drawConnectors(svg, new Set([...elements.canvas.querySelectorAll('.person-card')].map((card) => `${card.dataset.generation}|${card.dataset.personId}`)), state.selectedId, partnersOf(state.selectedId).map((item) => item.id));
+  }
+
+  new ResizeObserver(() => requestAnimationFrame(redrawGraphConnectors)).observe(elements.viewport);
   document.addEventListener('keydown', (event) => {
     if (event.key === '/' && !event.target.matches('input, textarea')) {
       event.preventDefault();
@@ -6385,6 +6680,11 @@
     setButtonContent(exitButton, 'exit', 'Exiting…');
     setSettingsOpen(false);
     await persistActiveSession();
+    if (!await syncSelectionsToHelper()) {
+      exitButton.disabled = false;
+      setButtonContent(exitButton, 'exit', 'Exit Kinship Atlas');
+      return;
+    }
     window.clearInterval(mediaHeartbeat);
     try {
       await fetch('/api/exit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
@@ -6562,5 +6862,5 @@
   // Keeps Kinship Atlas.exe's local server alive while this tab is open.
   const mediaHeartbeat = window.setInterval(() => { if (state.mediaHelper) fetch('/api/media-info', { cache: 'no-store' }).catch(() => {}); }, 30000);
   // Syncing once at startup captures selections made before this feature (or while the helper was down).
-  probeMediaHelper().then(loadHelperSelections).then(syncSelectionsToHelper).then(restoreActiveSession).then(applyDefaultOnStartup).then(loadHelperMedia);
+  probeMediaHelper().then(loadHelperSelections).then(restoreActiveSession).then(applyDefaultOnStartup).then(syncSelectionsToHelper).then(loadHelperMedia);
 })();
