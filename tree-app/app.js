@@ -991,7 +991,9 @@
     ['unclassified', 'Unclassified'], ['portrait', 'Portrait'], ['family-photo', 'Family photo'],
     ['document', 'Document'], ['certificate', 'Certificate'], ['letter', 'Letter'],
     ['newspaper', 'Newspaper'], ['map-plan', 'Map / plan'], ['will-probate', 'Will / Probate'],
-    ['wedding', 'Wedding'], ['birth', 'Birth'], ['death', 'Death'], ['census', 'Census'],
+    ['building-house', 'Building / house'], ['military-records', 'Military records'],
+    ['wedding', 'Wedding'], ['birth', 'Birth'],
+    ['death', 'Death'], ['census', 'Census'],
     ['directory', 'Directory'], ['other', 'Other']
   ];
   const mediaTypeStorageKey = (storageKey) => `kinship-atlas:media-types:v1:${storageKey}`;
@@ -3254,6 +3256,8 @@
     map: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.4 4 5.6 4 9s-1.4 6.6-4 9c-2.6-2.4-4-5.6-4-9s1.4-6.6 4-9z"/>',
     tree: '<rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/>',
     chart: '<path d="M3 21h18"/><rect x="5" y="11" width="3" height="7" rx=".5"/><rect x="10.5" y="5" width="3" height="13" rx=".5"/><rect x="16" y="8" width="3" height="10" rx=".5"/>',
+    media: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="M21 15l-5-5L5 20"/>',
+    exit: '<path d="M10 17l5-5-5-5M15 12H3"/><path d="M12 3h7a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-7"/>',
     restart: '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>',
     import: '<path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 17v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>',
     save: '<path d="M5 3h11l5 5v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M7 3v5h8V3"/><rect x="7" y="13" width="10" height="8"/>',
@@ -6378,7 +6382,7 @@
     if ((state.gedcomDirty || state.gedcomSaving) && !window.confirm('There are unsaved GEDCOM changes. Exit without saving them?')) return;
     const exitButton = document.querySelector('#exitButton');
     exitButton.disabled = true;
-    exitButton.textContent = 'Exiting…';
+    setButtonContent(exitButton, 'exit', 'Exiting…');
     setSettingsOpen(false);
     await persistActiveSession();
     window.clearInterval(mediaHeartbeat);
@@ -6509,6 +6513,9 @@
   });
   setButtonContent(elements.mapViewButton, 'map', 'Map View');
   setButtonContent(elements.reportsButton, 'chart', 'Reports');
+  setButtonContent(elements.mediaLibraryButton, 'media', 'Media');
+  setButtonContent(document.querySelector('#mediaLibraryMenuButton'), 'media', 'Media library');
+  setButtonContent(document.querySelector('#exitButton'), 'exit', 'Exit Kinship Atlas');
   setButtonContent(elements.clear, 'restart', 'Start Again');
   document.querySelector('#defaultsPickGedcom').addEventListener('click', async () => {
     if (typeof window.showOpenFilePicker !== 'function') {
