@@ -50,6 +50,7 @@
           <input id="mediaInput" type="file" webkitdirectory directory multiple>
           <input id="mediaUploadInput" type="file" accept="image/*,.pdf,application/pdf" multiple>
           <button id="mediaLibraryMenuButton" class="menu-item" type="button" role="menuitem" disabled>Media library</button>
+          <button id="birthCountryMenuButton" class="menu-item" type="button" role="menuitem" disabled title="List people whose birth place does not identify a country, and fix them">People without a birth country</button>
           <button id="defaultsButton" class="menu-item" type="button" role="menuitem" title="Choose the GEDCOM file and media folder that open automatically">Update defaults</button>
           <button id="clearButton" class="menu-item" type="button" role="menuitem" disabled>Start Again</button>
           <button id="exitButton" class="menu-item" type="button" role="menuitem">Exit Kinship Atlas</button>
@@ -419,6 +420,30 @@
       <div class="dialog-actions">
         <button class="dialog-button dialog-button-primary" type="submit">Save to GEDCOM</button>
         <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="personSummaryDialog">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="birthCountryDialog" class="app-dialog birth-country-dialog" aria-labelledby="birthCountryTitle">
+    <form id="birthCountryForm" class="dialog-panel new-gedcom-panel">
+      <h2 id="birthCountryTitle">People without a birth country</h2>
+      <p id="birthCountrySummary"></p>
+      <label class="birth-country-search" for="birthCountrySearch"><span class="search-glyph" aria-hidden="true">⌕</span><input id="birthCountrySearch" type="search" placeholder="Filter by name or place" autocomplete="off"></label>
+      <details id="geonamesPanel" class="geonames-panel">
+        <summary>Suggest countries with GeoNames</summary>
+        <p class="geonames-note">Looks up each listed birth location on GeoNames.org and suggests a country to append. Only the birth location text is sent (over HTTPS), not names, dates, or other details. GeoNames uses modern country names, so check historical places (for example in Prussia) before accepting. Accepted suggestions are written only when you click Save changes.</p>
+        <div class="geonames-controls">
+          <label class="new-gedcom-field" for="geonamesUsername">GeoNames username<input id="geonamesUsername" type="text" maxlength="80" autocomplete="off" spellcheck="false" placeholder="Your registered username"></label>
+          <button id="geonamesLookup" class="dialog-button" type="button" disabled>Suggest countries</button>
+        </div>
+        <label class="research-consent" for="geonamesConsent"><input id="geonamesConsent" type="checkbox"> I agree to send the birth locations currently listed to GeoNames.org for this lookup.</label>
+        <p id="geonamesStatus" class="geonames-status" role="status"></p>
+      </details>
+      <div id="birthCountryList" class="birth-country-list" aria-live="polite"></div>
+      <p id="birthCountryError" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <span id="birthCountryPending" class="birth-country-pending"></span>
+        <button id="saveBirthCountries" class="dialog-button dialog-button-primary" type="submit" disabled>Save changes</button>
+        <button id="closeBirthCountries" class="dialog-button dialog-button-quiet" type="button">Close</button>
       </div>
     </form>
   </dialog>

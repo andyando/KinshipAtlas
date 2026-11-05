@@ -54,6 +54,7 @@
     pendingPersonSummaryId: null,
     pendingLifeEvent: null,
     primaryMediaKey: '', primaryMedia: new Map(), additionalMedia: new Map(), mediaTypes: new Map(), primaryPersonId: '',
+    birthCountryEdits: new Map(), birthCountrySuggestions: new Map(), geonamesLookup: null,
     gedcomRecords: [], gedcomDirty: false, gedcomText: '', sessionSaveQueue: Promise.resolve(),
     gedcomSource: '', gedcomFileHandle: null, gedcomBaseHash: '', gedcomSaving: false,
     gedcomSaveQueue: Promise.resolve(), gedcomPickerDeclined: false,
@@ -888,6 +889,8 @@
       const fileSegments = normalizeMediaPath(state.mediaRelativePaths.get(file) || file.webkitRelativePath || file.name).split('/').filter(Boolean);
       let score = 0;
       while (score < segments.length && score < fileSegments.length && segments.at(-1 - score) === fileSegments.at(-1 - score)) score += 1;
+      // An exact relative path (e.g. a new upload at the media folder root) wins over same-named files in subfolders.
+      if (score === segments.length && score === fileSegments.length) return file;
       if (score > bestScore) {
         bestFile = file;
         bestScore = score;
@@ -1357,6 +1360,7 @@
 
     let savedCount = 0;
     let failedCount = 0;
+    const addedPaths = new Set();
     for (const file of files) {
       if (!isSupportedMediaFile(file)) {
         failedCount += 1;
@@ -1364,6 +1368,7 @@
       }
       try {
         const fileName = await storeMediaFile(file, mode, directoryHandle);
+        addedPaths.add(fileName);
         if (!person.mediaPaths.includes(fileName)) person.mediaPaths.push(fileName);
         const paths = state.additionalMedia.get(person.id) || [];
         if (!paths.includes(fileName)) paths.push(fileName);
@@ -1375,7 +1380,14 @@
     }
 
     if (savedCount) {
+      // New files are appended after the "Show more" cut-off, so expand the list and highlight them.
+      if (state.selectedId === person.id) {
+        expandedMediaPersonId = person.id;
+        justAddedMedia = { personId: person.id, paths: addedPaths };
+      }
       render();
+      justAddedMedia = null;
+      elements.details.querySelector('.is-just-added')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       const linked = saveAdditionalMedia();
       await persistActiveSession();
       const linkStatus = linked ? 'Person links saved in this browser.' : 'Links will last only for this tab because browser storage is unavailable.';
@@ -1699,6 +1711,7 @@
     elements.reportsButton.disabled = false;
     elements.mediaLibraryButton.disabled = false;
     document.querySelector('#mediaLibraryMenuButton').disabled = false;
+    document.querySelector('#birthCountryMenuButton').disabled = false;
     elements.printMapButton.disabled = false;
     elements.showSiblings.disabled = false;
     document.querySelector('#openGedcomLabel').hidden = true;
@@ -2032,6 +2045,11 @@
     welcome.innerHTML = '<div class="welcome-art" aria-hidden="true"><span class="orbit orbit-a"></span><span class="orbit orbit-b"></span><span class="welcome-node node-a"></span><span class="welcome-node node-b"></span><span class="welcome-node node-c"></span><span class="welcome-node node-d"></span><span class="welcome-node node-e"></span><span class="welcome-stem stem-a"></span><span class="welcome-stem stem-b"></span><span class="welcome-stem stem-c"></span><span class="welcome-stem stem-d"></span></div><div class="eyebrow">WELCOME</div><h2></h2><p></p><span class="welcome-note">Use the search box or directory on the left to choose a person, or switch to Map View to see where everyone lived.</span>';
     welcome.querySelector('h2').textContent = 'Welcome to your family archive';
     welcome.querySelector('p').textContent = `${state.fileName} is open with ${state.people.size.toLocaleString()} ${state.people.size === 1 ? 'person' : 'people'}. Select someone to see their relationships.`;
+    if (state.people.has(state.primaryPersonId)) {
+      const homeMapButton = makeButton('View Home Person Relationship Map', 'button button-secondary welcome-button welcome-home-map');
+      homeMapButton.addEventListener('click', showPrimaryPersonRelationshipMap);
+      welcome.insertBefore(homeMapButton, welcome.querySelector('.welcome-note'));
+    }
     elements.canvas.append(welcome);
     elements.generationLabel.textContent = 'NO PERSON SELECTED';
     elements.graphSummary.textContent = `${state.people.size.toLocaleString()} IN TREE`;
@@ -2722,6 +2740,14 @@
     elements.primaryHomeButton.setAttribute('aria-current', String(Boolean(primary) && primary.id === state.selectedId));
   }
 
+  function showPrimaryPersonRelationshipMap() {
+    if (!state.people.has(state.primaryPersonId)) return;
+    if (state.mediaLibraryMode) setMediaLibraryMode(false);
+    if (state.reportsMode) setReportsMode(false);
+    if (state.mapMode) setMapMode(false);
+    setFocus(state.primaryPersonId);
+  }
+
   function togglePrimaryPerson(personId) {
     const person = state.people.get(personId);
     if (!person) return;
@@ -2751,6 +2777,7 @@
 
   let lastDetailsPersonId = null;
   let expandedMediaPersonId = null;
+  let justAddedMedia = null;
 
   function renderDetails() {
     const person = state.people.get(state.selectedId);
@@ -2941,6 +2968,9 @@
       ? `${file.name}\nLinked to: ${linkedEvents.get(mediaPath).join(', ')}`
       : file.name;
     let missing = 0;
+    const markJustAdded = (item, path) => {
+      if (justAddedMedia?.personId === person.id && justAddedMedia.paths.has(path)) item.classList.add('is-just-added');
+    };
     for (const path of person.mediaPaths) {
       const file = resolveMediaFile(path);
       if (!file) {
@@ -2973,6 +3003,7 @@
         unlinkButton.setAttribute('aria-label', 'Unlink image from this person; file will remain in the media folder');
         unlinkButton.title = 'Unlink from person (file remains in folder)';
         item.append(link, primaryButton, unlinkButton);
+        markJustAdded(item, path);
         item.hidden = mediaItems.length >= 4;
         mediaItems.push(item);
         grid.append(item);
@@ -2992,6 +3023,7 @@
         unlinkButton.setAttribute('aria-label', 'Unlink media from this person; file will remain in the media folder');
         unlinkButton.title = 'Unlink from person (file remains in folder)';
         item.append(link, unlinkButton);
+        markJustAdded(item, path);
         item.hidden = mediaItems.length >= 4;
         mediaItems.push(item);
         grid.append(item);
@@ -4869,7 +4901,7 @@
     return true;
   }
 
-  function refreshAfterGedcomMutation(personId) {
+  function reparseGedcomRecords() {
     const parsed = parseGedcom(serializeGedcomRecords(state.gedcomRecords));
     state.people = parsed.people;
     state.families = parsed.families;
@@ -4884,10 +4916,328 @@
       if (!mediaPathsForPerson(id).includes(state.primaryMedia.get(id))) state.primaryMedia.delete(id);
     }
     elements.peopleCount.textContent = state.people.size.toLocaleString();
+  }
+
+  function refreshAfterGedcomMutation(personId) {
+    reparseGedcomRecords();
     state.history = [];
     state.historyIndex = -1;
     markGedcomDirty();
     setFocus(state.people.has(personId) ? personId : state.people.keys().next().value, true);
+  }
+
+  function birthPlaceOf(person) {
+    return person.events.find((event) => event.type === 'BIRT')?.place || '';
+  }
+
+  function peopleWithoutBirthCountry() {
+    return [...state.people.values()]
+      .filter((person) => !countryFlagForPlace(birthPlaceOf(person)))
+      .sort((a, b) => (a.surname || '').localeCompare(b.surname || '', undefined, { sensitivity: 'base' })
+        || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  }
+
+  function birthCountryHint(place) {
+    if (!place.trim()) return { text: 'No birth place recorded', found: false };
+    const country = countryFlagForPlace(place);
+    return country ? { text: `Country: ${country.country}`, found: true } : { text: 'Country not recognised', found: false };
+  }
+
+  function updateBirthCountryPending() {
+    const count = state.birthCountryEdits.size;
+    const pending = document.querySelector('#birthCountryPending');
+    pending.textContent = count ? `${countLabel(count, 'unsaved change', 'unsaved changes')}` : '';
+    document.querySelector('#saveBirthCountries').disabled = !count;
+  }
+
+  function renderBirthCountryList() {
+    const list = document.querySelector('#birthCountryList');
+    const people = peopleWithoutBirthCountry();
+    const query = normalizeDirectoryName(document.querySelector('#birthCountrySearch').value.trim());
+    const visible = query
+      ? people.filter((person) => normalizeDirectoryName(`${person.name} ${birthPlaceOf(person)}`).includes(query))
+      : people;
+    document.querySelector('#birthCountrySummary').textContent = people.length
+      ? `${countLabel(people.length, 'person has', 'people have')} no birth place that identifies a country. Add or correct the birth location (for example "Sydney, New South Wales, Australia"), then save. Edits are written to the GEDCOM file.`
+      : 'Everyone in this tree has a birth place that identifies a country.';
+    list.replaceChildren();
+    if (!visible.length) {
+      const empty = document.createElement('div');
+      empty.className = 'birth-country-empty';
+      empty.textContent = people.length ? 'No one matches this filter.' : 'Nothing left to fix.';
+      list.append(empty);
+    }
+    for (const person of visible) {
+      const original = birthPlaceOf(person);
+      const value = state.birthCountryEdits.has(person.id) ? state.birthCountryEdits.get(person.id) : original;
+      const row = document.createElement('div');
+      row.className = 'birth-country-row';
+      row.classList.toggle('is-edited', state.birthCountryEdits.has(person.id));
+      const who = document.createElement('div');
+      who.className = 'birth-country-person';
+      const name = makeButton(person.name, 'birth-country-name');
+      name.dataset.birthCountryOpen = person.id;
+      name.title = `Close this list and open ${person.name}`;
+      const years = document.createElement('span');
+      years.className = 'birth-country-years';
+      years.textContent = lifespan(person);
+      who.append(name, years);
+      const field = document.createElement('div');
+      field.className = 'birth-country-field';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.maxLength = 200;
+      input.autocomplete = 'off';
+      input.value = value;
+      input.placeholder = 'Add birth location';
+      input.dataset.birthCountryPerson = person.id;
+      input.dataset.original = original;
+      input.setAttribute('aria-label', `Birth location for ${person.name}`);
+      const hint = document.createElement('span');
+      const status = birthCountryHint(value);
+      hint.className = `birth-country-hint${status.found ? ' is-found' : ''}`;
+      hint.textContent = status.text;
+      const suggestions = document.createElement('div');
+      suggestions.className = 'birth-country-suggestions';
+      field.append(input, hint, suggestions);
+      row.dataset.placeKey = birthPlaceKey(original);
+      row.append(who, field);
+      renderBirthCountrySuggestionCell(row);
+      list.append(row);
+    }
+    updateBirthCountryPending();
+  }
+
+  function openBirthCountryDialog() {
+    if (!state.people.size) return;
+    if (!state.gedcomRecords.length) {
+      showToast('This tree cannot be edited, so birth locations cannot be updated.');
+      return;
+    }
+    state.birthCountryEdits = new Map();
+    document.querySelector('#birthCountrySearch').value = '';
+    document.querySelector('#birthCountryError').hidden = true;
+    document.querySelector('#geonamesConsent').checked = false;
+    try { document.querySelector('#geonamesUsername').value = localStorage.getItem(geonamesUsernameKey) || ''; } catch { }
+    document.querySelector('#geonamesStatus').textContent = '';
+    syncGeonamesControls();
+    renderBirthCountryList();
+    const dialog = document.querySelector('#birthCountryDialog');
+    if (!dialog.open) dialog.showModal();
+  }
+
+  function closeBirthCountryDialog() {
+    if (state.birthCountryEdits.size && !window.confirm('Discard your unsaved birth location changes?')) return false;
+    state.birthCountryEdits = new Map();
+    state.geonamesLookup?.abort();
+    document.querySelector('#birthCountryDialog').close();
+    return true;
+  }
+
+  const geonamesUsernameKey = 'kinship-atlas:geonames-username';
+  const ukNations = ['England', 'Scotland', 'Wales', 'Northern Ireland'];
+
+  function birthPlaceKey(place) {
+    return String(place || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+  }
+
+  function appendCountryToPlace(place, country) {
+    const base = String(place || '').trim().replace(/[\s,]+$/, '');
+    return base ? `${base}, ${country}` : country;
+  }
+
+  // UK results use the constituent nation, matching the flags the app shows for English, Scottish, Welsh and Northern Irish places.
+  function geonamesCountryLabel(result) {
+    if (String(result?.countryCode || '').toUpperCase() === 'GB') {
+      const region = String(result.adminName1 || '').trim().toLocaleLowerCase();
+      return ukNations.find((nation) => nation.toLocaleLowerCase() === region) || 'United Kingdom';
+    }
+    return String(result?.countryName || '').trim();
+  }
+
+  function geonamesCountryOptions(results, limit = 3) {
+    const options = [];
+    for (const result of Array.isArray(results) ? results : []) {
+      const country = geonamesCountryLabel(result);
+      if (!country || options.some((option) => option.country === country)) continue;
+      const match = [...new Set([result.name, result.adminName1, result.countryName].map((part) => String(part || '').trim()).filter(Boolean))].join(', ');
+      options.push({ country, match });
+      if (options.length >= limit) break;
+    }
+    return options;
+  }
+
+  async function geonamesSearch(params, username, signal) {
+    const url = new URL('https://secure.geonames.org/searchJSON');
+    for (const [key, value] of Object.entries({ ...params, maxRows: '10', style: 'MEDIUM', username })) url.searchParams.set(key, value);
+    const request = new AbortController();
+    const stop = () => request.abort();
+    signal?.addEventListener('abort', stop, { once: true });
+    const timer = setTimeout(stop, 15000);
+    let response;
+    let data;
+    try {
+      response = await fetch(url, { signal: request.signal, credentials: 'omit', referrerPolicy: 'no-referrer' });
+      try { data = await response.json(); } catch (error) {
+        if (request.signal.aborted) throw error;
+        throw new Error(`GeoNames returned HTTP ${response.status}.`);
+      }
+    } catch (error) {
+      if (request.signal.aborted && !signal?.aborted) throw new Error('GeoNames did not respond within 15 seconds.');
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', stop);
+    }
+    if (data?.status) {
+      const hint = data.status.value === 10 ? ' Check the username, and that free web services are enabled for it on the GeoNames "Manage account" page.' : '';
+      throw new Error(`${data.status.message}${hint}`);
+    }
+    if (!response.ok) throw new Error(`GeoNames returned HTTP ${response.status}.`);
+    return Array.isArray(data?.geonames) ? data.geonames : [];
+  }
+
+  async function suggestCountriesForPlace(place, username, signal) {
+    let results = await geonamesSearch({ q: place }, username, signal);
+    const firstPart = place.split(',')[0].trim();
+    if (!results.length && firstPart && firstPart !== place.trim()) {
+      results = await geonamesSearch({ q: firstPart, isNameRequired: 'true' }, username, signal);
+    }
+    return geonamesCountryOptions(results);
+  }
+
+  function renderBirthCountrySuggestionCell(row) {
+    const cell = row.querySelector('.birth-country-suggestions');
+    const input = row.querySelector('input[data-birth-country-person]');
+    const entry = state.birthCountrySuggestions.get(row.dataset.placeKey);
+    cell.replaceChildren();
+    cell.hidden = !entry;
+    if (!entry) return;
+    const note = (text) => {
+      const span = document.createElement('span');
+      span.className = 'birth-country-suggest-note';
+      span.textContent = text;
+      cell.append(span);
+    };
+    if (entry.status === 'loading') return note('Looking up on GeoNames…');
+    if (entry.status === 'error') return note(`GeoNames lookup failed: ${entry.message}`);
+    if (!entry.options.length) return note('No GeoNames match found.');
+    note('GeoNames suggests:');
+    for (const option of entry.options) {
+      const accepted = input.value.trim() === appendCountryToPlace(input.dataset.original, option.country);
+      const button = makeButton(accepted ? `✓ ${option.country} appended` : `Append ${option.country}`, `birth-country-accept${accepted ? ' is-accepted' : ''}`);
+      button.dataset.acceptCountry = option.country;
+      button.title = `GeoNames match: ${option.match}`;
+      button.setAttribute('aria-pressed', String(accepted));
+      cell.append(button);
+    }
+  }
+
+  function refreshBirthCountrySuggestionRows(key) {
+    for (const row of document.querySelectorAll('#birthCountryList .birth-country-row')) {
+      if (key === undefined || row.dataset.placeKey === key) renderBirthCountrySuggestionCell(row);
+    }
+  }
+
+  function applyBirthCountryInput(input) {
+    const personId = input.dataset.birthCountryPerson;
+    if (input.value.trim() === input.dataset.original.trim()) state.birthCountryEdits.delete(personId);
+    else state.birthCountryEdits.set(personId, input.value);
+    const status = birthCountryHint(input.value);
+    const hint = input.parentElement.querySelector('.birth-country-hint');
+    hint.textContent = status.text;
+    hint.classList.toggle('is-found', status.found);
+    input.closest('.birth-country-row').classList.toggle('is-edited', state.birthCountryEdits.has(personId));
+    updateBirthCountryPending();
+  }
+
+  function syncGeonamesControls() {
+    const button = document.querySelector('#geonamesLookup');
+    const running = Boolean(state.geonamesLookup);
+    button.textContent = running ? 'Stop' : 'Suggest countries';
+    button.disabled = !running && (!document.querySelector('#geonamesUsername').value.trim() || !document.querySelector('#geonamesConsent').checked);
+    document.querySelector('#geonamesUsername').disabled = running;
+    document.querySelector('#geonamesConsent').disabled = running;
+  }
+
+  async function runGeonamesLookup() {
+    if (state.geonamesLookup) {
+      state.geonamesLookup.abort();
+      return;
+    }
+    const username = document.querySelector('#geonamesUsername').value.trim();
+    const status = document.querySelector('#geonamesStatus');
+    if (!username || !document.querySelector('#geonamesConsent').checked) return;
+    try { localStorage.setItem(geonamesUsernameKey, username); } catch { }
+    const places = new Map();
+    for (const input of document.querySelectorAll('#birthCountryList input[data-birth-country-person]')) {
+      const place = input.dataset.original.trim();
+      const key = birthPlaceKey(place);
+      if (place && state.birthCountrySuggestions.get(key)?.status !== 'done') places.set(key, place);
+    }
+    if (!places.size) {
+      status.textContent = 'No listed birth locations need a lookup. Only people with an existing birth location can be looked up.';
+      return;
+    }
+    const controller = new AbortController();
+    state.geonamesLookup = controller;
+    syncGeonamesControls();
+    let done = 0;
+    let matched = 0;
+    let failure = '';
+    for (const [key, place] of places) {
+      if (controller.signal.aborted) break;
+      status.textContent = `Looking up ${done + 1} of ${places.size} birth locations…`;
+      state.birthCountrySuggestions.set(key, { status: 'loading' });
+      refreshBirthCountrySuggestionRows(key);
+      try {
+        const options = await suggestCountriesForPlace(place, username, controller.signal);
+        state.birthCountrySuggestions.set(key, { status: 'done', options });
+        if (options.length) matched += 1;
+        done += 1;
+      } catch (error) {
+        if (controller.signal.aborted) state.birthCountrySuggestions.delete(key);
+        else {
+          failure = error?.message || 'The request failed.';
+          state.birthCountrySuggestions.set(key, { status: 'error', message: failure });
+        }
+      }
+      refreshBirthCountrySuggestionRows(key);
+      if (failure) break;
+    }
+    state.geonamesLookup = null;
+    syncGeonamesControls();
+    status.textContent = failure ? `Lookup stopped: ${failure}`
+      : controller.signal.aborted ? `Stopped after ${countLabel(done, 'birth location', 'birth locations')}.`
+      : `Looked up ${countLabel(done, 'birth location', 'birth locations')}; ${matched.toLocaleString()} with suggestions. Review each suggestion before accepting.`;
+  }
+
+  function saveBirthCountries() {
+    const error = document.querySelector('#birthCountryError');
+    error.hidden = true;
+    let changed = 0;
+    for (const [personId, place] of state.birthCountryEdits) {
+      const record = state.gedcomRecords.find((entry) => entry.tag === 'INDI' && entry.xref === personId);
+      if (!record) continue;
+      const lines = [...record.lines];
+      updateEventField(lines, 'BIRT', 'PLAC', place.replace(/[\r\n]+/g, ' ').trim());
+      record.lines = lines;
+      changed += 1;
+    }
+    if (!changed) {
+      error.textContent = 'None of the edited people could be found in the current GEDCOM.';
+      error.hidden = false;
+      return;
+    }
+    const before = peopleWithoutBirthCountry().length;
+    reparseGedcomRecords();
+    markGedcomDirty();
+    if (state.people.has(state.selectedId)) render();
+    else { renderRoster(); if (!state.mapMode) renderTreeWelcome(); }
+    state.birthCountryEdits = new Map();
+    renderBirthCountryList();
+    const fixed = before - peopleWithoutBirthCountry().length;
+    document.querySelector('#birthCountryPending').textContent = `Saved ${countLabel(changed, 'birth location', 'birth locations')}; ${countLabel(fixed, 'person', 'people')} now ${fixed === 1 ? 'has' : 'have'} a birth country.`;
   }
 
   function savePersonFields() {
@@ -5752,6 +6102,7 @@
     elements.reportsButton.disabled = true;
     elements.mediaLibraryButton.disabled = true;
     document.querySelector('#mediaLibraryMenuButton').disabled = true;
+    document.querySelector('#birthCountryMenuButton').disabled = true;
     releaseMediaUrls(); state.mediaIndex = null; state.mediaFolderPicked = false;
     state.mediaRelativePaths = new WeakMap(); state.mediaDirectoryHandle = null; state.pendingUploadPersonId = null;
     syncMediaButton();
@@ -5806,6 +6157,47 @@
   elements.reportsButton.addEventListener('click', () => setReportsMode(!state.reportsMode));
   elements.mediaLibraryButton.addEventListener('click', () => setMediaLibraryMode(!state.mediaLibraryMode));
   document.querySelector('#mediaLibraryMenuButton').addEventListener('click', () => setMediaLibraryMode(true));
+  document.querySelector('#birthCountryMenuButton').addEventListener('click', openBirthCountryDialog);
+  document.querySelector('#birthCountrySearch').addEventListener('input', renderBirthCountryList);
+  document.querySelector('#birthCountryList').addEventListener('input', (event) => {
+    const input = event.target.closest('input[data-birth-country-person]');
+    if (input) applyBirthCountryInput(input);
+  });
+  document.querySelector('#birthCountryList').addEventListener('click', (event) => {
+    const accept = event.target.closest('button[data-accept-country]');
+    if (accept) {
+      const row = accept.closest('.birth-country-row');
+      const input = row.querySelector('input[data-birth-country-person]');
+      input.value = appendCountryToPlace(input.dataset.original, accept.dataset.acceptCountry);
+      applyBirthCountryInput(input);
+      renderBirthCountrySuggestionCell(row);
+      return;
+    }
+    const button = event.target.closest('button[data-birth-country-open]');
+    if (!button || !closeBirthCountryDialog()) return;
+    if (state.mediaLibraryMode) setMediaLibraryMode(false);
+    if (state.reportsMode) setReportsMode(false);
+    if (state.mapMode) setMapMode(false);
+    setFocus(button.dataset.birthCountryOpen);
+  });
+  document.querySelector('#birthCountryForm').addEventListener('submit', (event) => {
+    event.preventDefault();
+    saveBirthCountries();
+  });
+  document.querySelector('#closeBirthCountries').addEventListener('click', closeBirthCountryDialog);
+  document.querySelector('#geonamesLookup').addEventListener('click', runGeonamesLookup);
+  document.querySelector('#geonamesUsername').addEventListener('input', syncGeonamesControls);
+  document.querySelector('#geonamesConsent').addEventListener('change', syncGeonamesControls);
+  document.querySelector('#geonamesUsername').addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    if (!document.querySelector('#geonamesLookup').disabled) runGeonamesLookup();
+  });
+  document.querySelector('#birthCountryDialog').addEventListener('close', () => state.geonamesLookup?.abort());
+  document.querySelector('#birthCountryDialog').addEventListener('cancel', (event) => {
+    event.preventDefault();
+    closeBirthCountryDialog();
+  });
   document.querySelector('#mediaLibraryBackButton').addEventListener('click', () => setMediaLibraryMode(false));
   document.querySelector('#mediaLibrarySearch').addEventListener('input', renderMediaLibrary);
   document.querySelector('#mediaLibraryTypeFilter').addEventListener('change', renderMediaLibrary);
@@ -6003,11 +6395,7 @@
     saveUploadedMedia([...(event.target.files || [])]);
   });
   elements.primaryHomeButton.addEventListener('click', () => {
-    if (!state.people.has(state.primaryPersonId)) return;
-    if (state.mediaLibraryMode) setMediaLibraryMode(false);
-    if (state.reportsMode) setReportsMode(false);
-    if (state.mapMode) setMapMode(false);
-    setFocus(state.primaryPersonId);
+    showPrimaryPersonRelationshipMap();
   });
   elements.addGedcomField.addEventListener('click', () => appendGedcomFieldRow());
   elements.personFieldsEditor.addEventListener('click', (event) => {
@@ -6815,6 +7203,7 @@
   setButtonContent(elements.reportsButton, 'chart', 'Reports');
   setButtonContent(elements.mediaLibraryButton, 'media', 'Media');
   setButtonContent(document.querySelector('#mediaLibraryMenuButton'), 'media', 'Media library');
+  setButtonContent(document.querySelector('#birthCountryMenuButton'), 'map', 'People without a birth country');
   setButtonContent(document.querySelector('#exitButton'), 'exit', 'Exit Kinship Atlas');
   setButtonContent(elements.clear, 'restart', 'Start Again');
   document.querySelector('#defaultsPickGedcom').addEventListener('click', async () => {

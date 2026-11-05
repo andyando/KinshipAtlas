@@ -211,6 +211,8 @@ button { color: inherit; }
 .welcome-state h2 { margin: 10px 0 6px; color: var(--ink); font-family: Baskerville, "Palatino Linotype", Georgia, serif; font-size: 30px; font-weight: 500; }
 .welcome-state p { max-width: 340px; margin: 0 0 18px; color: #74847d; font-size: 13px; line-height: 1.6; }
 .welcome-button { cursor: pointer; }
+.tree-welcome .welcome-home-map { margin-top: 16px; }
+.tree-welcome .welcome-note { max-width: 520px; font-size: 13px; line-height: 1.5; }
 .welcome-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
 .welcome-or { color: var(--muted, #5f736d); font-size: 0.9625rem; }
 .dialog-error { margin: 0 0 12px; padding: 8px 10px; border-radius: 6px; background: #fdecea; color: #8a1c12; font-size: 0.9125rem; }
@@ -275,6 +277,8 @@ button { color: inherit; }
 .media-show-more:hover { color: var(--green); }
 .media-show-more:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .media-image-item { min-width: 0; position: relative; }
+.media-image-item.is-just-added, .media-file-item.is-just-added { border-radius: 6px; animation: media-just-added 2.4s ease-out; }
+@keyframes media-just-added { 0%, 60% { box-shadow: 0 0 0 3px var(--green); } 100% { box-shadow: 0 0 0 3px transparent; } }
 .media-image-link { display: block; overflow: hidden; border: 1px solid #dce6df; border-radius: 3px; background: #f5f8f5; }
 .media-image-link img { width: 100%; aspect-ratio: 4 / 3; display: block; object-fit: cover; }
 .media-primary-button { width: 25px; height: 25px; position: absolute; right: 5px; bottom: 5px; display: grid; place-items: center; padding: 0; border: 1px solid #d7dfd9; border-radius: 3px; color: #536e65; background: rgba(255,255,255,.95); box-shadow: 0 1px 3px rgba(23,53,47,.16); cursor: pointer; font-size: 16px; line-height: 1; }
@@ -362,6 +366,37 @@ button { color: inherit; }
 .research-consent { display: flex; align-items: flex-start; gap: 8px; margin-top: 13px; color: #42584f; font-size: 11px; line-height: 1.45; }
 .research-consent input { flex: 0 0 auto; margin: 1px 0 0; accent-color: var(--green); }
 .new-gedcom-panel { width: auto; }
+.birth-country-dialog { width: min(760px, calc(100vw - 28px)); }
+.birth-country-search { min-height: 36px; display: flex; align-items: center; gap: 8px; margin: 0 0 10px; padding: 0 10px; color: var(--muted); background: #f6f8f6; border: 1px solid var(--line); border-radius: 5px; }
+.birth-country-search:focus-within { border-color: #7ab3a4; box-shadow: 0 0 0 3px rgba(47,120,106,.1); }
+.birth-country-search input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--ink); background: transparent; font-size: 12px; }
+.birth-country-list { max-height: min(52vh, 480px); display: grid; align-content: start; gap: 6px; overflow-y: auto; padding-right: 2px; }
+.birth-country-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid #e3ebe6; border-radius: 4px; background: #f8faf8; }
+.birth-country-row.is-edited { border-color: #c58f34; background: #fffaf0; }
+.birth-country-person { min-width: 0; display: grid; gap: 2px; }
+.birth-country-name { min-width: 0; padding: 0; overflow: hidden; border: 0; color: var(--ink); background: none; cursor: pointer; font-size: 13px; font-weight: 700; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.birth-country-name:hover, .birth-country-name:focus-visible { color: var(--green); text-decoration: underline; }
+.birth-country-years { color: #82918a; font-size: 11px; }
+.birth-country-field { min-width: 0; display: grid; gap: 3px; }
+.birth-country-field input { width: 100%; min-width: 0; height: 32px; padding: 0 8px; border: 1px solid #d5e0d9; border-radius: 4px; color: #344b42; background: #fff; font-size: 12px; }
+.birth-country-field input:focus { outline: 2px solid rgba(47,120,106,.22); border-color: #7eaa94; }
+.birth-country-hint { color: #a3683a; font-size: 10px; font-weight: 700; }
+.birth-country-hint.is-found { color: var(--green); }
+.birth-country-empty { padding: 18px; color: #83958c; font-size: 12px; font-style: italic; text-align: center; }
+.birth-country-pending { margin-right: auto; align-self: center; color: #2f786a; font-size: 11px; font-weight: 700; }
+.birth-country-suggestions { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 2px; }
+.birth-country-suggestions[hidden] { display: none; }
+.birth-country-suggest-note { color: #687a72; font-size: 10px; font-weight: 700; }
+.birth-country-accept { min-height: 24px; padding: 0 8px; border: 1px solid #9cc2b2; border-radius: 12px; color: #245f54; background: #fff; cursor: pointer; font-size: 10px; font-weight: 700; }
+.birth-country-accept:hover, .birth-country-accept:focus-visible { border-color: #2f786a; background: #ebf5ef; }
+.birth-country-accept.is-accepted { border-color: #2f786a; color: #fff; background: #2f786a; }
+.geonames-panel { margin: 0 0 10px; padding: 8px 10px; border: 1px solid #e3ebe6; border-radius: 4px; background: #fbfcfb; }
+.geonames-panel summary { color: #245f54; cursor: pointer; font-size: 12px; font-weight: 700; }
+.geonames-note { margin: 8px 0; color: #687a72; font-size: 11px; line-height: 1.5; }
+.geonames-controls { display: flex; align-items: flex-end; gap: 8px; }
+.geonames-controls .new-gedcom-field { flex: 1; }
+.geonames-status { min-height: 14px; margin: 6px 0 0; color: #42584f; font-size: 11px; line-height: 1.45; }
+@media (max-width: 560px) { .birth-country-row { grid-template-columns: 1fr; } }
 .new-gedcom-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .new-gedcom-field { min-width: 0; display: grid; gap: 5px; color: #60756b; font-size: 11px; font-weight: 700; }
 .new-gedcom-field[hidden] { display: none; }
