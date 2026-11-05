@@ -9,6 +9,7 @@
   <link rel="alternate icon" type="image/x-icon" href="launcher/kinship-atlas.ico">
   <link rel="stylesheet" href="styles.css">
   <script src="primary-data.js" defer></script>
+  <script src="version.js" defer></script>
   <script src="data/world-data.js" defer></script>
   <script src="map.js" defer></script>
   <script src="app.js" defer></script>
@@ -54,6 +55,15 @@
           <button id="defaultsButton" class="menu-item" type="button" role="menuitem" title="Choose the GEDCOM file and media folder that open automatically">Update defaults</button>
           <button id="clearButton" class="menu-item" type="button" role="menuitem" disabled>Start Again</button>
           <button id="exitButton" class="menu-item" type="button" role="menuitem">Exit Kinship Atlas</button>
+        </div>
+      </div>
+      <div class="settings-menu" id="helpMenu">
+        <button id="helpButton" class="button button-quiet" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="helpPanel">
+          <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 0 1 5 .8c0 1.8-2.5 2.2-2.5 4"/><path d="M12 17.2v.3"/></svg>
+          Help <span class="menu-caret" aria-hidden="true">▾</span>
+        </button>
+        <div id="helpPanel" class="settings-panel" role="menu" hidden>
+          <button id="aboutMenuButton" class="menu-item" type="button" role="menuitem">About Kinship Atlas</button>
         </div>
       </div>
     </div>
@@ -203,6 +213,18 @@
       <div class="dialog-actions">
         <button id="confirmGedcomImport" class="dialog-button dialog-button-primary" type="button">Import</button>
         <button id="cancelGedcomImport" class="dialog-button dialog-button-quiet" type="button" data-close-dialog="importGedcomDialog">Cancel</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="aboutDialog" class="app-dialog about-dialog" aria-labelledby="aboutTitle">
+    <section class="dialog-panel">
+      <h2 id="aboutTitle">About Kinship Atlas</h2>
+      <p id="aboutVersion" class="about-version"></p>
+      <p>A local family archive for exploring GEDCOM relationships, places, and media. Your tree and media stay on this device.</p>
+      <h3 class="about-history-title">Version history</h3>
+      <div id="aboutHistory" class="about-history"></div>
+      <div class="dialog-actions">
+        <button class="dialog-button dialog-button-primary" type="button" data-close-dialog="aboutDialog">Close</button>
       </div>
     </section>
   </dialog>

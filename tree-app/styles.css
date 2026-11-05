@@ -367,6 +367,15 @@ button { color: inherit; }
 .research-consent input { flex: 0 0 auto; margin: 1px 0 0; accent-color: var(--green); }
 .new-gedcom-panel { width: auto; }
 .birth-country-dialog { width: min(760px, calc(100vw - 28px)); }
+.about-dialog { width: min(620px, calc(100vw - 28px)); }
+.about-version { margin-top: 4px; color: var(--green); font-weight: 700; }
+.about-history-title { margin: 16px 0 6px; font-size: 14px; }
+.about-history { max-height: 46vh; overflow: auto; padding-right: 4px; }
+.about-history[hidden], .about-history-title[hidden] { display: none; }
+.about-release + .about-release { margin-top: 12px; padding-top: 10px; border-top: 1px solid #e1e9e4; }
+.about-release h4 { margin: 0 0 4px; font-size: 13px; }
+.about-release-date { margin-left: 6px; color: #5f7a6e; font-weight: 400; }
+.about-release ul { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.45; }
 .birth-country-search { min-height: 36px; display: flex; align-items: center; gap: 8px; margin: 0 0 10px; padding: 0 10px; color: var(--muted); background: #f6f8f6; border: 1px solid var(--line); border-radius: 5px; }
 .birth-country-search:focus-within { border-color: #7ab3a4; box-shadow: 0 0 0 3px rgba(47,120,106,.1); }
 .birth-country-search input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--ink); background: transparent; font-size: 12px; }

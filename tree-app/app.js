@@ -3395,7 +3395,8 @@
     targetClear: '<circle cx="12" cy="12" r="9"/><path d="M8.5 8.5l7 7M15.5 8.5l-7 7"/>',
     print: '<path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v7H6z"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
-    trash: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M9 7V4h6v3"/>'
+    trash: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M9 7V4h6v3"/>',
+    info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 7.5v.5"/>'
   };
 
   function setButtonContent(button, icon, text) {
@@ -7036,12 +7037,61 @@
     renderDetails();
   }
 
-  const settingsMenu = document.querySelector('#settingsMenu');
-  const settingsPanel = document.querySelector('#settingsPanel');
-  const settingsButton = document.querySelector('#settingsButton');
+  const topMenus = [
+    { menu: document.querySelector('#settingsMenu'), panel: document.querySelector('#settingsPanel'), button: document.querySelector('#settingsButton') },
+    { menu: document.querySelector('#helpMenu'), panel: document.querySelector('#helpPanel'), button: document.querySelector('#helpButton') }
+  ];
+  function setMenuOpen(target, open) {
+    for (const item of topMenus) {
+      const isOpen = item === target && open;
+      item.panel.hidden = !isOpen;
+      item.button.setAttribute('aria-expanded', String(isOpen));
+    }
+  }
   function setSettingsOpen(open) {
-    settingsPanel.hidden = !open;
-    settingsButton.setAttribute('aria-expanded', String(open));
+    setMenuOpen(topMenus[0], open);
+  }
+
+  function currentAppVersion() {
+    const releases = window.KINSHIP_VERSION?.releases;
+    return Array.isArray(releases) && releases.length ? releases[0] : null;
+  }
+  function formatReleaseDate(value) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+    if (!match) return String(value || '');
+    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+      .toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+  }
+  function openAboutDialog() {
+    const current = currentAppVersion();
+    document.querySelector('#aboutVersion').textContent = current
+      ? `Version ${current.version}${current.date ? ` · released ${formatReleaseDate(current.date)}` : ''}`
+      : 'Version information is unavailable (version.js was not found next to the app).';
+    const history = document.querySelector('#aboutHistory');
+    history.replaceChildren();
+    for (const release of current ? window.KINSHIP_VERSION.releases : []) {
+      const section = document.createElement('section');
+      section.className = 'about-release';
+      const heading = document.createElement('h4');
+      heading.textContent = `Version ${release.version}`;
+      if (release.date) {
+        const date = document.createElement('span');
+        date.className = 'about-release-date';
+        date.textContent = formatReleaseDate(release.date);
+        heading.append(' ', date);
+      }
+      const list = document.createElement('ul');
+      for (const change of release.changes || []) {
+        const item = document.createElement('li');
+        item.textContent = change;
+        list.append(item);
+      }
+      section.append(heading, list);
+      history.append(section);
+    }
+    history.hidden = !current;
+    document.querySelector('.about-history-title').hidden = !current;
+    document.querySelector('#aboutDialog').showModal();
   }
   function showExitScreen() {
     const main = document.createElement('main');
@@ -7080,12 +7130,18 @@
     window.close();
     window.setTimeout(showExitScreen, 250);
   }
-  settingsButton.addEventListener('click', () => setSettingsOpen(settingsPanel.hidden));
-  settingsPanel.addEventListener('click', () => window.setTimeout(() => setSettingsOpen(false), 0));
-  document.addEventListener('click', (event) => { if (!settingsMenu.contains(event.target)) setSettingsOpen(false); });
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !settingsPanel.hidden) { setSettingsOpen(false); settingsButton.focus(); }
+  for (const item of topMenus) {
+    item.button.addEventListener('click', () => setMenuOpen(item, item.panel.hidden));
+    item.panel.addEventListener('click', () => window.setTimeout(() => setMenuOpen(item, false), 0));
+  }
+  document.addEventListener('click', (event) => {
+    if (!topMenus.some((item) => item.menu.contains(event.target))) setMenuOpen(null, false);
   });
+  document.addEventListener('keydown', (event) => {
+    const open = topMenus.find((item) => !item.panel.hidden);
+    if (event.key === 'Escape' && open) { setMenuOpen(open, false); open.button.focus(); }
+  });
+  document.querySelector('#aboutMenuButton').addEventListener('click', openAboutDialog);
 
   document.querySelector('#defaultsButton').addEventListener('click', openDefaultsDialog);
 
@@ -7205,6 +7261,7 @@
   setButtonContent(document.querySelector('#mediaLibraryMenuButton'), 'media', 'Media library');
   setButtonContent(document.querySelector('#birthCountryMenuButton'), 'map', 'People without a birth country');
   setButtonContent(document.querySelector('#exitButton'), 'exit', 'Exit Kinship Atlas');
+  setButtonContent(document.querySelector('#aboutMenuButton'), 'info', 'About Kinship Atlas');
   setButtonContent(elements.clear, 'restart', 'Start Again');
   document.querySelector('#defaultsPickGedcom').addEventListener('click', async () => {
     if (typeof window.showOpenFilePicker !== 'function') {
