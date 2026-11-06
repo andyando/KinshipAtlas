@@ -2234,9 +2234,10 @@
   }
 
   function renderRoster() {
-    const query = normalizeDirectoryName(state.searchText.trim());
+    const searchTerms = normalizeDirectoryName(state.searchText.trim()).split(/\s+/).filter(Boolean);
     const matches = [...state.people.values()].filter((person) => {
-      if (query && !normalizeDirectoryName(person.name).includes(query)) return false;
+      const name = normalizeDirectoryName(person.name);
+      if (!searchTerms.every((term) => name.includes(term))) return false;
       if (state.surnameFilter.size && !state.surnameFilter.has(normalizeDirectoryName(person.surname || 'Unknown surname'))) return false;
       if (!matchesOccupationType(person, state.directoryFilters.occupationType)) return false;
       for (const [eventType, countryFilter, minFilter, maxFilter] of [
@@ -2280,7 +2281,7 @@
     for (const [surnameKey, { surname, people }] of groups) {
       const group = document.createElement('section');
       group.className = 'surname-group';
-      const expanded = state.expandedSurnames.has(surnameKey) || Boolean(query);
+      const expanded = state.expandedSurnames.has(surnameKey) || searchTerms.length > 0;
       const header = document.createElement('div');
       header.className = 'surname-group-header';
       const check = document.createElement('input');

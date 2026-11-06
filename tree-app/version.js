@@ -7,6 +7,20 @@
 window.KINSHIP_VERSION = {
   releases: [
     {
+      version: '1.11.2',
+      date: '2026-11-06',
+      changes: [
+        'Fixed a Directory rendering error introduced by the middle-name search change that prevented trees from opening.'
+      ]
+    },
+    {
+      version: '1.11.1',
+      date: '2026-11-06',
+      changes: [
+        'Directory searches now match first and last names even when recorded middle names are omitted.'
+      ]
+    },
+    {
       version: '1.11.0',
       date: '2026-11-06',
       changes: [
