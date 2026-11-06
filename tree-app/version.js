@@ -7,6 +7,13 @@
 window.KINSHIP_VERSION = {
   releases: [
     {
+      version: '1.7.2',
+      date: '2026-11-06',
+      changes: [
+        'Replaced thirteen PNG country flags with Wikimedia Commons SVGs and documented their source and license terms.'
+      ]
+    },
+    {
       version: '1.7.1',
       date: '2026-11-06',
       changes: [

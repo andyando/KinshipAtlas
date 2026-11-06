@@ -34,15 +34,16 @@
     ['croatia', 'HR', 'Croatia'], ['slovakia', 'SK', 'Slovakia'], ['slovenia', 'SI', 'Slovenia'],
     ['turkiye', 'TR', 'Turkiye'], ['turkey', 'TR', 'Turkey'],
     ['australie', 'AU', 'Australia'], ['new zeland', 'NZ', 'New Zealand'], ['scotlamd', 'gb-sct', 'Scotland'],
-    // PNG flags below were sourced from flagcolorcodes.com; the optional fourth value is the file extension.
-    ['papua new guinea', 'PG', 'Papua New Guinea', 'png'], ['cuba', 'CU', 'Cuba', 'png'],
-    ['jamaica', 'JM', 'Jamaica', 'png'], ['sudan', 'SD', 'Sudan', 'png'], ['armenia', 'AM', 'Armenia', 'png'],
-    ['samoa', 'WS', 'Samoa', 'png'], ['puerto rico', 'PR', 'Puerto Rico', 'png'],
-    ['palestine', 'PS', 'Palestine', 'png'], ['palistine', 'PS', 'Palestine', 'png'],
-    ['tonga', 'TO', 'Tonga', 'png'], ['bolivia', 'BO', 'Bolivia', 'png'], ['bermuda', 'BM', 'Bermuda', 'png'],
-    ['latvia', 'LV', 'Latvia', 'png'],
+    ['papua new guinea', 'PG', 'Papua New Guinea', 'Flag_of_Papua_New_Guinea.svg'], ['cuba', 'CU', 'Cuba', 'Flag_of_Cuba.svg'],
+    ['jamaica', 'JM', 'Jamaica', 'Flag_of_Jamaica.svg'], ['sudan', 'SD', 'Sudan', 'Flag_of_Sudan.svg'],
+    ['armenia', 'AM', 'Armenia', 'Flag_of_Armenia.svg'], ['samoa', 'WS', 'Samoa', 'Flag_of_Samoa.svg'],
+    ['puerto rico', 'PR', 'Puerto Rico', 'Flag_of_Puerto_Rico.svg'],
+    ['palestine', 'PS', 'Palestine', 'Flag_of_Palestine.svg'], ['palistine', 'PS', 'Palestine', 'Flag_of_Palestine.svg'],
+    ['tonga', 'TO', 'Tonga', 'Flag_of_Tonga.svg'], ['bolivia', 'BO', 'Bolivia', 'Flag_of_Bolivia.svg'],
+    ['bermuda', 'BM', 'Bermuda', 'Flag_of_Bermuda.svg'], ['latvia', 'LV', 'Latvia', 'Flag_of_Latvia.svg'],
     // Listed after 'germany' so places naming both keep the German flag (equal-length ties keep array order).
-    ['prussia', 'de-prussia', 'Prussia', 'png'], ['preussen', 'de-prussia', 'Prussia', 'png']
+    ['prussia', 'de-prussia', 'Prussia', 'Flag_of_Prussia_(1918–1933).svg'],
+    ['preussen', 'de-prussia', 'Prussia', 'Flag_of_Prussia_(1918–1933).svg']
   ].sort((a, b) => b[0].length - a[0].length);
   const state = {
     mapMode: false, mapStats: null, directoryMatches: [], reportsMode: false, mediaLibraryMode: false,
@@ -844,8 +845,8 @@
     const normalized = ` ${String(place || '').toLocaleLowerCase().replace(/\u00df/g, 'ss').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim()} `;
     const match = countryFlagAliases.find(([alias]) => normalized.includes(` ${alias} `));
     if (!match) return null;
-    const [, code, country, extension = 'svg'] = match;
-    return { code: code.toLocaleLowerCase(), country, file: `${code.toLocaleLowerCase()}.${extension}` };
+    const [, code, country, file = `${code.toLocaleLowerCase()}.svg`] = match;
+    return { code: code.toLocaleLowerCase(), country, file };
   }
 
   function initials(name) {

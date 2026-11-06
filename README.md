@@ -93,7 +93,7 @@ Versions are recorded in [tree-app/version.js](tree-app/version.js) as `MAJOR.MI
 
 The Help guides are written into `tree-app/index.html` as `#helpDialog` articles; when a feature changes, update its guide too. After editing `tree-app/launcher/KinshipAtlas.cs`, rebuild `Kinship Atlas.exe` with `tree-app/launcher/build-launcher.ps1`, which uses the C# compiler included with Windows.
 
-Country flags use locally stored SVGs from [flag-icons](https://github.com/lipis/flag-icons), released under the MIT license included in `tree-app/flags/LICENSE`.
+Third-party assets and data sources, including the Wikimedia Commons flag licenses and required GeoNames attribution, are documented in [Third-party notices](tree-app/THIRD-PARTY-NOTICES.md).
 
 ## Research workspace
 
