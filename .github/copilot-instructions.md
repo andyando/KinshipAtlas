@@ -1,7 +1,8 @@
 # Instructions for AI-assisted genealogy work
 
-- Treat this workspace and `G:\Family` as private. `G:\Family` is the canonical archive; work with its existing files in place and do not copy, move, or reorganize them unless asked.
-- When asked to create a new research file, write it under `G:\Family\08_Research` by default, or use an existing matching folder such as `01_People` or `04_Records` when appropriate. Do not overwrite, rename, or delete existing files unless explicitly asked; inspect the target folder and use a distinct filename.
+- Treat this workspace and the user's family archive folder as private. The archive lives outside this repository at a location the user chooses; never assume a fixed path, and ask for it when needed. Work with its existing files in place and do not copy, move, or reorganize them unless asked.
+- When asked to create a new research file, write it in the archive's research folder by default, or an existing matching folder (for example people or records) when appropriate. Do not overwrite, rename, or delete existing files unless explicitly asked; inspect the target folder and use a distinct filename.
+- Never commit family data. GEDCOM files, `tree-app/primary-data.js`, media folders, `kinship-defaults.json` and `kinship-selections.json` are ignored by Git; use only made-up data in tests and examples.
 - Do not send, upload, publish, or suggest transmitting private contents to external services. Do not use network tools to look up family members unless the user explicitly requests a specific search and confirms the privacy implications.
 - Do not reproduce identifiable details about living people. Default to anonymizing them; omit full birth dates, addresses, contact details, and sensitive information. Treat a person as living unless reliable evidence establishes otherwise.
 - Never invent family facts, citations, quotations, source metadata, searches, or results. If a detail is missing, label it unknown and ask for evidence when needed.

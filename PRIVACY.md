@@ -12,13 +12,13 @@ Genealogy can expose sensitive information about people who are alive, including
 
 ## Storage and sharing
 
-- The canonical archive is `G:\Family`, outside this project workspace. Work there in place; do not copy, move, or reorganize existing archive files unless explicitly asked.
+- Keep your family archive (records, scans, photos, DNA results and research notes) in a folder of your choice outside this repository. Work there in place; do not copy, move, or reorganize existing archive files unless explicitly asked.
 - Kinship Atlas caches the active GEDCOM text, unsaved state, and supported media-folder handle in the browser tab's IndexedDB to restore across refresh/navigation. The top-level **Clear** action deletes this active session record. This local browser storage is not encrypted by the app and is separate from the GEDCOM file and archive.
-- Save new research notes and reports to `G:\Family\08_Research` by default. Use the existing `01_People`, `04_Records`, `05_Photos`, `06_DNA`, or other matching archive folders only when the requested output belongs there.
+- Save new research notes and reports in the archive's research folder by default, or in another matching archive folder (for example people, records, photos or DNA) when the output belongs there.
 - Do not overwrite or rename an existing archive file unless explicitly asked. Check the target folder and choose a distinct filename for new work.
-- Keep any temporary working files under this workspace's `private/`; that directory is excluded from this workspace's Git by default. Completed work should normally be saved in the canonical archive.
-- Do not commit private records, scans, GEDCOM files, exports, or notes. Inspect `git status` and review every staged file before any commit.
-- Git ignore applies only within this workspace; it does not cover `G:\Family`, provide encryption or access control, or protect against cloud synchronization, backups, malware, or accidental sharing. Use encrypted storage and review sync, backup, and device-sharing settings for both locations.
+- Keep any temporary working files under this repository's `private/`; that directory is excluded from Git by default. Completed work should normally be saved in the archive.
+- Do not commit private records, scans, GEDCOM files, exports, or notes. Kinship Atlas's local files (`primary-data.js`, `Primary Media Library`, `*_media` folders, `kinship-defaults.json` and `kinship-selections.json`) contain names or family data and are ignored by Git. Inspect `git status` and review every staged file before any commit.
+- Git ignore applies only within this repository; it does not cover your archive folder, provide encryption or access control, or protect against cloud synchronization, backups, malware, or accidental sharing. Use encrypted storage and review sync, backup, and device-sharing settings for both locations.
 - Before using an external website, AI service, or shared drive, check its privacy terms and whether you have permission to disclose the material. Prefer anonymized excerpts and omit unnecessary identifiers.
 - Kinship Atlas's WikiTree search is an explicit external-sharing step: it is available only for people with recorded death details, previews the name, years, and countries that will be sent, and requires consent. The search is sent to WikiTree. Review those details before continuing.
 - Remove identifying metadata from files intended for sharing and inspect the final export, not just the source document.

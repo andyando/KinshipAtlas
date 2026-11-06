@@ -1606,7 +1606,7 @@
     try { saved = localStorage.getItem(storageKey) || ''; } catch { }
     if (!folderPath && !forcePrompt) folderPath = saved;
     if (!folderPath) {
-      const entered = window.prompt(`The full location of "${folderName}" isn't recorded in this GEDCOM and browsers can't read it. Enter the folder path once (for example G:\\Family\\${folderName}); it is remembered. Shift+click the folder button to change it.`, saved);
+      const entered = window.prompt(`The full location of "${folderName}" isn't recorded in this GEDCOM and browsers can't read it. Enter the folder path once (for example D:\\Family History\\${folderName}); it is remembered. Shift+click the folder button to change it.`, saved);
       if (!entered || !entered.trim()) return;
       folderPath = entered.trim().replace(/^["']|["']$/g, '');
       try { localStorage.setItem(storageKey, folderPath); } catch { }

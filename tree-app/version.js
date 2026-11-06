@@ -7,6 +7,13 @@
 window.KINSHIP_VERSION = {
   releases: [
     {
+      version: '1.7.1',
+      date: '2026-11-06',
+      changes: [
+        'The example folder path shown when asking for a media folder\'s location is now a general example rather than a specific drive.'
+      ]
+    },
+    {
       version: '1.7.0',
       date: '2026-11-06',
       changes: [
