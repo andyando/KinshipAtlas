@@ -25,7 +25,7 @@
       <button id="reportsButton" class="button button-quiet" type="button" aria-pressed="false" disabled>Reports</button>
       <button id="mediaLibraryButton" class="button button-quiet media-library-nav-button" type="button" aria-pressed="false" disabled>Media</button>
     </div>
-    <div class="topbar-meta"><span class="privacy-indicator"><span class="privacy-dot"></span> ON THIS DEVICE</span><span class="topbar-divider"></span><span id="treeLabel">No tree loaded</span></div>
+    <div class="topbar-meta"><span class="privacy-indicator"><span class="privacy-dot"></span> ON THIS DEVICE</span><span class="topbar-divider"></span><button id="treeLabel" class="tree-label-button" type="button" title="Update defaults: choose the GEDCOM file and media folder that open automatically" disabled>No tree loaded</button></div>
     <div class="topbar-actions">
       <div id="primaryPersonBar" class="primary-person-bar" hidden>
         <button id="primaryHomeButton" class="button button-quiet primary-home-button" type="button" title="Show the home person in Relationship View">
@@ -63,6 +63,14 @@
           Help <span class="menu-caret" aria-hidden="true">▾</span>
         </button>
         <div id="helpPanel" class="settings-panel" role="menu" hidden>
+          <button class="menu-item" type="button" role="menuitem" data-help-topic="getting-started">Getting started</button>
+          <button class="menu-item" type="button" role="menuitem" data-help-topic="gedcom">Opening &amp; importing GEDCOM files</button>
+          <button class="menu-item" type="button" role="menuitem" data-help-topic="exploring">Exploring the family tree</button>
+          <button class="menu-item" type="button" role="menuitem" data-help-topic="editing">Editing people &amp; saving</button>
+          <button class="menu-item" type="button" role="menuitem" data-help-topic="media">Photos, documents &amp; media</button>
+          <button class="menu-item" type="button" role="menuitem" data-help-topic="maps-reports">Map View, Reports &amp; data checks</button>
+          <button class="menu-item" type="button" role="menuitem" data-help-topic="defaults">Defaults &amp; home person</button>
+          <hr class="menu-divider">
           <button id="aboutMenuButton" class="menu-item" type="button" role="menuitem">About Kinship Atlas</button>
         </div>
       </div>
@@ -120,7 +128,7 @@
           </button>
           <div class="relationship-options">
             <label class="siblings-toggle">
-              <input id="showSiblingsInput" type="checkbox" role="switch" disabled>
+              <input id="showSiblingsInput" type="checkbox" role="switch" checked disabled>
               <span>Show siblings</span>
               <span class="siblings-toggle-state" aria-hidden="true"></span>
             </label>
@@ -199,7 +207,7 @@
   </section>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <div id="printFooter" class="print-footer" aria-hidden="true"></div>
-  <dialog id="importGedcomDialog" class="app-dialog" aria-labelledby="importGedcomTitle">
+  <dialog id="importGedcomDialog" class="app-dialog import-dialog" aria-labelledby="importGedcomTitle">
     <section class="dialog-panel">
       <h2 id="importGedcomTitle">Import new GEDCOM records</h2>
       <p id="importGedcomFile" class="media-delete-name"></p>
@@ -208,6 +216,13 @@
       <div id="importGedcomPeopleSection" hidden>
         <h3 class="import-people-heading">People to add</h3>
         <ul id="importGedcomPeople" class="import-people"></ul>
+      </div>
+      <div id="importGedcomMergeSection" class="import-merge-section" hidden>
+        <h3 class="import-people-heading">Merge extra details into matching people (optional)</h3>
+        <p class="dialog-hint">These people are already in your tree (same first name, last name and birth date), and the file has details for them that your tree does not. Tick each person whose details you want to add. Nothing already in your tree is changed or removed; where the file differs, your tree's value is kept.</p>
+        <label class="import-merge-all"><input id="importGedcomMergeAll" type="checkbox"> Select all</label>
+        <ul id="importGedcomMerges" class="import-merges"></ul>
+        <p id="importGedcomMergeTotal" class="import-merge-total" aria-live="polite"></p>
       </div>
       <p id="importGedcomHint" class="dialog-hint">People are matched on first name, last name and birth date. Imported people keep their life events and their relationships to each other and to matching people in this tree. Importing saves the added people to your GEDCOM file.</p>
       <div class="dialog-actions">
@@ -225,6 +240,185 @@
       <div id="aboutHistory" class="about-history"></div>
       <div class="dialog-actions">
         <button class="dialog-button dialog-button-primary" type="button" data-close-dialog="aboutDialog">Close</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="helpDialog" class="app-dialog help-dialog" aria-labelledby="helpTitle">
+    <section class="dialog-panel help-dialog-panel">
+      <h2 id="helpTitle">Kinship Atlas help</h2>
+      <div class="help-layout">
+        <nav class="help-nav" aria-label="Help topics">
+          <button type="button" data-help-nav="getting-started">Getting started</button>
+          <button type="button" data-help-nav="gedcom">Opening &amp; importing GEDCOM files</button>
+          <button type="button" data-help-nav="exploring">Exploring the family tree</button>
+          <button type="button" data-help-nav="editing">Editing people &amp; saving</button>
+          <button type="button" data-help-nav="media">Photos, documents &amp; media</button>
+          <button type="button" data-help-nav="maps-reports">Map View, Reports &amp; data checks</button>
+          <button type="button" data-help-nav="defaults">Defaults &amp; home person</button>
+        </nav>
+        <div id="helpBody" class="help-body" tabindex="-1">
+          <article class="help-article" data-help-article="getting-started" hidden>
+            <h3>Getting started</h3>
+            <p>Kinship Atlas shows a family tree from a GEDCOM file as an interactive relationship map, with each person's life events, places and media. Everything happens on this device: your file is read locally and is not uploaded.</p>
+            <h4>First steps</h4>
+            <ol>
+              <li><strong>Open a tree.</strong> On the welcome page, choose <strong>Open GEDCOM</strong> and pick a <code>.ged</code> file exported from your family tree program. To start from scratch, choose <strong>Create new GEDCOM</strong> and enter the first person.</li>
+              <li><strong>Link your media (optional).</strong> After a tree opens you are asked for a media folder so photos and documents referenced in the GEDCOM can be shown. You can skip this and do it later from <strong>Settings &gt; Select Media Folder</strong>.</li>
+              <li><strong>Choose a person.</strong> Use the directory on the left, or press <kbd>/</kbd> to jump to the <strong>Find a person</strong> search box.</li>
+              <li><strong>Explore.</strong> Click any card in the relationship map to recentre on that person. Their record appears on the right.</li>
+              <li><strong>Make it yours.</strong> Use <strong>Set as primary person</strong> in a record to add a <strong>Home Person</strong> button, and <strong>Settings &gt; Update defaults</strong> to open your tree automatically next time.</li>
+            </ol>
+            <h4>Finding your way around</h4>
+            <ul>
+              <li><strong>Top bar:</strong> <strong>Map View</strong>, <strong>Reports</strong> and <strong>Media</strong> switch views. The name of the open GEDCOM file is shown in the middle; click it to change your defaults. The <strong>Saved</strong> / <strong>Save to GEDCOM</strong> indicator shows whether your edits are in the file.</li>
+              <li><strong>Left:</strong> the directory of everyone in the tree, with search and filters.</li>
+              <li><strong>Centre:</strong> the relationship map for the selected person.</li>
+              <li><strong>Right:</strong> the person record, with actions for editing, printing and media.</li>
+            </ul>
+            <h4>Privacy</h4>
+            <p>Nothing leaves this device unless you choose a feature that says so and tick its consent box: <strong>Search WikiTree</strong> (in a person record) and <strong>Suggest countries with GeoNames</strong> (in the birth country list). Each one shows exactly what it will send first.</p>
+          </article>
+          <article class="help-article" data-help-article="gedcom" hidden>
+            <h3>Opening &amp; importing GEDCOM files</h3>
+            <p>A GEDCOM (<code>.ged</code>) file is the standard text format that family tree programs, such as RootsMagic, use to export a tree. Kinship Atlas opens files up to 100&nbsp;MB.</p>
+            <h4>Open a GEDCOM</h4>
+            <ol>
+              <li>Choose <strong>Open GEDCOM</strong> on the welcome page or in the <strong>Settings</strong> menu.</li>
+              <li>Select the file. The directory fills with everyone in the tree and the first person is shown.</li>
+              <li>When asked, link a media folder, or cancel and do it later.</li>
+            </ol>
+            <p>In browsers with local file access (such as Edge or Chrome), the app keeps permission to write back to the file you opened, so your edits can be saved into it. Otherwise, saving asks where to save, or downloads a copy.</p>
+            <h4>Open a different tree</h4>
+            <p><strong>Open GEDCOM</strong> is removed from the menu while a tree is open. Choose <strong>Settings &gt; Start Again</strong> to close the current tree, then open the other file. Start Again does not delete any GEDCOM or media files, but <strong>any changes that are not yet saved are discarded</strong>, so check that the top bar says <strong>Saved</strong> first.</p>
+            <h4>Create a new GEDCOM</h4>
+            <p>On the welcome page, choose <strong>Create new GEDCOM</strong>, enter a file name and the first person (birth details are optional), then choose <strong>Create</strong>. The new tree opens straight away.</p>
+            <h4>Import new people from another GEDCOM</h4>
+            <p>Use this to add relatives from someone else's export, or from another program, without starting again.</p>
+            <ol>
+              <li>With your tree open, choose <strong>Settings &gt; Import new GEDCOM records</strong> and select the other file.</li>
+              <li>Nothing changes yet. A preview shows how many people in the file are:
+                <ul>
+                  <li><strong>new and related to this tree</strong>: these will be added;</li>
+                  <li><strong>already in this tree</strong>: same first name, last name and birth date;</li>
+                  <li><strong>already in this tree, with extra details that can be merged</strong>: see below;</li>
+                  <li><strong>new but not related to this tree</strong>: not imported;</li>
+                  <li><strong>without a birth date</strong>: not imported, because they cannot be matched.</li>
+                </ul>
+              </li>
+              <li>Check the <strong>People to add</strong> list, then choose <strong>Import … &amp; save</strong>, or <strong>Cancel</strong> to leave your tree untouched.</li>
+            </ol>
+            <p>Imported people keep their life events and their relationships to each other and to the matching people in your tree. The additions are then saved to your GEDCOM file.</p>
+            <h4>Merge extra details into matching people (optional)</h4>
+            <p>If someone in the file matches a person in your tree but the file has more about them, such as extra life events, a birth place, sources, notes or media, the preview lists them under <strong>Merge extra details into matching people</strong>. Each entry shows the person in the file, the person in your tree it matches, and how many additional records would be added (life events and other details).</p>
+            <ol>
+              <li>Choose <strong>Show what will be added</strong> on an entry to see each record. Any value that is different in the file, such as another death date, is listed as kept from your tree.</li>
+              <li>Tick each person to merge, or tick <strong>Select all</strong>. Nobody is ticked to start with, and unticked people are not changed.</li>
+              <li>Choose <strong>… merge … &amp; save</strong>. If the file only has extra details, and nobody new, the button reads <strong>Merge … &amp; save</strong>.</li>
+            </ol>
+            <p>Merging only adds what your tree is missing. It never changes or removes anything already in your tree; where the file differs, your tree's value is kept. Family links in the file are not merged this way. Life events, sources and media that already exist in your tree are recognised and are not added twice.</p>
+            <h4>How people are matched</h4>
+            <ul>
+              <li>A person in the import file counts as already in your tree when their first name, last name and birth date exactly match someone in it.</li>
+              <li>A new person is only imported if they are linked, directly or through other new people, to someone who matches exactly <em>one</em> person in your tree. If two people in your tree share a name and birth date, neither can be used as a link point, and extra details cannot be merged into them.</li>
+              <li>If nobody new is related and there is nothing to merge, the preview says <strong>No related people found</strong> or <strong>Nothing new to import</strong>, and nothing is changed.</li>
+            </ul>
+            <p class="help-note">A name-and-date match is not proof that two records are the same person. Review newly imported people, merged details and their links against your sources.</p>
+          </article>
+          <article class="help-article" data-help-article="exploring" hidden>
+            <h3>Exploring the family tree</h3>
+            <h4>The directory</h4>
+            <ul>
+              <li>Type in <strong>Find a person</strong> (shortcut <kbd>/</kbd>) to search by name.</li>
+              <li>Narrow the list with <strong>Birth country</strong>, <strong>Death country</strong> and <strong>Occupation Type</strong>, and the <strong>Birth year</strong> and <strong>Death year</strong> sliders. The filters combine with each other and with the search.</li>
+              <li>People are grouped by surname. Expand or collapse a surname to browse it, or tick <strong>Show only</strong> next to it to list just that family.</li>
+            </ul>
+            <h4>The relationship map</h4>
+            <ul>
+              <li>The selected person is shown with their partners, and above and below them are their recorded ancestors and descendants. Click any card to recentre the map on that person.</li>
+              <li><strong>Show siblings</strong> (on by default) adds the selected person's recorded siblings beside them.</li>
+              <li>Use <strong>←</strong> and <strong>→</strong> to step back and forward through the people you have viewed, <strong>−</strong> and <strong>+</strong> to zoom, and the printer button to print the map on A4.</li>
+              <li><strong>Home Person</strong> in the top bar returns to your primary person from any view.</li>
+            </ul>
+            <h4>The person record</h4>
+            <p>The panel on the right lists the person's recorded life events, relationships, source references and attached media. Click a relative's name to move to them. The map and record show what the GEDCOM says; they do not independently verify it.</p>
+          </article>
+          <article class="help-article" data-help-article="editing" hidden>
+            <h3>Editing people &amp; saving</h3>
+            <p>The buttons at the top of a person record let you change the tree:</p>
+            <ul>
+              <li><strong>Edit person details:</strong> name, sex, and birth and death dates and places.</li>
+              <li><strong>Add Life Event:</strong> record another event, such as a residence, marriage, occupation, military service, burial or an event of your own.</li>
+              <li><strong>Add relative:</strong> create a new person linked as a parent, child, sibling or partner. You are asked to confirm if the name matches someone already in the tree.</li>
+              <li><strong>✎ next to a relative:</strong> edit the relationship (for example, parent role or marriage details) or delete it.</li>
+              <li><strong>Set as primary person:</strong> adds the <strong>Home Person</strong> button and shows how others are related to this person.</li>
+              <li><strong>Print record:</strong> prints the record on A4, without attached media.</li>
+              <li><strong>Search WikiTree:</strong> shown for people with a recorded death. It sends the details listed in the dialog to WikiTree only after you tick the consent box.</li>
+              <li><strong>Delete person:</strong> removes the person and all links to them from the GEDCOM.</li>
+            </ul>
+            <h4>Dates</h4>
+            <p>Type dates in GEDCOM style, for example <code>12 MAR 1883</code> or <code>ABT 1883</code>, or use the calendar for an exact date.</p>
+            <h4>Saving</h4>
+            <ul>
+              <li>Edits are written back to your GEDCOM file automatically whenever the browser allows it. Records and tags you did not edit are preserved.</li>
+              <li>If the browser needs your permission, or a place to save, the top bar shows <strong>Save to GEDCOM</strong>. Click it to finish saving. It changes to <strong>Saved</strong> when the file is up to date.</li>
+              <li>Unsaved changes are kept in this browser tab, and you are warned before closing a tab that has them.</li>
+              <li>When <strong>Kinship Atlas.exe</strong> saves the GEDCOM in its Primary GEDCOM folder, the previous version is kept in <strong>Primary GEDCOM\Backups</strong>.</li>
+            </ul>
+          </article>
+          <article class="help-article" data-help-article="media" hidden>
+            <h3>Photos, documents &amp; media</h3>
+            <h4>Link a media folder</h4>
+            <ol>
+              <li>Choose <strong>Settings &gt; Select Media Folder</strong> (shown as <strong>Change media folder</strong> once one is linked).</li>
+              <li>Choose <strong>Link existing folder</strong>, or <strong>Create new media folder</strong> to make one named after your GEDCOM.</li>
+              <li>When the browser asks to let the site edit files, choose <strong>Allow</strong>. This is needed to add files to the folder, and the app only uses the folder you pick.</li>
+            </ol>
+            <p>Files referenced in the GEDCOM are matched to files in the folder, and a person's primary image appears on their card.</p>
+            <h4>Add or remove media for a person</h4>
+            <ul>
+              <li>In a person record, choose <strong>Add photo or PDF</strong>. The files are copied into the media folder (renamed if a file with the same name exists) and appear under <strong>Attached media</strong>.</li>
+              <li>The trash icon on a media item unlinks it from that person. The file itself stays in the folder.</li>
+            </ul>
+            <h4>The media library</h4>
+            <p>Choose <strong>Media</strong> in the top bar, or <strong>Settings &gt; Media library</strong>, to review every file referenced in the tree. Search by filename or person, filter by type, preview files, classify them, see who they are linked to, and choose card images. Files that are missing from the folder are listed but cannot be previewed until they are found. Deleting a file here removes it permanently, along with its GEDCOM links.</p>
+          </article>
+          <article class="help-article" data-help-article="maps-reports" hidden>
+            <h3>Map View, Reports &amp; data checks</h3>
+            <h4>Map View</h4>
+            <p><strong>Map View</strong> plots people on a world map using the places recorded in the tree. Click a pin to open that person. Choose <strong>Relationship View</strong> to return to the map of relationships.</p>
+            <h4>Reports</h4>
+            <p><strong>Reports</strong> summarises the tree, including the most popular occupations, media coverage, and how many people have a birth or death country recorded. The death country count only includes people with a dated death, so people who may still be living are left out. Use the printer button to print the reports on A4.</p>
+            <p>Occupation categories are worked out from the wording in the GEDCOM, which is left unchanged. Hover over a bar to see how each description was grouped.</p>
+            <h4>People without a birth country</h4>
+            <ol>
+              <li>Choose <strong>Settings &gt; People without a birth country</strong> to list everyone whose birth place is blank or has no recognised country.</li>
+              <li>Type a corrected birth place for one or more people. Each row previews the detected country as you type.</li>
+              <li>Choose <strong>Save changes</strong>. The places are written to the GEDCOM and the list refreshes to show who still needs a country.</li>
+            </ol>
+            <p><strong>Suggest countries with GeoNames</strong> can look up existing birth places and offer countries to add with one click. It needs a free GeoNames account and your consent each time, and it sends only the place text. GeoNames uses modern country names, so check historical places before accepting.</p>
+          </article>
+          <article class="help-article" data-help-article="defaults" hidden>
+            <h3>Defaults &amp; home person</h3>
+            <h4>Open your tree automatically</h4>
+            <ol>
+              <li>Choose <strong>Settings &gt; Update defaults</strong>, or click the GEDCOM file name in the top bar.</li>
+              <li>Choose the GEDCOM file and, optionally, the media folder to open at start-up.</li>
+              <li>Choose <strong>Save default</strong>. The choice is stored in <strong>kinship-defaults.json</strong> next to the app, and the browser remembers access to the file and folder.</li>
+            </ol>
+            <p>This needs a browser with local file access, such as Edge or Chrome. <strong>Clear default</strong> stops opening a tree automatically.</p>
+            <h4>Primary person and home person</h4>
+            <ul>
+              <li><strong>Primary person</strong> (<strong>Set as primary person</strong> in a record) adds the <strong>Home Person</strong> button to the top bar and shows how others are related to that person.</li>
+              <li><strong>Home person</strong> (<strong>☆ Set as home person</strong>, shown when your default GEDCOM is open) is the person selected when the default tree opens.</li>
+              <li>When a primary person is set, the welcome page offers <strong>Go to Home/Default Person in Tree</strong>.</li>
+            </ul>
+            <h4>Finishing a session</h4>
+            <p><strong>Settings &gt; Exit Kinship Atlas</strong> saves your preferences and stops the local helper. If there are unsaved GEDCOM changes, you are asked before exiting.</p>
+          </article>
+        </div>
+      </div>
+      <div class="dialog-actions">
+        <button class="dialog-button dialog-button-primary" type="button" data-close-dialog="helpDialog">Close</button>
       </div>
     </section>
   </dialog>

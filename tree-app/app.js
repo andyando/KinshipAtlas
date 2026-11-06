@@ -47,7 +47,7 @@
   const state = {
     mapMode: false, mapStats: null, directoryMatches: [], reportsMode: false, mediaLibraryMode: false,
     people: new Map(), families: new Map(), sources: new Map(), selectedId: null,
-    fileName: '', searchText: '', history: [], historyIndex: -1, zoom: 1, showSiblings: false,
+    fileName: '', searchText: '', history: [], historyIndex: -1, zoom: 1, showSiblings: true,
     mediaIndex: null, mediaUrls: new Map(), mediaRelativePaths: new WeakMap(), mediaDirectoryHandle: null,
     rememberedMediaDirectoryHandle: null, mediaFolderPicked: false, mediaHelper: null,
     pendingUploadPersonId: null, pendingResearchPersonId: null,
@@ -1216,7 +1216,7 @@
   function syncMediaButton() {
     const hasFolder = Boolean(state.mediaDirectoryHandle || state.rememberedMediaDirectoryHandle || state.mediaFolderPicked);
     const helperDefault = !hasFolder && state.mediaHelper;
-    elements.mediaButton.textContent = helperDefault || hasFolder ? 'Change media folder' : 'Select Media Folder';
+    setButtonContent(elements.mediaButton, 'folder', helperDefault || hasFolder ? 'Change media folder' : 'Select Media Folder');
     elements.mediaButton.title = helperDefault ? `Photos and PDFs are saved to "${state.mediaHelper.folder}" inside Primary Media Library. Click to choose a different folder.` : '';
     elements.mediaButton.classList.toggle('media-button-needed', !hasFolder && !state.mediaHelper);
   }
@@ -1720,6 +1720,7 @@
     elements.zoomOut.disabled = false;
     elements.zoomLabel.textContent = '100%';
     elements.treeLabel.textContent = fileName;
+    elements.treeLabel.disabled = false;
     elements.peopleCount.textContent = state.people.size.toLocaleString();
     elements.loadStatus.textContent = 'TREE LOADED LOCALLY';
     elements.statusPip.classList.add('ready');
@@ -2046,7 +2047,7 @@
     welcome.querySelector('h2').textContent = 'Welcome to your family archive';
     welcome.querySelector('p').textContent = `${state.fileName} is open with ${state.people.size.toLocaleString()} ${state.people.size === 1 ? 'person' : 'people'}. Select someone to see their relationships.`;
     if (state.people.has(state.primaryPersonId)) {
-      const homeMapButton = makeButton('View Home Person Relationship Map', 'button button-secondary welcome-button welcome-home-map');
+      const homeMapButton = makeButton('Go to Home/Default Person in Tree', 'button button-secondary welcome-button welcome-home-map');
       homeMapButton.addEventListener('click', showPrimaryPersonRelationshipMap);
       welcome.insertBefore(homeMapButton, welcome.querySelector('.welcome-note'));
     }
@@ -3324,10 +3325,30 @@
     }
   }
 
+  let logoPersonId = null;
+  let logoAngle = 0;
+
+  function spinBrandMark() {
+    const mark = document.querySelector('.brand-mark');
+    if (!mark?.animate || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const from = logoAngle;
+    const to = from + 45;
+    logoAngle = to % 360;
+    mark.getAnimations().forEach((animation) => animation.cancel());
+    // Individual rotate/scale properties compose with the small-screen transform on .brand-mark.
+    mark.style.rotate = `${logoAngle}deg`;
+    mark.animate([
+      { rotate: `${from}deg`, scale: '1', filter: 'drop-shadow(0 0 0 rgba(242,191,117,0))' },
+      { rotate: `${from + 22.5}deg`, scale: '1.25', filter: 'drop-shadow(0 0 7px rgba(242,191,117,.85))', offset: 0.5 },
+      { rotate: `${to}deg`, scale: '1', filter: 'drop-shadow(0 0 0 rgba(242,191,117,0))' }
+    ], { duration: 650, easing: 'ease-in-out' });
+  }
+
   function render() {
     if (state.reportsMode) renderReports();
     const person = state.people.get(state.selectedId);
-    if (!person) return;
+    if (!person) { logoPersonId = null; return; }
+    if (person.id !== logoPersonId) { logoPersonId = person.id; spinBrandMark(); }
     elements.title.textContent = person.name;
     const birth = person.events.find((event) => event.type === 'BIRT');
     const death = person.events.find((event) => event.type === 'DEAT');
@@ -3396,7 +3417,10 @@
     print: '<path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v7H6z"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
     trash: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M9 7V4h6v3"/>',
-    info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 7.5v.5"/>'
+    info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 7.5v.5"/>',
+    sliders: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
+    folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+    book: '<path d="M4 5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2z"/><path d="M4 20a2 2 0 0 0 2 1h13v-3"/><path d="M9 8h6"/>'
   };
 
   function setButtonContent(button, icon, text) {
@@ -3638,7 +3662,9 @@
       withMedia: people.filter((person) => person.mediaPaths.length).length,
       mediaFiles: new Set(people.flatMap((person) => person.mediaPaths)).size,
       countries: new Map(), unmatchedPlaces: new Set(), births: [], decades: new Map(),
-      occupations: new Map(), withOccupation: 0
+      occupations: new Map(), withOccupation: 0,
+      birthCountry: { withCountry: 0, unrecognised: 0, noPlace: 0 },
+      deathCountry: { withCountry: 0, unrecognised: 0, noPlace: 0, excluded: 0 }
     };
     stats.unknownSex = stats.total - stats.men - stats.women;
     stats.withoutMedia = stats.total - stats.withMedia;
@@ -3651,6 +3677,15 @@
     };
     for (const person of people) {
       for (const event of person.events) addPlace(event.place, [person.id]);
+      for (const [type, tally] of [['BIRT', stats.birthCountry], ['DEAT', stats.deathCountry]]) {
+        const event = person.events.find((item) => item.type === type);
+        // No death event or no death date: possibly living, so left out of the death country count.
+        if (type === 'DEAT' && !(event?.date || '').trim()) { tally.excluded += 1; continue; }
+        const place = (event?.place || '').trim();
+        if (!place) tally.noPlace += 1;
+        else if (countryFlagForPlace(place)) tally.withCountry += 1;
+        else tally.unrecognised += 1;
+      }
       const occupations = new Set();
       for (const event of person.events) {
         if (event.type !== 'OCCU') continue;
@@ -3816,6 +3851,22 @@
     ], 'PEOPLE'));
     mediaPanel.append(reportElement('p', 'report-note', 'Counts photos and PDFs attached to the person or to any of their life events.'));
 
+    const countryCoveragePanel = (title, tally, eventLabel, note) => {
+      const panel = reportPanel(title);
+      const without = tally.unrecognised + tally.noPlace;
+      panel.append(reportDonut([
+        { label: `With a ${eventLabel} country`, value: tally.withCountry, color: '#2f786a' },
+        { label: `${eventLabel[0].toUpperCase()}${eventLabel.slice(1)} place with no recognised country`, value: tally.unrecognised, color: '#d6a63f' },
+        { label: `No ${eventLabel} place recorded`, value: tally.noPlace, color: '#d5dfda' }
+      ], 'PEOPLE'));
+      panel.append(reportElement('p', 'report-note', `${tally.withCountry.toLocaleString()} ${tally.withCountry === 1 ? 'person has' : 'people have'} a ${eventLabel} country and ${without.toLocaleString()} ${without === 1 ? 'does' : 'do'} not. ${note}`));
+      return panel;
+    };
+    const birthCountryPanel = countryCoveragePanel('Birth country', stats.birthCountry, 'birth',
+      'Uses the place on the first birth event, as the directory filter and Settings > People without a birth country do.');
+    const deathCountryPanel = countryCoveragePanel('Death country', stats.deathCountry, 'death',
+      `Counts only people with a recorded death date, using the place on their first death event.${stats.deathCountry.excluded ? ` ${stats.deathCountry.excluded.toLocaleString()} ${stats.deathCountry.excluded === 1 ? 'person is' : 'people are'} not counted because no death date is recorded; this includes anyone who may be living.` : ''}`);
+
     const earliestPanel = reportPanel('Earliest recorded birth');
     if (earliest) {
       earliestPanel.append(reportPersonLink(earliest.person, 'report-earliest-name'));
@@ -3887,7 +3938,7 @@
       occupationPanel.append(reportElement('p', 'report-empty', 'No occupations are recorded in this tree.'));
     }
 
-    charts.append(sexPanel, mediaPanel, earliestPanel, birthsPanel, countryPanel, occupationPanel);
+    charts.append(sexPanel, mediaPanel, birthCountryPanel, deathCountryPanel, earliestPanel, birthsPanel, countryPanel, occupationPanel);
     elements.reportsContent.replaceChildren(cards, charts);
   }
 
@@ -5278,6 +5329,145 @@
     state.gedcomRecords.splice(trailerIndex < 0 ? state.gedcomRecords.length : trailerIndex, 0, record);
   }
 
+  // Merging a matched person adds only details the open tree lacks; values that differ are reported and never overwritten.
+  const mergeSkippedTags = new Set(['FAMS', 'FAMC', 'CHAN', 'RIN', '_UID', 'UID', 'AFN', 'RFN', 'REFN']);
+  const mergeSingletonTags = new Set(['SEX', 'BIRT', 'DEAT', 'BURI', 'CREM']);
+  const mergeSingleValueTags = new Set(['DATE', 'PLAC', 'TYPE', 'AGE', 'CAUS', 'PAGE', 'QUAY', 'GIVN', 'SURN', 'NPFX', 'NSFX', 'SPFX', 'NICK']);
+  const mergeTagNames = {
+    DATE: 'date', PLAC: 'place', TYPE: 'type', AGE: 'age', CAUS: 'cause', PAGE: 'page', QUAY: 'source quality',
+    GIVN: 'given names', SURN: 'surname', NICK: 'nickname', NOTE: 'note', SOUR: 'source citation', OBJE: 'media',
+    ADDR: 'address', NAME: 'name', SEX: 'sex', CREM: 'Cremation', TITL: 'title', RELI: 'religion', NATI: 'nationality'
+  };
+  const mergeLinePattern = /^(\d+)\s+(?:@[^@]+@\s+)?([A-Za-z0-9_]+)(?:\s+(.*))?$/;
+  const mergeNormalize = (value) => String(value || '').normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim();
+  const mergePointer = (value) => (String(value || '').trim().match(/^@([^@#][^@]*)@$/) || [])[1] || '';
+
+  // Splits lines[start..end) into blocks at one GEDCOM level; each block keeps its line range so sub-blocks can be found.
+  function gedcomBlocks(lines, start, end, level) {
+    const blocks = [];
+    for (let index = start; index < end; index += 1) {
+      const match = lines[index].match(mergeLinePattern);
+      if (match && Number(match[1]) === level) {
+        blocks.push({ lines, level, tag: match[2].toUpperCase(), value: (match[3] || '').trim(), start: index, end: index + 1 });
+      } else if (blocks.length && (match || lines[index].trim())) {
+        blocks.at(-1).end = index + 1;
+      }
+    }
+    return blocks;
+  }
+  const mergeChildren = (block) => gedcomBlocks(block.lines, block.start + 1, block.end, block.level + 1);
+
+  function gedcomRecordLabel(records, xref) {
+    const record = records.get(xref);
+    if (!record) return `@${xref}@`;
+    const fields = record.lines.map((line) => line.match(mergeLinePattern)).filter(Boolean)
+      .map((match) => ({ level: Number(match[1]), tag: match[2].toUpperCase(), value: (match[3] || '').trim() }));
+    const pick = (tag) => fields.filter((field) => field.level === 1 && field.tag === tag && field.value).map((field) => field.value).join('; ');
+    if (record.tag === 'OBJE') return pick('FILE') || pick('TITL') || `@${xref}@`;
+    if (record.tag === 'SOUR') return pick('TITL') || pick('ABBR') || `@${xref}@`;
+    if (record.tag === 'INDI') return pick('NAME').replaceAll('/', '') || `@${xref}@`;
+    if (record.tag === 'NOTE') return fields.filter((field) => field.level === 0 || ['CONT', 'CONC'].includes(field.tag)).map((field) => field.value).join(' ');
+    return fields.slice(1).map((field) => `${field.tag} ${field.value}`.trim()).join('; ');
+  }
+
+  // A block's own value with pointers resolved to what they point at, so records with different xrefs still compare equal.
+  function mergeBlockValue(block, records) {
+    const pointer = mergePointer(block.value);
+    let text = pointer ? `@${gedcomRecordLabel(records, pointer)}` : block.value;
+    for (const child of mergeChildren(block)) {
+      if (child.tag === 'CONT') text += `\n${child.value}`;
+      else if (child.tag === 'CONC') text += child.value;
+    }
+    const normalized = mergeNormalize(text);
+    return normalized === 'y' ? '' : normalized;
+  }
+  function mergeChildValue(block, tag, records) {
+    const child = mergeChildren(block).find((entry) => entry.tag === tag);
+    return child ? mergeBlockValue(child, records) : '';
+  }
+
+  function mergeBlockLabel(block, records) {
+    const children = mergeChildren(block);
+    const child = (tag) => children.find((entry) => entry.tag === tag)?.value || '';
+    const pointer = mergePointer(block.value);
+    const shown = (pointer ? gedcomRecordLabel(records, pointer) : block.value).replace(/^y$/i, '');
+    const brief = (text) => text.length > 70 ? `${text.slice(0, 67)}…` : text;
+    if (block.tag === 'SOUR') return `Source: ${brief(shown) || 'citation'}${child('PAGE') ? ` (${brief(child('PAGE'))})` : ''}`;
+    if (block.tag === 'OBJE') return `Media: ${brief(shown || child('FILE') || 'linked file')}`;
+    if (block.tag === 'NOTE') return `Note: ${brief(shown || 'text')}`;
+    if (block.tag === 'NAME') return `Name: ${shown.replaceAll('/', '').replace(/\s+/g, ' ').trim()}`;
+    if (block.tag === 'SEX') return `Sex: ${shown}`;
+    const name = (block.tag === 'EVEN' && child('TYPE')) || eventNames[block.tag] || mergeTagNames[block.tag] || block.tag;
+    return [name, brief(shown), child('DATE'), brief(child('PLAC'))].filter(Boolean).join(' · ');
+  }
+  const mergeIsEvent = (block) => eventTags.has(block.tag) || mergeSingletonTags.has(block.tag) && block.tag !== 'SEX'
+    || mergeChildren(block).some((child) => child.tag === 'DATE' || child.tag === 'PLAC');
+
+  // Finds the existing block that describes the same fact: same tag, value and type, with dates and places that agree or are missing on one side.
+  function findMergeTarget(block, candidates, sides, claimed) {
+    if (mergeSingletonTags.has(block.tag) && block.level === 1) return candidates.find((entry) => entry.tag === block.tag) || null;
+    const value = mergeBlockValue(block, sides.incoming);
+    const type = mergeChildValue(block, 'TYPE', sides.incoming);
+    const date = mergeChildValue(block, 'DATE', sides.incoming);
+    const place = mergeChildValue(block, 'PLAC', sides.incoming);
+    const same = candidates.filter((entry) => !claimed.has(entry) && entry.tag === block.tag
+      && mergeBlockValue(entry, sides.existing) === value && mergeChildValue(entry, 'TYPE', sides.existing) === type);
+    const agrees = (a, b) => a === b || !a || !b;
+    return same.find((entry) => mergeChildValue(entry, 'DATE', sides.existing) === date && mergeChildValue(entry, 'PLAC', sides.existing) === place)
+      || same.find((entry) => agrees(mergeChildValue(entry, 'DATE', sides.existing), date) && agrees(mergeChildValue(entry, 'PLAC', sides.existing), place))
+      || null;
+  }
+
+  function collectMergeAdditions(incomingBlocks, existingBlocks, parent, sides, additions) {
+    const claimed = new Set();
+    for (const block of incomingBlocks) {
+      if (block.tag === 'CONT' || block.tag === 'CONC' || (block.level === 1 && mergeSkippedTags.has(block.tag))) continue;
+      const parentLabel = parent ? mergeBlockLabel(parent, sides.existing) : '';
+      if (parent && mergeSingleValueTags.has(block.tag)) {
+        const current = existingBlocks.find((entry) => entry.tag === block.tag);
+        if (!current) {
+          additions.fills.push({ insertAt: parent.end, lines: block.lines.slice(block.start, block.end), label: `${parentLabel}: adds ${mergeTagNames[block.tag] || block.tag} "${block.value}"` });
+        } else if (mergeBlockValue(current, sides.existing) !== mergeBlockValue(block, sides.incoming)) {
+          additions.conflicts.push({ label: `${parentLabel}: ${mergeTagNames[block.tag] || block.tag}`, existing: current.value, incoming: block.value });
+        }
+        continue;
+      }
+      const target = findMergeTarget(block, existingBlocks, sides, claimed);
+      if (!target) {
+        const lines = block.lines.slice(block.start, block.end);
+        if (parent) additions.fills.push({ insertAt: parent.end, lines, label: `${parentLabel}: adds ${mergeBlockLabel(block, sides.incoming)}` });
+        else additions.blocks.push({ lines, label: mergeBlockLabel(block, sides.incoming), kind: mergeIsEvent(block) ? 'event' : 'detail' });
+        continue;
+      }
+      claimed.add(target);
+      const incomingValue = mergeBlockValue(block, sides.incoming);
+      const existingValue = mergeBlockValue(target, sides.existing);
+      if (incomingValue && existingValue && incomingValue !== existingValue) {
+        additions.conflicts.push({ label: mergeBlockLabel(target, sides.existing), existing: target.value, incoming: block.value });
+      }
+      collectMergeAdditions(mergeChildren(block), mergeChildren(target), target, sides, additions);
+    }
+  }
+
+  // Lists what the incoming person record would add to the existing one: whole new blocks, sub-lines for existing blocks, and differences.
+  function importMergeAdditions(incomingLines, existingLines, incomingRecords, existingRecords) {
+    const additions = { blocks: [], fills: [], conflicts: [] };
+    if (!incomingLines?.length || !existingLines?.length) return additions;
+    collectMergeAdditions(gedcomBlocks(incomingLines, 1, incomingLines.length, 1), gedcomBlocks(existingLines, 1, existingLines.length, 1),
+      null, { incoming: incomingRecords, existing: existingRecords }, additions);
+    return additions;
+  }
+
+  function buildMergedLines(existingLines, additions, remap = (lines) => lines) {
+    const lines = [...existingLines];
+    const fills = additions.fills.map((fill, order) => ({ ...fill, order })).sort((a, b) => b.insertAt - a.insertAt || b.order - a.order);
+    for (const fill of fills) lines.splice(fill.insertAt, 0, ...remap(fill.lines));
+    let index = lines.length;
+    while (index > 1 && !lines[index - 1].trim()) index -= 1;
+    lines.splice(index, 0, ...additions.blocks.flatMap((block) => remap(block.lines)));
+    return lines;
+  }
+
   // People only match when first given name, surname and birth date text are the same (ignoring case and spacing).
   function importMatchKey(person) {
     const birthDate = person.events.find((event) => event.type === 'BIRT' && event.date)?.date || '';
@@ -5302,6 +5492,7 @@
     const candidates = new Set();
     let noBirthDate = 0;
     let alreadyInTree = 0;
+    let ambiguous = 0;
     for (const person of incoming.people.values()) {
       const key = importMatchKey(person);
       if (!key) { noBirthDate += 1; continue; }
@@ -5309,6 +5500,7 @@
       if (matches) {
         alreadyInTree += 1;
         if (matches.length === 1) anchors.set(person.id, matches[0]);
+        else ambiguous += 1;
         continue;
       }
       candidates.add(person.id);
@@ -5331,8 +5523,15 @@
         if (candidates.has(other) && !importIds.has(other)) { importIds.add(other); queue.push(other); }
       }
     }
+    const incomingRecords = new Map(incoming.gedcomRecords.filter((record) => record.xref).map((record) => [record.xref, record]));
+    const existingRecords = new Map(state.gedcomRecords.filter((record) => record.xref).map((record) => [record.xref, record]));
+    const merges = [];
+    for (const [incomingId, existingId] of anchors) {
+      const additions = importMergeAdditions(incomingRecords.get(incomingId)?.lines, existingRecords.get(existingId)?.lines, incomingRecords, existingRecords);
+      if (additions.blocks.length || additions.fills.length) merges.push({ incomingId, existingId, ...additions });
+    }
     return {
-      incoming, anchors, importIds, noBirthDate, alreadyInTree,
+      incoming, anchors, importIds, noBirthDate, alreadyInTree, ambiguous, merges,
       total: incoming.people.size, newPeople: candidates.size, unconnected: candidates.size - importIds.size
     };
   }
@@ -5344,8 +5543,9 @@
     record.lines.splice(index, 0, line);
   }
 
-  // Appends the planned people with their life events, families and cited records, re-numbering every xref.
-  function applyGedcomImport(plan) {
+  // Appends the planned people with their life events, families and cited records, re-numbering every xref,
+  // then adds the missing details of each chosen matched person to their existing record.
+  function applyGedcomImport(plan, mergeIds = new Set()) {
     const { incoming, anchors, importIds } = plan;
     const incomingRecords = new Map(incoming.gedcomRecords.filter((record) => record.xref).map((record) => [record.xref, record]));
     const existingRecords = new Map(state.gedcomRecords.filter((record) => record.xref).map((record) => [record.xref, record]));
@@ -5383,6 +5583,7 @@
 
     const copiedRecords = new Map();
     const newRecords = [];
+    const newRecordsByXref = new Map();
     const existingBodies = new Map();
     for (const record of state.gedcomRecords) {
       if (record.xref && !['INDI', 'FAM'].includes(record.tag)) existingBodies.set(`${record.tag}\n${record.lines.slice(1).join('\n').trim()}`, record.xref);
@@ -5396,7 +5597,9 @@
       if (reuse) { copiedRecords.set(xref, reuse); return reuse; }
       const newXref = allocate(record.tag);
       copiedRecords.set(xref, newXref);
-      newRecords.push({ xref: newXref, tag: record.tag, lines: remapLines(record.lines, newXref) });
+      const copy = { xref: newXref, tag: record.tag, lines: remapLines(record.lines, newXref) };
+      newRecords.push(copy);
+      newRecordsByXref.set(newXref, copy);
       return newXref;
     }
     function remapPointer(target) {
@@ -5450,8 +5653,24 @@
       const record = existingRecords.get(personId);
       if (record) appendRecordLine(record, line);
     }
+    // Recomputed against the current records so a second file person matching the same tree person does not add details twice.
+    const labelRecords = { get: (xref) => existingRecords.get(xref) || newRecordsByXref.get(xref) };
+    let mergedPeople = 0;
+    let mergedRecords = 0;
+    for (const merge of plan.merges || []) {
+      if (!mergeIds.has(merge.incomingId)) continue;
+      const record = existingRecords.get(merge.existingId);
+      const source = incomingRecords.get(merge.incomingId);
+      if (!record || !source) continue;
+      const additions = importMergeAdditions(source.lines, record.lines, incomingRecords, labelRecords);
+      const count = additions.blocks.length + additions.fills.length;
+      if (!count) continue;
+      record.lines = buildMergedLines(record.lines, additions, (lines) => remapLines(lines, ''));
+      mergedPeople += 1;
+      mergedRecords += count;
+    }
     for (const record of [...personRecords, ...familyRecords, ...newRecords]) addRecordBeforeTrailer(record);
-    return { people: personRecords.length, families: familyRecords.length, joinedFamilies: mergedFamilies.length, linkedRecords: newRecords.length };
+    return { people: personRecords.length, families: familyRecords.length, joinedFamilies: mergedFamilies.length, linkedRecords: newRecords.length, mergedPeople, mergedRecords };
   }
 
   function createRelativeRecord() {
@@ -6121,11 +6340,11 @@
     elements.clear.disabled = true; elements.back.disabled = true; elements.forward.disabled = true;
     document.querySelector('#importGedcomButton').disabled = true;
     elements.printMapButton.disabled = true;
-    state.showSiblings = false;
-    elements.showSiblings.checked = false;
+    state.showSiblings = true;
+    elements.showSiblings.checked = true;
     elements.showSiblings.disabled = true;
     elements.zoomIn.disabled = true; elements.zoomOut.disabled = true;
-    elements.treeLabel.textContent = 'No tree loaded'; elements.peopleCount.textContent = '0';
+    elements.treeLabel.textContent = 'No tree loaded'; elements.treeLabel.disabled = true; elements.peopleCount.textContent = '0';
     elements.loadStatus.textContent = 'WAITING FOR FILE'; elements.statusPip.classList.remove('ready');
     syncGedcomSaveUi();
     elements.canvas.innerHTML = '<div class="welcome-state"><div class="welcome-art" aria-hidden="true"><span class="orbit orbit-a"></span><span class="orbit orbit-b"></span><span class="welcome-node node-a"></span><span class="welcome-node node-b"></span><span class="welcome-node node-c"></span><span class="welcome-node node-d"></span><span class="welcome-node node-e"></span><span class="welcome-stem stem-a"></span><span class="welcome-stem stem-b"></span><span class="welcome-stem stem-c"></span><span class="welcome-stem stem-d"></span></div><div class="eyebrow">YOUR ARCHIVE, CONNECTED</div><h2>Start with a person.</h2><p>Choose a local GEDCOM file to open its family relationships in this tab.</p><label class="button button-primary welcome-button" for="gedcomInput"><span class="button-plus" aria-hidden="true">+</span> Open GEDCOM</label><span class="welcome-note">Your file is read locally and never uploaded. Saved edits are written back to the file on this device.</span></div>';
@@ -6822,7 +7041,7 @@
   });
 
   function updateDefaultsButton() {
-    document.querySelector('#defaultsButton').textContent = 'Update defaults';
+    setButtonContent(document.querySelector('#defaultsButton'), 'sliders', 'Update defaults');
   }
 
   function syncDefaultsDialog() {
@@ -7143,7 +7362,36 @@
   });
   document.querySelector('#aboutMenuButton').addEventListener('click', openAboutDialog);
 
+  const helpDialog = document.querySelector('#helpDialog');
+  const helpMenuIcons = { 'getting-started': 'book', gedcom: 'import', exploring: 'tree', editing: 'edit', media: 'media', 'maps-reports': 'chart', defaults: 'sliders' };
+  function showHelpTopic(topic) {
+    const articles = [...helpDialog.querySelectorAll('[data-help-article]')];
+    const target = articles.find((article) => article.dataset.helpArticle === topic) || articles[0];
+    for (const article of articles) article.hidden = article !== target;
+    for (const button of helpDialog.querySelectorAll('[data-help-nav]')) {
+      const current = button.dataset.helpNav === target.dataset.helpArticle;
+      button.classList.toggle('is-current', current);
+      if (current) button.setAttribute('aria-current', 'page');
+      else button.removeAttribute('aria-current');
+    }
+    document.querySelector('#helpBody').scrollTop = 0;
+  }
+  function openHelpDialog(topic) {
+    showHelpTopic(topic);
+    if (!helpDialog.open) helpDialog.showModal();
+    helpDialog.querySelector('.help-nav .is-current')?.focus();
+  }
+  for (const button of document.querySelectorAll('#helpPanel [data-help-topic]')) {
+    setButtonContent(button, helpMenuIcons[button.dataset.helpTopic] || 'book', button.textContent.trim());
+    button.addEventListener('click', () => openHelpDialog(button.dataset.helpTopic));
+  }
+  helpDialog.querySelector('.help-nav').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-help-nav]');
+    if (button) showHelpTopic(button.dataset.helpNav);
+  });
+
   document.querySelector('#defaultsButton').addEventListener('click', openDefaultsDialog);
+  elements.treeLabel.addEventListener('click', openDefaultsDialog);
 
   const gedcomImport = {
     button: document.querySelector('#importGedcomButton'), input: document.querySelector('#importGedcomInput'),
@@ -7151,29 +7399,124 @@
     file: document.querySelector('#importGedcomFile'), message: document.querySelector('#importGedcomMessage'),
     stats: document.querySelector('#importGedcomStats'), peopleSection: document.querySelector('#importGedcomPeopleSection'),
     people: document.querySelector('#importGedcomPeople'), hint: document.querySelector('#importGedcomHint'),
-    confirm: document.querySelector('#confirmGedcomImport'), cancel: document.querySelector('#cancelGedcomImport')
+    confirm: document.querySelector('#confirmGedcomImport'), cancel: document.querySelector('#cancelGedcomImport'),
+    mergeSection: document.querySelector('#importGedcomMergeSection'), merges: document.querySelector('#importGedcomMerges'),
+    mergeAll: document.querySelector('#importGedcomMergeAll'), mergeTotal: document.querySelector('#importGedcomMergeTotal')
   };
   let pendingGedcomImport = null;
   const countLabel = (count, one, many) => `${count.toLocaleString()} ${count === 1 ? one : many}`;
+  const birthDateOf = (person) => person?.events.find((event) => event.type === 'BIRT' && event.date)?.date || '';
+
+  function mergeCountText(merge) {
+    const events = merge.blocks.filter((block) => block.kind === 'event').length;
+    const details = merge.blocks.length + merge.fills.length - events;
+    const parts = [events ? countLabel(events, 'life event', 'life events') : '', details ? countLabel(details, 'other detail', 'other details') : ''].filter(Boolean);
+    return `${countLabel(merge.blocks.length + merge.fills.length, 'additional record', 'additional records')} to add: ${parts.join(', ')}`;
+  }
+
+  function renderGedcomImportMerges(plan) {
+    gedcomImport.merges.replaceChildren(...plan.merges.map((merge) => {
+      const incomingPerson = plan.incoming.people.get(merge.incomingId);
+      const existingPerson = state.people.get(merge.existingId);
+      const item = document.createElement('li');
+      item.className = 'import-merge-row';
+      const choice = document.createElement('label');
+      choice.className = 'import-merge-choice';
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.dataset.mergeId = merge.incomingId;
+      const name = document.createElement('strong');
+      name.textContent = incomingPerson?.name || merge.incomingId;
+      const birth = birthDateOf(incomingPerson);
+      choice.append(box, name, birth ? ` · b. ${birth}` : '');
+      const match = document.createElement('div');
+      match.className = 'import-merge-match';
+      const birthPlace = existingPerson?.events.find((event) => event.type === 'BIRT')?.place || '';
+      match.append('Matches ');
+      const matchName = document.createElement('strong');
+      matchName.textContent = existingPerson?.name || merge.existingId;
+      match.append(matchName, ` in your tree${birthPlace ? ` (born ${birthPlace})` : ''} · GEDCOM @${merge.existingId}@`);
+      const count = document.createElement('div');
+      count.className = 'import-merge-count';
+      count.textContent = mergeCountText(merge);
+      const details = document.createElement('details');
+      const summary = document.createElement('summary');
+      summary.textContent = 'Show what will be added';
+      const list = document.createElement('ul');
+      for (const label of [...merge.blocks.map((block) => block.label), ...merge.fills.map((fill) => fill.label)]) {
+        const entry = document.createElement('li');
+        entry.textContent = label;
+        list.append(entry);
+      }
+      details.append(summary, list);
+      if (merge.conflicts.length) {
+        const heading = document.createElement('p');
+        heading.className = 'import-merge-conflicts-title';
+        heading.textContent = 'Different in the file — your tree\'s value is kept:';
+        const conflicts = document.createElement('ul');
+        conflicts.className = 'import-merge-conflicts';
+        for (const conflict of merge.conflicts) {
+          const entry = document.createElement('li');
+          entry.textContent = `${conflict.label}: tree "${conflict.existing}", file "${conflict.incoming}"`;
+          conflicts.append(entry);
+        }
+        details.append(heading, conflicts);
+      }
+      item.append(choice, match, count, details);
+      return item;
+    }));
+  }
+
+  function selectedGedcomMerges() {
+    const plan = pendingGedcomImport;
+    if (!plan) return [];
+    const ids = new Set([...gedcomImport.merges.querySelectorAll('input[data-merge-id]:checked')].map((box) => box.dataset.mergeId));
+    return plan.merges.filter((merge) => ids.has(merge.incomingId));
+  }
+
+  function syncGedcomImportConfirm() {
+    const plan = pendingGedcomImport;
+    if (!plan) return;
+    const chosen = selectedGedcomMerges();
+    const records = chosen.reduce((sum, merge) => sum + merge.blocks.length + merge.fills.length, 0);
+    const parts = [];
+    if (plan.importIds.size) parts.push(`Import ${countLabel(plan.importIds.size, 'person', 'people')}`);
+    if (chosen.length) parts.push(`${parts.length ? 'merge' : 'Merge'} ${countLabel(chosen.length, 'person', 'people')}`);
+    gedcomImport.confirm.textContent = parts.length ? `${parts.join(', ')} & save` : 'Choose people to merge';
+    gedcomImport.confirm.disabled = !parts.length;
+    gedcomImport.mergeAll.checked = plan.merges.length > 0 && chosen.length === plan.merges.length;
+    gedcomImport.mergeAll.indeterminate = chosen.length > 0 && chosen.length < plan.merges.length;
+    gedcomImport.mergeTotal.textContent = chosen.length
+      ? `${countLabel(records, 'additional record', 'additional records')} will be added to ${countLabel(chosen.length, 'matching person', 'matching people')}.`
+      : 'No matching people selected; their records will not be changed.';
+  }
 
   function showGedcomImportPreview(fileName, plan) {
-    const canImport = plan.importIds.size > 0;
+    const canImport = plan.importIds.size > 0 || plan.merges.length > 0;
     pendingGedcomImport = canImport ? plan : null;
     gedcomImport.file.textContent = fileName;
-    if (canImport) {
+    const mergeText = plan.merges.length
+      ? `${countLabel(plan.merges.length, 'person', 'people')} already in your tree ${plan.merges.length === 1 ? 'has' : 'have'} extra details in this file that you can merge.`
+      : '';
+    if (plan.importIds.size) {
       gedcomImport.title.textContent = 'Import new GEDCOM records';
-      gedcomImport.message.textContent = `${countLabel(plan.importIds.size, 'new person', 'new people')} related to your current family tree will be added.`;
+      gedcomImport.message.textContent = `${countLabel(plan.importIds.size, 'new person', 'new people')} related to your current family tree will be added.${mergeText ? ` ${mergeText}` : ''}`;
+    } else if (plan.merges.length) {
+      gedcomImport.title.textContent = 'Merge matching records';
+      gedcomImport.message.textContent = `There is nobody new to add, but ${mergeText.charAt(0).toLocaleLowerCase()}${mergeText.slice(1)}`;
     } else if (!plan.newPeople && plan.anchors.size) {
       gedcomImport.title.textContent = 'Nothing new to import';
-      gedcomImport.message.textContent = 'Everyone in this file who has a birth date is already in your current family tree, so there is nobody new to add.';
+      gedcomImport.message.textContent = 'Everyone in this file who has a birth date is already in your current family tree, and the file has no extra details for them, so there is nothing to add.';
     } else {
       gedcomImport.title.textContent = 'No related people found';
       gedcomImport.message.textContent = 'The imported file does not have any people related to your current family tree, so nothing was imported. To open this file on its own, use the "Start Again" menu option instead.';
     }
     const rows = [
       ['People in the file', plan.total, true],
-      ['New and related to this tree (will be added)', plan.importIds.size, canImport],
+      ['New and related to this tree (will be added)', plan.importIds.size, plan.importIds.size > 0],
       ['Already in this tree (same first name, last name and birth date)', plan.alreadyInTree, false],
+      ['Already in this tree, with extra details that can be merged', plan.merges.length, false],
+      ['Match more than one person in this tree (cannot be merged)', plan.ambiguous || 0, false],
       ['New but not related to this tree (not imported)', plan.unconnected, false],
       ['No birth date recorded (not imported)', plan.noBirthDate, false]
     ];
@@ -7201,14 +7544,22 @@
       shown.push(more);
     }
     gedcomImport.people.replaceChildren(...shown);
-    gedcomImport.peopleSection.hidden = !canImport;
-    gedcomImport.hint.hidden = !canImport;
+    gedcomImport.peopleSection.hidden = !plan.importIds.size;
+    gedcomImport.hint.hidden = !plan.importIds.size;
+    gedcomImport.mergeSection.hidden = !plan.merges.length;
+    if (plan.merges.length) renderGedcomImportMerges(plan);
+    else gedcomImport.merges.replaceChildren();
     gedcomImport.confirm.hidden = !canImport;
-    gedcomImport.confirm.textContent = `Import ${countLabel(plan.importIds.size, 'person', 'people')} & save`;
+    syncGedcomImportConfirm();
     gedcomImport.cancel.textContent = canImport ? 'Cancel' : 'OK';
     gedcomImport.dialog.showModal();
-    (canImport ? gedcomImport.confirm : gedcomImport.cancel).focus();
+    (!canImport ? gedcomImport.cancel : gedcomImport.confirm.disabled ? gedcomImport.mergeAll : gedcomImport.confirm).focus();
   }
+  gedcomImport.merges.addEventListener('change', syncGedcomImportConfirm);
+  gedcomImport.mergeAll.addEventListener('change', () => {
+    for (const box of gedcomImport.merges.querySelectorAll('input[data-merge-id]')) box.checked = gedcomImport.mergeAll.checked;
+    syncGedcomImportConfirm();
+  });
 
   setButtonContent(gedcomImport.button, 'import', 'Import new GEDCOM records');
   gedcomImport.button.addEventListener('click', () => { if (state.people.size) gedcomImport.input.click(); });
@@ -7231,13 +7582,14 @@
   });
   gedcomImport.confirm.addEventListener('click', () => {
     const plan = pendingGedcomImport;
+    const mergeIds = new Set(selectedGedcomMerges().map((merge) => merge.incomingId));
     pendingGedcomImport = null;
     gedcomImport.dialog.close();
-    if (!plan) return;
+    if (!plan || (!plan.importIds.size && !mergeIds.size)) return;
     const snapshot = state.gedcomRecords.map((record) => ({ ...record, lines: [...record.lines] }));
     let result;
     try {
-      result = applyGedcomImport(plan);
+      result = applyGedcomImport(plan, mergeIds);
       refreshAfterGedcomMutation(state.selectedId);
     } catch {
       state.gedcomRecords = snapshot;
@@ -7246,7 +7598,10 @@
       return;
     }
     const families = result.families + result.joinedFamilies;
-    showToast(`Imported ${countLabel(result.people, 'new person', 'new people')}${families ? ` with ${countLabel(families, 'family link', 'family links')}` : ''}.`);
+    const messages = [];
+    if (result.people) messages.push(`Imported ${countLabel(result.people, 'new person', 'new people')}${families ? ` with ${countLabel(families, 'family link', 'family links')}` : ''}.`);
+    if (result.mergedPeople) messages.push(`Merged ${countLabel(result.mergedRecords, 'additional record', 'additional records')} into ${countLabel(result.mergedPeople, 'matching person', 'matching people')}.`);
+    showToast(messages.join(' ') || 'Nothing was added; the tree already has these details.');
   });
   gedcomImport.dialog.addEventListener('close', () => { pendingGedcomImport = null; });
   document.querySelector('#saveGedcomButton').addEventListener('click', () => { saveGedcomFile({ interactive: true }); });
@@ -7262,6 +7617,8 @@
   setButtonContent(document.querySelector('#birthCountryMenuButton'), 'map', 'People without a birth country');
   setButtonContent(document.querySelector('#exitButton'), 'exit', 'Exit Kinship Atlas');
   setButtonContent(document.querySelector('#aboutMenuButton'), 'info', 'About Kinship Atlas');
+  setButtonContent(document.querySelector('#defaultsButton'), 'sliders', 'Update defaults');
+  syncMediaButton();
   setButtonContent(elements.clear, 'restart', 'Start Again');
   document.querySelector('#defaultsPickGedcom').addEventListener('click', async () => {
     if (typeof window.showOpenFilePicker !== 'function') {

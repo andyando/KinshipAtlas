@@ -9,7 +9,7 @@
 - Preserve conflicting evidence and uncertainty. Do not silently choose, merge identities, or upgrade a hypothesis to a fact. Use the confidence labels in `RESEARCH_STANDARDS.md`.
 - For negative searches, record where, when, and how the search was performed and its coverage. Do not treat a failed search as proof that an event or record did not exist.
 - Keep personal research files in `private/`. Before producing a shareable report or export, review it for identifying details and unsupported claims.
-- When changing the Kinship Atlas app (`tree-app/`), record the change in `tree-app/version.js`: add a new `MAJOR.MINOR` release entry at the top (or add to the current entry if it has not been released yet), dated, with plain-language change notes. It is shown in Help > About.
+- When changing the Kinship Atlas app (`tree-app/`), record the change in `tree-app/version.js`: add a new `MAJOR.MINOR.PATCH` release entry at the top (PATCH for small fixes, MINOR for new features, MAJOR for large or incompatible changes; reset the lower parts to 0) (or add to the current entry if it has not been released yet), dated, with plain-language change notes. It is shown in Help > About.
 
 <!-- mermaid-ai-skills:start -->
 ## Mermaid Diagrams
