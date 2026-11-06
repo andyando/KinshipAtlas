@@ -9,7 +9,7 @@ No family data is included in this repository. Version history is shown in the a
 Kinship Atlas does not need installing system-wide and can live in any folder you choose: a local drive, a synced folder, or a USB stick. All of its paths are relative to its own folder.
 
 1. Copy the `tree-app` folder to the location you want, and rename it if you like.
-2. Keep these together in that folder: `index.html`, `app.js`, `updater.js`, `map.js`, `styles.css`, `version.js`, `favicon.svg`, `data/`, `flags/` and `launcher/kinship-atlas.ico`, plus `Kinship Atlas.exe` on Windows and `server.js` if you use the Node.js helper.
+2. Keep these together in that folder: `index.html`, `app.js`, `updater.js`, `map.js`, `styles.css`, `version.js`, `favicon.svg`, `welcome-pattern.svg`, `data/`, `flags/` and `launcher/kinship-atlas.ico`, plus `Kinship Atlas.exe` on Windows and `server.js` if you use the Node.js helper.
 3. Keep your GEDCOM file and media folder wherever suits you. They do not need to be inside the app folder unless you use the optional `Primary GEDCOM` and `Primary Media Library` folders described below.
 
 Requirements:

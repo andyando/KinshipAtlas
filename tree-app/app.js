@@ -3413,6 +3413,7 @@
     media: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="M21 15l-5-5L5 20"/>',
     exit: '<path d="M10 17l5-5-5-5M15 12H3"/><path d="M12 3h7a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-7"/>',
     restart: '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>',
+    update: '<path d="M20 7a9 9 0 0 0-15-1M4 17a9 9 0 0 0 15 1"/><path d="M20 3v4h-4M4 21v-4h4M12 8v8M9 13l3 3 3-3"/>',
     import: '<path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 17v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>',
     save: '<path d="M5 3h11l5 5v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M7 3v5h8V3"/><rect x="7" y="13" width="10" height="8"/>',
     saved: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
@@ -7087,7 +7088,7 @@
     const releases = window.KINSHIP_VERSION?.releases;
     const currentVersion = releases?.[0]?.version;
     elements.updateAppButton.disabled = true;
-    elements.updateAppButton.textContent = 'Checking for updates…';
+    setButtonContent(elements.updateAppButton, 'update', 'Checking for updates…');
     try {
       const update = await window.KINSHIP_UPDATER.checkForUpdate(currentVersion, releases);
       if (!update.available) {
@@ -7103,7 +7104,7 @@
       showToast(error instanceof Error ? error.message : 'The application update could not be checked.');
     } finally {
       elements.updateAppButton.disabled = false;
-      elements.updateAppButton.textContent = 'Check for application updates';
+      setButtonContent(elements.updateAppButton, 'update', 'Check for application updates');
     }
   }
 
@@ -7689,6 +7690,7 @@
   setButtonContent(document.querySelector('#exitButton'), 'exit', 'Exit Kinship Atlas');
   setButtonContent(document.querySelector('#aboutMenuButton'), 'info', 'About Kinship Atlas');
   setButtonContent(document.querySelector('#defaultsButton'), 'sliders', 'Update defaults');
+  setButtonContent(elements.updateAppButton, 'update', 'Check for application updates');
   syncMediaButton();
   setButtonContent(elements.clear, 'restart', 'Start Again');
   document.querySelector('#defaultsPickGedcom').addEventListener('click', async () => {

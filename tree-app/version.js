@@ -7,6 +7,13 @@
 window.KINSHIP_VERSION = {
   releases: [
     {
+      version: '1.8.2',
+      date: '2026-11-06',
+      changes: [
+        'Added an icon to Check for application updates and a subtle repeating family-tree background to the welcome page.'
+      ]
+    },
+    {
       version: '1.8.1',
       date: '2026-11-06',
       changes: [

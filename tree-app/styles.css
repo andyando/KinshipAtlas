@@ -197,6 +197,7 @@ button { color: inherit; }
 .graph-footer-right { color: #a0aca6; text-align: right; }
 
 .welcome-state { min-height: 460px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 35px 20px 40px; text-align: center; }
+.tree-welcome { background-image: radial-gradient(ellipse at center, #f3f5f2 0%, rgba(243,245,242,.92) 30%, rgba(243,245,242,0) 75%), url("welcome-pattern.svg"); background-repeat: no-repeat, repeat; background-size: 100% 100%, 320px 240px; }
 .welcome-art { width: 180px; height: 144px; position: relative; margin-bottom: 22px; }
 .orbit { position: absolute; border: 1px solid rgba(47,120,106,.28); border-radius: 50%; transform: rotate(-23deg); }
 .orbit-a { width: 148px; height: 68px; top: 34px; left: 15px; }
