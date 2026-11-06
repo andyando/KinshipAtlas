@@ -26,3 +26,7 @@ Desktop.ini
 # Kinship Atlas local preferences; contain person names and IDs
 /tree-app/kinship-defaults.json
 /tree-app/kinship-selections.json
+
+# Media copied beside the app; contains private family photos and documents
+/tree-app/Primary Media Library/
+*_media/
