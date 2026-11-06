@@ -7,6 +7,20 @@
 window.KINSHIP_VERSION = {
   releases: [
     {
+      version: '1.9.2',
+      date: '2026-11-06',
+      changes: [
+        'Failed update checks and incomplete setup now explain how to manually update the installation folder and provide the latest GitHub release link.'
+      ]
+    },
+    {
+      version: '1.9.1',
+      date: '2026-11-06',
+      changes: [
+        'Person records now show the recorded birth country beside the hero image, and the death country when it differs.'
+      ]
+    },
+    {
       version: '1.9.0',
       date: '2026-11-06',
       changes: [

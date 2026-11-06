@@ -255,6 +255,12 @@ button { color: inherit; }
 .details-empty h2 { margin: 11px 0 5px; color: var(--ink); font-family: Baskerville, "Palatino Linotype", Georgia, serif; font-size: 23px; font-weight: 500; }
 .details-empty p { max-width: 235px; color: #7c8b84; font-size: 12px; line-height: 1.6; }
 .detail-hero { padding: 25px 21px 19px; background: linear-gradient(135deg, #f8fbf8 0%, #edf4ef 100%); border-bottom: 1px solid var(--line); }
+.detail-portrait-row { display: flex; align-items: center; gap: 16px; margin-bottom: 15px; }
+.detail-portrait-row .detail-monogram { flex: 0 0 auto; margin-bottom: 0; }
+.detail-countries { min-width: 0; display: grid; gap: 8px; }
+.detail-country { display: flex; align-items: center; gap: 8px; color: var(--ink); font-size: 12px; overflow-wrap: anywhere; }
+.detail-country img { width: 24px; height: 18px; flex: 0 0 auto; object-fit: contain; }
+.detail-country-label { display: block; margin-bottom: 2px; color: #687a72; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
 .detail-monogram { width: 42px; height: 42px; display: grid; place-items: center; margin-bottom: 15px; border: 1px solid #d3a08d; border-radius: 50%; color: #a8533e; background: #fff5ef; font-family: Baskerville, Georgia, serif; font-size: 19px; }
 .detail-monogram.has-photo { width: 56px; height: 56px; display: block; flex: 0 0 auto; position: relative; }
 .detail-monogram-photo { width: 56px; height: 56px; max-width: none; display: block; border-radius: 50%; object-fit: cover; object-position: center 25%; }

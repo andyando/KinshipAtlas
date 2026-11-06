@@ -36,8 +36,13 @@ try {
     if (Test-Path -LiteralPath (Join-Path $app 'updater.js')) { throw 'Retired browser updater was installed.' }
     [IO.File]::WriteAllText((Join-Path $app 'version.js'), "version: '99.0.0'")
     $before = (Get-FileHash -LiteralPath (Join-Path $app 'index.html')).Hash
-    $process = Start-Process -FilePath $Installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',("/DIR=`"$app`"") -Wait -PassThru
+    $failureLog = Join-Path $testRoot 'rejected-update.log'
+    $process = Start-Process -FilePath $Installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',("/DIR=`"$app`""),("/LOG=`"$failureLog`"") -Wait -PassThru
     if ($process.ExitCode -eq 0) { throw 'Unallocated future version was accepted.' }
+    $log = Get-Content -LiteralPath $failureLog -Raw
+    if ($log -notmatch 'did not complete' -or $log -notmatch 'https://github.com/andyando/KinshipAtlas/releases/latest') {
+        throw 'Incomplete-update guidance or latest-release link missing from the setup log.'
+    }
     if ((Get-FileHash -LiteralPath (Join-Path $app 'index.html')).Hash -ne $before) { throw 'Rejected upgrade changed app files.' }
     $fresh = Join-Path $testRoot 'fresh'
     $process = Start-Process -FilePath $Installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',("/DIR=`"$fresh`"") -Wait -PassThru

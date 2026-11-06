@@ -13,9 +13,11 @@ const aliasesEnd = source.indexOf('\n  const state =', aliasesStart);
 const flagFunctionStart = source.indexOf('  function countryFlagForPlace(', aliasesEnd);
 const flagFunctionEnd = source.indexOf('\n  function initials(', flagFunctionStart);
 const context = vm.createContext({});
+const headerStart = source.indexOf('  function personHeaderCountries(');
+const headerEnd = source.indexOf('\n  let lastDetailsPersonId', headerStart);
 
 vm.runInContext(
-  `${source.slice(aliasesStart, aliasesEnd)}\n${source.slice(flagFunctionStart, flagFunctionEnd)}\nglobalThis.countryFlagForPlace = countryFlagForPlace;`,
+  `${source.slice(aliasesStart, aliasesEnd)}\n${source.slice(flagFunctionStart, flagFunctionEnd)}\n${source.slice(headerStart, headerEnd)}\nglobalThis.countryFlagForPlace = countryFlagForPlace;\nglobalThis.personHeaderCountries = personHeaderCountries;`,
   context
 );
 
@@ -55,4 +57,16 @@ test('historic Prussia remains distinct from Germany in country flag lookup', ()
   assert.equal(context.countryFlagForPlace('Prussia').file, 'Flag_of_Prussia_(1918–1933).svg');
   assert.equal(context.countryFlagForPlace('Preussen').file, 'Flag_of_Prussia_(1918–1933).svg');
   assert.equal(context.countryFlagForPlace('Germany').file, 'de.svg');
+});
+
+test('person header shows birth country and only a distinct recorded death country', () => {
+  const countries = (birth, death) => Array.from(context.personHeaderCountries({
+    events: [{ type: 'BIRT', place: birth }, { type: 'DEAT', place: death }]
+  }), (country) => `${country.label}: ${country.country}`);
+  assert.deepEqual(countries('Example, Australia', 'Example, New Zealand'), ['Birth country: Australia', 'Death country: New Zealand']);
+  assert.deepEqual(countries('Australia', 'Australia'), ['Birth country: Australia']);
+  assert.deepEqual(countries('Turkiye', 'Turkey'), ['Birth country: Turkiye']);
+  assert.deepEqual(countries('', 'New Zealand'), ['Death country: New Zealand']);
+  assert.deepEqual(countries('Unknown place', ''), []);
+  assert.deepEqual(countries('Prussia', 'Germany'), ['Birth country: Prussia', 'Death country: Germany']);
 });

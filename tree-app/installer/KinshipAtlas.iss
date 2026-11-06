@@ -29,6 +29,30 @@ InfoBeforeFile=install-notes.txt
 #include "generated\files.iss"
 
 [Code]
+var
+  InstallationCompleted: Boolean;
+
+function ManualUpdateGuidance: String;
+begin
+  Result := 'The installation/update did not complete. Download the latest release and manually apply the verified application files to your installation folder containing index.html.' + #13#10 +
+    'Preserve GEDCOM files, media, primary-data.js, kinship-defaults.json and kinship-selections.json. Do not bypass antivirus warnings.' + #13#10 +
+    'https://github.com/andyando/KinshipAtlas/releases/latest';
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssDone then InstallationCompleted := True;
+end;
+
+procedure DeinitializeSetup;
+begin
+  if not InstallationCompleted then begin
+    Log(ManualUpdateGuidance);
+    if not WizardSilent then
+      MsgBox(ManualUpdateGuidance, mbError, MB_OK);
+  end;
+end;
+
 function GetFileAttributes(Name: String): LongWord;
   external 'GetFileAttributesW@kernel32.dll stdcall';
 
@@ -50,7 +74,7 @@ begin
   end;
 end;
 
-function PrepareToInstall(var NeedsRestart: Boolean): String;
+function ValidateInstallation: String;
 var
   VersionSource: AnsiString;
   Allowed, Version: String;
@@ -64,6 +88,7 @@ begin
       Result := 'The selected application folder has no readable version.js.';
       Exit;
     end;
+
     Start := Pos('version:', String(VersionSource));
     if Start = 0 then begin Result := 'The installed version is not allocated.'; Exit; end;
     Version := Trim(Copy(String(VersionSource), Start + 8, 100));
@@ -87,4 +112,10 @@ begin
       FindClose(FindRec);
     end;
   end;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := ValidateInstallation;
+  if Result <> '' then Result := Result + #13#10#13#10 + ManualUpdateGuidance;
 end;

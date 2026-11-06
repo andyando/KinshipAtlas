@@ -277,7 +277,7 @@
               <li><strong>Top bar:</strong> <strong>Map View</strong>, <strong>Reports</strong> and <strong>Media</strong> switch views. The name of the open GEDCOM file is shown in the middle; click it to change your defaults. The <strong>Saved</strong> / <strong>Save to GEDCOM</strong> indicator shows whether your edits are in the file.</li>
               <li><strong>Left:</strong> the directory of everyone in the tree, with search and filters.</li>
               <li><strong>Centre:</strong> the relationship map for the selected person.</li>
-              <li><strong>Right:</strong> the person record, with actions for editing, printing and media.</li>
+              <li><strong>Right:</strong> the person record, with actions for editing, printing and media. Recognized countries from the recorded birth and death places appear beside the hero image; the death country is omitted when it matches the birth country. Missing or unrecognized countries are not guessed.</li>
             </ul>
             <h4>Privacy</h4>
             <p>Nothing leaves this device unless you choose a feature that says so and tick its consent box: <strong>Search WikiTree</strong> (in a person record) and <strong>Suggest countries with GeoNames</strong> (in the birth country list). Each one shows exactly what it will send first.</p>
@@ -434,6 +434,7 @@
       <p id="updateDialogSummary" role="status" aria-live="polite"></p>
       <p id="updateDialogNotes" class="dialog-hint" hidden></p>
       <p class="dialog-hint">Download and verify the installer, checksum and Sigstore bundle from GitHub. Save your GEDCOM and exit the app before running setup. Select the application folder containing index.html. Sigstore is not a Windows-trusted signature.</p>
+      <p class="dialog-hint">If setup does not complete, manually apply the verified release to your installation folder. Replace application files only; preserve your GEDCOM, media, primary-data.js, kinship-defaults.json and kinship-selections.json. Do not bypass an antivirus warning.</p>
       <div class="dialog-actions">
         <a id="installAppUpdate" class="dialog-button dialog-button-primary" target="_blank" rel="noopener noreferrer">Open release downloads</a>
         <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="updateDialog">Cancel</button>

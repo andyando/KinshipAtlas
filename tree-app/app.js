@@ -2782,6 +2782,15 @@
     showToast('Select ☆ on an image to make it the card image.');
   }
 
+  function personHeaderCountries(person) {
+    const birth = countryFlagForPlace(person.events.find((event) => event.type === 'BIRT')?.place);
+    const death = countryFlagForPlace(person.events.find((event) => event.type === 'DEAT')?.place);
+    const countries = [];
+    if (birth) countries.push({ label: 'Birth country', ...birth });
+    if (death && death.code !== birth?.code) countries.push({ label: 'Death country', ...death });
+    return countries;
+  }
+
   let lastDetailsPersonId = null;
   let expandedMediaPersonId = null;
   let justAddedMedia = null;
@@ -2831,7 +2840,32 @@
     const title = document.createElement('h2'); title.textContent = person.name;
     const life = document.createElement('p'); life.className = 'detail-life'; life.textContent = lifespan(person);
     const id = document.createElement('span'); id.className = 'detail-id'; id.textContent = `GEDCOM @${person.id}@`;
-    hero.append(monogram, kicker, title, life, id);
+    const portraitRow = document.createElement('div');
+    portraitRow.className = 'detail-portrait-row';
+    portraitRow.append(monogram);
+    const countries = personHeaderCountries(person);
+    if (countries.length) {
+      const countryList = document.createElement('div');
+      countryList.className = 'detail-countries';
+      for (const country of countries) {
+        const row = document.createElement('div');
+        row.className = 'detail-country';
+        const flag = document.createElement('img');
+        flag.src = `flags/4x3/${country.file}`;
+        flag.alt = '';
+        const text = document.createElement('span');
+        const label = document.createElement('span');
+        label.className = 'detail-country-label';
+        label.textContent = country.label;
+        const name = document.createElement('span');
+        name.textContent = country.country;
+        text.append(label, name);
+        row.append(flag, text);
+        countryList.append(row);
+      }
+      portraitRow.append(countryList);
+    }
+    hero.append(portraitRow, kicker, title, life, id);
     const personActions = document.createElement('div');
     personActions.className = 'person-action-row';
     const iconButton = (icon, text, className = 'research-button') => {
@@ -7101,7 +7135,12 @@
       elements.updateDialogNotes.hidden = !update.releaseNotes;
       elements.updateDialog.showModal();
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'The application update could not be checked.');
+      elements.updateDialogSummary.textContent = 'The update check did not complete. No update was applied by this check. If an update is available, download it from GitHub and manually apply it to your installation folder containing index.html.';
+      elements.updateDialogNotes.textContent = error instanceof Error ? error.message : 'The application update could not be checked.';
+      elements.updateDialogNotes.hidden = false;
+      elements.installAppUpdate.href = 'https://github.com/andyando/KinshipAtlas/releases/latest';
+      elements.updateDialog.querySelector('[data-close-dialog]').textContent = 'Close';
+      elements.updateDialog.showModal();
     } finally {
       elements.updateAppButton.disabled = false;
       setButtonContent(elements.updateAppButton, 'update', 'Check for application updates');

@@ -48,6 +48,8 @@ Back up the installed folder, save GEDCOM edits, use **Settings > Exit Kinship A
 
 The old browser updater was quarantined by Defender. Do not restore it to migrate: obtain the new verified installer directly from GitHub Releases. Existing releases without installer assets cannot be installed by this new menu.
 
+If a check fails, the app keeps the error and a latest-release download link visible. The browser cannot observe the separate installer's outcome. Incomplete setup displays manual-update guidance (silent setup records it in its log when logging is enabled). Download the verified release from https://github.com/andyando/KinshipAtlas/releases/latest and apply application files to your existing folder containing `index.html`; preserve GEDCOM, media, `primary-data.js`, defaults and selections. Never bypass an antivirus warning to complete an update.
+
 ### Building and publishing a portable installer
 
 Install Inno Setup 6, then run `.\tree-app\installer\build-installer.ps1` from the repository root. The build rebuilds the launcher and packages a fixed runtime list plus tracked flag SVGs; it never sweeps local media or preferences. Output goes to ignored `dist/`. A local build is unsigned until signed separately; changing any executable after signing invalidates its bundle.
