@@ -86,6 +86,8 @@ In a person’s details, choose **Edit person details** to update the displayed 
 
 ### Photos, documents and media
 
+In the life-event editor, **Link media already attached to this person** lets you select an existing attachment (including media linked to another event). Choose **Link selected media**, then save the event. The file is referenced in the GEDCOM without being copied or uploaded; the same file can belong to multiple events. Removing a pending selection does not unlink it from other events. The media folder is only needed for previews, not for reusing a recorded path.
+
 **Link media** lets you select an existing folder or create a sibling `<GEDCOM name>_media` folder inside a parent folder you choose. The app matches GEDCOM file references to files in that folder and displays the primary image on each person card. Use **Media** or **Settings > Media library** to review media referenced anywhere in the GEDCOM, preview files, classify them, see linked people and primary-card selections, choose another linked image as a card image, or permanently delete a file and its GEDCOM links. Missing files are listed but cannot be previewed or deleted until found in a linked media folder. In a person’s details, add photos or PDFs to the selected folder; the app writes them there with collision-safe filenames. Use the trash icon on a media item to unlink it from that person; the file itself remains in the folder.
 
 ### Reports and data checks

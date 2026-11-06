@@ -7,6 +7,20 @@
 window.KINSHIP_VERSION = {
   releases: [
     {
+      version: '1.11.0',
+      date: '2026-11-06',
+      changes: [
+        'Life events can now link media already attached to the person, reusing the same file across multiple events without uploading it again.'
+      ]
+    },
+    {
+      version: '1.10.1',
+      date: '2026-11-06',
+      changes: [
+        'Made the existing-person selection list taller and full-width so matching people are easier to read and select.'
+      ]
+    },
+    {
       version: '1.10.0',
       date: '2026-11-06',
       changes: [

@@ -561,6 +561,9 @@
                     <button id="lifeEventMediaAdd" class="dialog-button dialog-button-quiet life-event-media-add" type="button">Upload photo or PDF</button>
                     <input id="lifeEventMediaInput" type="file" accept="image/*,.pdf,application/pdf" multiple tabindex="-1" aria-hidden="true">
                   </div>
+                  <label class="new-gedcom-field" for="lifeEventExistingMedia">Link media already attached to this person<select id="lifeEventExistingMedia"></select></label>
+                  <button id="lifeEventLinkMedia" class="dialog-button dialog-button-quiet" type="button">Link selected media</button>
+                  <p class="life-event-media-hint">The same file can be linked to multiple life events. Existing files are not copied or uploaded again.</p>
                   <div id="lifeEventMediaList" class="life-event-media-list" aria-labelledby="lifeEventMediaHeading"></div>
                   <p id="lifeEventMediaHint" class="life-event-media-hint" hidden></p>
                 </div>

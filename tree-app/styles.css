@@ -538,6 +538,9 @@ a.life-event-media-thumb:hover, a.life-event-media-thumb:focus-visible { border-
 .event-item-editable:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .new-gedcom-field input, .new-gedcom-field select { width: 100%; min-width: 0; height: 36px; padding: 0 9px; border: 1px solid #d5e0d9; border-radius: 4px; color: #344b42; background: #fff; font-size: 12px; }
 .new-gedcom-field input:focus, .new-gedcom-field select:focus { outline: 2px solid rgba(47,120,106,.22); border-color: #7eaa94; }
+#relativeExistingFields { grid-column: 1 / -1; }
+#relativeExistingPerson { height: 180px; padding: 6px; }
+#relativeExistingPerson option { padding: 5px 3px; }
 .person-editor-dialog { width: min(940px, calc(100vw - 28px)); }
 .person-editor-panel { width: auto; }
 .gedcom-field-heading { display: grid; grid-template-columns: 52px 110px minmax(0,1fr) 30px; gap: 5px; color: #788983; font-size: 9px; font-weight: 800; letter-spacing: .8px; text-transform: uppercase; }

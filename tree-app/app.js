@@ -4417,12 +4417,36 @@
     lifeEventPreviewUrls.splice(0).forEach((url) => URL.revokeObjectURL(url));
   }
 
+  function availableLifeEventMedia(pending) {
+    const person = state.people.get(pending.personId);
+    const paths = [...mediaPathsForPerson(pending.personId),
+      ...(person?.events || []).flatMap((event) => event.mediaPaths || [])];
+    return [...new Set(paths)].filter((path) =>
+      !pending.existingMedia.includes(path) && !(pending.linkedMedia || []).includes(path));
+  }
+
   function renderLifeEventMedia() {
     const fields = lifeEventFields();
     const pending = state.pendingLifeEvent;
     if (!pending) return;
     releaseLifeEventPreviewUrls();
-    const existing = pending.existingMedia;
+    const existing = [...pending.existingMedia, ...(pending.linkedMedia || [])];
+    const selector = document.querySelector('#lifeEventExistingMedia');
+    const previous = selector.value;
+    selector.replaceChildren();
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Select attached media…';
+    selector.append(placeholder);
+    for (const path of availableLifeEventMedia(pending)) {
+      const option = document.createElement('option');
+      option.value = path;
+      option.textContent = path;
+      selector.append(option);
+    }
+    selector.value = [...selector.options].some((option) => option.value === previous) ? previous : '';
+    selector.disabled = selector.options.length === 1;
+    document.querySelector('#lifeEventLinkMedia').disabled = selector.disabled;
     const added = pending.newMedia;
     const makeItem = (name, thumbContent, className = '', href = '') => {
       const item = document.createElement('div');
@@ -4474,7 +4498,9 @@
         missing += 1;
         item = makeItem(name, state.mediaIndex ? 'Not found' : 'Not linked', 'is-missing');
       }
-      item.append(makeRemoveButton('deleteEventMedia', index, '🗑', `Remove or delete ${name}`));
+      item.append(index < pending.existingMedia.length
+        ? makeRemoveButton('deleteEventMedia', index, '🗑', `Remove or delete ${name}`)
+        : makeRemoveButton('removeLinkedMedia', index - pending.existingMedia.length, '×', `Don't link ${name}`));
       items.push(item);
     });
     added.forEach((entry, index) => {
@@ -4587,7 +4613,7 @@
         return null;
       }
     }
-    return pending.newMedia.map((entry) => entry.savedName);
+    return [...new Set([...(pending.linkedMedia || []), ...pending.newMedia.map((entry) => entry.savedName)])];
   }
 
   let pendingEventMediaDelete = null;
@@ -4702,7 +4728,7 @@
     const editing = Boolean(event);
     state.pendingLifeEvent = {
       personId: person.id, ordinal: editing ? event.ordinal : null, familyId: event?.familyId || null, original: null,
-      existingMedia: editing ? [...(event.mediaPaths || [])] : [], newMedia: []
+      existingMedia: editing ? [...(event.mediaPaths || [])] : [], newMedia: [], linkedMedia: []
     };
     fields.error.hidden = true;
     fields.remove.hidden = !editing;
@@ -6868,6 +6894,23 @@
     submitLifeEvent();
   });
   lifeEvent.mediaAdd.addEventListener('click', () => lifeEvent.mediaInput.click());
+  document.querySelector('#lifeEventLinkMedia').addEventListener('click', () => {
+    const pending = state.pendingLifeEvent;
+    const path = document.querySelector('#lifeEventExistingMedia').value;
+    if (!pending || !availableLifeEventMedia(pending).includes(path)) {
+      lifeEvent.error.textContent = 'Select media already attached to this person.';
+      lifeEvent.error.hidden = false;
+      return;
+    }
+    pending.linkedMedia.push(path);
+    renderLifeEventMedia();
+  });
+  lifeEvent.mediaList.addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-remove-linked-media]');
+    if (!button || !state.pendingLifeEvent) return;
+    state.pendingLifeEvent.linkedMedia.splice(Number(button.dataset.removeLinkedMedia), 1);
+    renderLifeEventMedia();
+  });
   lifeEvent.sourceAdd.addEventListener('click', () => addLifeEventSourceRow().querySelector('select').focus());
   document.querySelector('#personDeleteContinue').addEventListener('click', () => {
     const plan = pendingPersonDelete;
