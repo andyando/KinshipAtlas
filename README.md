@@ -9,7 +9,7 @@ No family data is included in this repository. Version history is shown in the a
 Kinship Atlas does not need installing system-wide and can live in any folder you choose: a local drive, a synced folder, or a USB stick. All of its paths are relative to its own folder.
 
 1. Copy the `tree-app` folder to the location you want, and rename it if you like.
-2. Keep these together in that folder: `index.html`, `app.js`, `updater.js`, `map.js`, `styles.css`, `version.js`, `favicon.svg`, `welcome-pattern.svg`, `data/`, `flags/` and `launcher/kinship-atlas.ico`, plus `Kinship Atlas.exe` on Windows and `server.js` if you use the Node.js helper.
+2. Keep these together in that folder: `index.html`, `app.js`, `release-check.js`, `map.js`, `styles.css`, `version.js`, `favicon.svg`, `welcome-pattern.svg`, `data/`, `flags/` and `launcher/kinship-atlas.ico`, plus `Kinship Atlas.exe` on Windows and `server.js` if you use the Node.js helper.
 3. Keep your GEDCOM file and media folder wherever suits you. They do not need to be inside the app folder unless you use the optional `Primary GEDCOM` and `Primary Media Library` folders described below.
 
 Requirements:
@@ -29,7 +29,30 @@ To open the same tree every time, use **Settings > Update defaults** to choose a
 
 ### Updating the application
 
-In Edge or Chrome, choose **Settings > Check for application updates**. Updates are downloaded only from published, numbered GitHub Releases. The repository must be public and the release version must be listed in the app's version history. When prompted, select the installed `tree-app` folder and allow write access. The updater verifies files against GitHub's release tree, updates application files only, and does not change GEDCOM files, media folders, `primary-data.js`, `kinship-defaults.json` or `kinship-selections.json`. It also excludes any currently selected media folder inside the application folder. Save GEDCOM edits before updating, then refresh the tab when the update finishes. The Windows launcher executable is not replaced by the in-app updater.
+Choose **Settings > Check for application updates** in any current browser. The checker contacts public GitHub Releases but never writes local application files or executes downloads. A newer release must have a numbered version history, a Windows installer, its Sigstore bundle and `SHA256SUMS`. The menu opens the release page; installation is a separate, user-approved step.
+
+Download `KinshipAtlas-Setup-VERSION.exe`, its `.exe.bundle.json` and `SHA256SUMS` from the same release. Verify the SHA-256 checksum and Sigstore provenance before running setup. Checksums alone are not publisher authentication. With [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) installed, verification for version 1.9.0 is:
+
+```powershell
+$file = 'KinshipAtlas-Setup-1.9.0.exe'
+$expected = (Get-Content .\SHA256SUMS | Where-Object { $_ -match ('  ' + [regex]::Escape($file) + '$') })
+if (@($expected).Count -ne 1) { throw 'Missing or duplicate installer checksum.' }
+if ((Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLower() -ne $expected.Substring(0, 64)) { throw 'Checksum mismatch.' }
+cosign verify-blob --bundle "$file.bundle.json" --certificate-identity 'https://github.com/andyando/KinshipAtlas/.github/workflows/release-installer.yml@refs/tags/v1.9.0' --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' $file
+if ($LASTEXITCODE -ne 0) { throw 'Provenance verification failed. Do not run setup.' }
+```
+
+Change the version in both the filename and expected certificate identity for later releases; do not use a wildcard signer identity. A bundle previously generated for `Kinship Atlas.exe` does not authenticate this installer. **Sigstore is not Windows Authenticode signing**: Windows may show an unknown publisher and antivirus acceptance is not guaranteed. Keep protection enabled and investigate detections rather than adding exclusions.
+
+Back up the installed folder, save GEDCOM edits, use **Settings > Exit Kinship Atlas**, and close its tabs before running setup. Choose the existing folder containing `index.html` (not its parent, GEDCOM or media folder), or an empty folder for a new copy. Setup requires no administrator access, creates no uninstaller or shortcuts, and replaces only its explicitly packaged app files, including the launcher. It does not delete obsolete files or package GEDCOMs, media, `primary-data.js`, defaults or selections. Keep personal media outside reserved application asset folders (`flags`, `data`, `launcher`); custom files colliding with packaged app filenames would be replaced. Setup rejects junction/symlink destination folders and unallocated installed versions or downgrades. Reopen the app afterwards.
+
+The old browser updater was quarantined by Defender. Do not restore it to migrate: obtain the new verified installer directly from GitHub Releases. Existing releases without installer assets cannot be installed by this new menu.
+
+### Building and publishing a portable installer
+
+Install Inno Setup 6, then run `.\tree-app\installer\build-installer.ps1` from the repository root. The build rebuilds the launcher and packages a fixed runtime list plus tracked flag SVGs; it never sweeps local media or preferences. Output goes to ignored `dist/`. A local build is unsigned until signed separately; changing any executable after signing invalidates its bundle.
+
+For automated signing, commit the changes and push a new tag such as `v1.9.0` matching the top entry in `version.js`. The **Build portable installer** GitHub Actions workflow runs tests, builds setup, signs it using Sigstore's GitHub OIDC identity, verifies the bundle, and attaches setup, bundle and checksums to a **draft** release. It requires repository Actions and workflow token write access; no personal signing token is embedded. Inspect the workflow result and scan/test the installer before publishing the draft as a stable release. Do not publish first or reuse an immutable release: assets must be attached before publication. The workflow never uploads the family archive or the locally created launcher signing bundle.
 
 ## Using the app
 

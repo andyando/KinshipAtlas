@@ -1,0 +1,65 @@
+name: Build portable installer
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  installer:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate tag and tests
+        shell: pwsh
+        run: |
+          $version = node -e "const vm=require('node:vm'),fs=require('node:fs'),c=vm.createContext({window:{}});vm.runInContext(fs.readFileSync('tree-app/version.js','utf8'),c);console.log(c.window.KINSHIP_VERSION.releases[0].version)"
+          if ($env:GITHUB_REF_NAME -cne "v$version") { throw 'Tag must match the top version.js entry.' }
+          node --test tree-app/tests/*.test.js
+          if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
+      - name: Build installer
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed.' }
+          }
+          .\tree-app\installer\build-installer.ps1
+          $installer = Get-ChildItem dist\KinshipAtlas-Setup-*.exe
+          .\tree-app\tests\installer.test.ps1 -Installer $installer.FullName
+      - uses: sigstore/cosign-installer@v3
+      - name: Sign and verify provenance; produce checksums
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem dist\KinshipAtlas-Setup-*.exe
+          if (@($installer).Count -ne 1) { throw 'Expected exactly one installer.' }
+          $bundle = "$($installer.FullName).bundle.json"
+          cosign sign-blob --yes --bundle $bundle $installer.FullName
+          if ($LASTEXITCODE -ne 0) { throw 'Sigstore signing failed.' }
+          $identity = "https://github.com/$env:GITHUB_REPOSITORY/.github/workflows/release-installer.yml@$env:GITHUB_REF"
+          cosign verify-blob --bundle $bundle --certificate-identity $identity --certificate-oidc-issuer https://token.actions.githubusercontent.com $installer.FullName
+          if ($LASTEXITCODE -ne 0) { throw 'Sigstore verification failed.' }
+          $lines = Get-ChildItem dist -File | Where-Object Name -ne 'SHA256SUMS' | Sort-Object Name | ForEach-Object { "$((Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLower())  $($_.Name)" }
+          $lines | Set-Content dist\SHA256SUMS -Encoding ascii
+      - name: Attach artifacts to a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release view $env:GITHUB_REF_NAME --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:GITHUB_REF_NAME --repo $env:GITHUB_REPOSITORY --draft --title "Kinship Atlas $($env:GITHUB_REF_NAME)" --notes "Portable Windows setup with SHA-256 checksums and Sigstore provenance. Verify before running; Sigstore is not Authenticode."
+            if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed.' }
+          }
+          $files = (Get-ChildItem dist -File).FullName
+          gh release upload $env:GITHUB_REF_NAME @files --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { throw 'Release asset upload failed.' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: portable-installer
+          path: dist/*

@@ -1,0 +1,15 @@
+Kinship Atlas portable-folder setup
+
+Save GEDCOM edits, close browser tabs, and use Settings > Exit Kinship Atlas
+to stop the local helper before continuing. Back up your existing folder first.
+
+Choose the existing application folder containing index.html to update it,
+or choose an empty folder for a new copy. No administrator access is required.
+
+Setup replaces only the packaged application files. It does not delete old
+files or include GEDCOM files, primary-data.js, defaults, selections or media.
+Keep personal media outside the reserved app asset folders: flags, data and
+launcher. Do not select your media folder or Primary GEDCOM as the app folder.
+
+Sigstore bundles establish verifiable provenance, not Windows Authenticode
+publisher trust. Do not bypass antivirus detections or disable protection.

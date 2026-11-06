@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="styles.css">
   <script src="primary-data.js" defer></script>
   <script src="version.js" defer></script>
-  <script src="updater.js" defer></script>
+  <script src="release-check.js" defer></script>
   <script src="data/world-data.js" defer></script>
   <script src="map.js" defer></script>
   <script src="app.js" defer></script>
@@ -419,7 +419,7 @@
             <h4>Finishing a session</h4>
             <p><strong>Settings &gt; Exit Kinship Atlas</strong> saves your preferences and stops the local helper. If there are unsaved GEDCOM changes, you are asked before exiting.</p>
             <h4>Updating the application</h4>
-            <p>Choose <strong>Settings &gt; Check for application updates</strong> to check for a published, numbered GitHub release. When one is available, choose the Kinship Atlas application folder to install it. This requires Edge or Chrome with local folder access and a public repository. The updater changes application files only; it does not update the Windows launcher or touch your GEDCOM, media, defaults, or image selections. A currently selected media folder inside the application folder is also excluded. Refresh the tab after the update completes.</p>
+            <p><strong>Settings &gt; Check for application updates</strong> checks published stable GitHub releases without writing local files. Download the Windows setup executable, its Sigstore bundle and SHA256SUMS from the release page. Follow the verification instructions in the README, save your GEDCOM and exit the app and helper, then run setup and select the folder containing index.html. Setup replaces only packaged application files, including the launcher; it does not delete files or include your GEDCOM, media or preferences. Keep personal media outside application asset folders such as flags and data. Sigstore is not Windows Authenticode signing and does not guarantee antivirus acceptance.</p>
           </article>
         </div>
       </div>
@@ -431,11 +431,11 @@
   <dialog id="updateDialog" class="app-dialog" aria-labelledby="updateDialogTitle">
     <section class="dialog-panel">
       <h2 id="updateDialogTitle">Application update available</h2>
-      <p id="updateDialogSummary"></p>
+      <p id="updateDialogSummary" role="status" aria-live="polite"></p>
       <p id="updateDialogNotes" class="dialog-hint" hidden></p>
-      <p class="dialog-hint">The updater changes application files only. Your GEDCOM, media, defaults, and image selections are not changed.</p>
+      <p class="dialog-hint">Download and verify the installer, checksum and Sigstore bundle from GitHub. Save your GEDCOM and exit the app before running setup. Select the application folder containing index.html. Sigstore is not a Windows-trusted signature.</p>
       <div class="dialog-actions">
-        <button id="installAppUpdate" class="dialog-button dialog-button-primary" type="button">Choose app folder and install</button>
+        <a id="installAppUpdate" class="dialog-button dialog-button-primary" target="_blank" rel="noopener noreferrer">Open release downloads</a>
         <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="updateDialog">Cancel</button>
       </div>
     </section>

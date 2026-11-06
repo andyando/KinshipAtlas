@@ -7,6 +7,13 @@
 window.KINSHIP_VERSION = {
   releases: [
     {
+      version: '1.9.0',
+      date: '2026-11-06',
+      changes: [
+        'Replaced browser file-writing updates with GitHub release checks and a portable-folder Windows installer distributed with checksums and Sigstore provenance.'
+      ]
+    },
+    {
       version: '1.8.2',
       date: '2026-11-06',
       changes: [

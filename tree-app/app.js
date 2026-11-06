@@ -134,7 +134,6 @@
     printFooter: document.querySelector('#printFooter')
   };
   let toastTimer = 0;
-  let pendingAppUpdate = null;
 
   function splitXref(value) {
     return value ? value.replace(/^@|@$/g, '') : '';
@@ -7081,8 +7080,8 @@
       showToast('Save your GEDCOM changes before updating the application.');
       return;
     }
-    if (!window.KINSHIP_UPDATER) {
-      showToast('The application updater could not be loaded. Restart Kinship Atlas and try again.');
+    if (!window.KINSHIP_RELEASES) {
+      showToast('The release checker could not be loaded. Restart Kinship Atlas and try again.');
       return;
     }
     const releases = window.KINSHIP_VERSION?.releases;
@@ -7090,13 +7089,14 @@
     elements.updateAppButton.disabled = true;
     setButtonContent(elements.updateAppButton, 'update', 'Checking for updates…');
     try {
-      const update = await window.KINSHIP_UPDATER.checkForUpdate(currentVersion, releases);
+      const update = await window.KINSHIP_RELEASES.checkForUpdate(currentVersion, releases);
       if (!update.available) {
         showToast(`Kinship Atlas ${currentVersion} is up to date.`);
         return;
       }
-      pendingAppUpdate = update;
-      elements.updateDialogSummary.textContent = `Install Kinship Atlas ${update.latestVersion} over version ${update.currentVersion}?`;
+      elements.installAppUpdate.href = update.releaseUrl;
+      elements.updateDialog.querySelector('[data-close-dialog]').textContent = 'Cancel';
+      elements.updateDialogSummary.textContent = `Kinship Atlas ${update.latestVersion} is available. Download the portable-folder Windows installer to update version ${currentVersion}.`;
       elements.updateDialogNotes.textContent = update.releaseNotes.slice(0, 3000);
       elements.updateDialogNotes.hidden = !update.releaseNotes;
       elements.updateDialog.showModal();
@@ -7105,36 +7105,6 @@
     } finally {
       elements.updateAppButton.disabled = false;
       setButtonContent(elements.updateAppButton, 'update', 'Check for application updates');
-    }
-  }
-
-  async function installApplicationUpdate() {
-    if (state.gedcomDirty || state.gedcomSaving) {
-      elements.updateDialog.close();
-      showToast('Save your GEDCOM changes before updating the application.');
-      return;
-    }
-    if (!pendingAppUpdate || typeof window.showDirectoryPicker !== 'function') {
-      elements.updateDialog.close();
-      showToast('The application folder picker is unavailable. Use Edge or Chrome and try again.');
-      return;
-    }
-    const update = pendingAppUpdate;
-    pendingAppUpdate = null;
-    elements.installAppUpdate.disabled = true;
-    elements.updateDialog.close();
-    try {
-      const root = await window.showDirectoryPicker({ id: 'kinship-atlas-application', mode: 'readwrite' });
-      const count = await window.KINSHIP_UPDATER.installUpdate(update, root, [
-        state.mediaDirectoryHandle, state.rememberedMediaDirectoryHandle
-      ]);
-      showToast(`Updated ${count} application files to version ${update.latestVersion}. Refresh this tab to finish.`);
-    } catch (error) {
-      if (error?.name !== 'AbortError') {
-        showToast(error instanceof Error ? error.message : 'The application update could not be installed.');
-      }
-    } finally {
-      elements.installAppUpdate.disabled = false;
     }
   }
 
@@ -7462,7 +7432,6 @@
 
   document.querySelector('#defaultsButton').addEventListener('click', openDefaultsDialog);
   elements.updateAppButton.addEventListener('click', checkApplicationUpdates);
-  elements.installAppUpdate.addEventListener('click', installApplicationUpdate);
   elements.treeLabel.addEventListener('click', openDefaultsDialog);
 
   const gedcomImport = {
