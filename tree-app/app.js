@@ -209,6 +209,12 @@
     return `${year}-${month}-${day}`;
   }
 
+  function enteredGedcomDate(value) {
+    const text = String(value || '').replace(/[\r\n]+/g, ' ').trim();
+    return datePickerValue(text) && /^\d{4}-\d{2}-\d{2}$/.test(text)
+      ? formatGedcomDate(text) : text;
+  }
+
   function splitGedcomRecords(text) {
     const records = [];
     let active = null;
@@ -5714,9 +5720,154 @@
     return { people: personRecords.length, families: familyRecords.length, joinedFamilies: mergedFamilies.length, linkedRecords: newRecords.length, mergedPeople, mergedRecords };
   }
 
+  function existingRelativeCandidates(query) {
+    const words = normalizeDirectoryName(query).split(/\s+/).filter(Boolean);
+    return [...state.people.values()].filter((person) => person.id !== state.selectedId
+      && words.every((word) => normalizeDirectoryName(`${person.name} ${person.id}`).includes(word)))
+      .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  }
+
+  function syncExistingRelativeChoices() {
+    const select = document.querySelector('#relativeExistingPerson');
+    const selectedId = select.value;
+    const people = existingRelativeCandidates(document.querySelector('#relativeSearch').value);
+    select.replaceChildren();
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Select a person…';
+    select.append(placeholder);
+    for (const person of people.slice(0, 100)) {
+      const option = document.createElement('option');
+      option.value = person.id;
+      option.textContent = `${person.name} · ${lifespan(person)} · @${person.id}@`;
+      select.append(option);
+    }
+    select.value = [...select.options].some((option) => option.value === selectedId) ? selectedId : '';
+    document.querySelector('#relativeSearchCount').textContent = `${Math.min(100, people.length)} of ${people.length} matches. Refine the search if needed.`;
+  }
+
+  function syncRelativeEntryMode() {
+    const supportsExisting = ['PARENT', 'PARTNER'].includes(elements.relativeType.value);
+    document.querySelector('#relativeModeField').hidden = !supportsExisting;
+    const existing = supportsExisting && document.querySelector('#relativeMode').value === 'EXISTING';
+    document.querySelector('#relativeExistingFields').hidden = !existing;
+    for (const id of ['relativeGivenName', 'relativeSurname', 'relativeSex', 'relativeBirthDate',
+      'relativeBirthPlace', 'relativeDeathDate', 'relativeDeathPlace']) {
+      const field = document.getElementById(id).closest('label');
+      field.hidden = existing;
+      for (const input of field.querySelectorAll('input, select')) input.disabled = existing;
+    }
+    document.querySelector('#relativeExistingPerson').required = existing;
+    document.querySelector('#relativeDuplicateWarning').hidden = true;
+    document.querySelector('#relativeDuplicateConfirmationLabel').hidden = true;
+    document.querySelector('#relativeError').hidden = true;
+    document.querySelector('#relativeFamilyField').hidden = elements.relativeType.value !== 'PARENT';
+    const familySelect = document.querySelector('#relativeFamily');
+    familySelect.replaceChildren();
+    const role = elements.relativeParentRole.value;
+    const families = [...state.families.values()].filter((family) => family.childIds.includes(state.selectedId)
+      && !(role === 'HUSB' ? family.husbandId : family.wifeId));
+    for (const family of families) {
+      const option = document.createElement('option');
+      option.value = family.id;
+      const other = state.people.get(role === 'HUSB' ? family.wifeId : family.husbandId);
+      option.textContent = `@${family.id}@ · ${other?.name || 'No other parent recorded'}`;
+      familySelect.append(option);
+    }
+    const newFamily = document.createElement('option');
+    newFamily.value = '';
+    newFamily.textContent = 'Create a separate parent family';
+    familySelect.append(newFamily);
+    if (families.length !== 1) familySelect.value = '';
+    if (existing) syncExistingRelativeChoices();
+  }
+
+  function linkExistingRelative(personId, relation, parentRole, parentFamilyId) {
+    const selectedId = state.selectedId;
+    if (!['PARENT', 'PARTNER'].includes(relation) || !state.people.has(personId) || personId === selectedId) {
+      throw new Error('Select a different existing person for this relationship.');
+    }
+    const selected = state.people.get(selectedId);
+    const person = state.people.get(personId);
+    const record = (id, tag) => state.gedcomRecords.find((entry) => entry.xref === id && entry.tag === tag);
+    const selectedRecord = record(selectedId, 'INDI');
+    const personRecord = record(personId, 'INDI');
+    if (!selected || !selectedRecord || !personRecord) throw new Error('The selected person record could not be found.');
+    const families = [...state.families.values()];
+    const ancestorOf = (ancestor, child) => {
+      const pending = [child];
+      const visited = new Set();
+      while (pending.length) {
+        const id = pending.pop();
+        if (visited.has(id)) continue;
+        visited.add(id);
+        for (const family of families.filter((entry) => entry.childIds.includes(id))) {
+          for (const parent of [family.husbandId, family.wifeId].filter(Boolean)) {
+            if (parent === ancestor) return true;
+            pending.push(parent);
+          }
+        }
+      }
+      return false;
+    };
+    if (relation === 'PARENT' && ancestorOf(selectedId, personId)) {
+      throw new Error('This parent link would create an ancestry cycle.');
+    }
+    if (relation === 'PARTNER' && (ancestorOf(selectedId, personId) || ancestorOf(personId, selectedId))) {
+      throw new Error('An ancestor and descendant cannot be linked as partners here.');
+    }
+    if (families.some((family) => relation === 'PARENT'
+      ? family.childIds.includes(selectedId) && [family.husbandId, family.wifeId].includes(personId)
+      : [family.husbandId, family.wifeId].includes(selectedId) && [family.husbandId, family.wifeId].includes(personId))) {
+      throw new Error('These people already have this relationship.');
+    }
+    let familyRecord;
+    let familyId;
+    const role = relation === 'PARENT' ? parentRole : selected.sex === 'F' ? 'HUSB' : 'WIFE';
+    if (!['HUSB', 'WIFE'].includes(role)) throw new Error('Choose a valid parent role.');
+    if (relation === 'PARENT' && parentFamilyId) {
+      const family = state.families.get(parentFamilyId);
+      familyRecord = record(parentFamilyId, 'FAM');
+      if (!familyRecord || !family?.childIds.includes(selectedId)
+        || (role === 'HUSB' ? family.husbandId : family.wifeId)) {
+        throw new Error('That parent family is unavailable or the parent role is already occupied.');
+      }
+      if (family.childIds.some((childId) => childId === personId || ancestorOf(childId, personId))) {
+        throw new Error('This parent link would create an ancestry cycle for a child in this family.');
+      }
+      familyId = parentFamilyId;
+    } else {
+      familyId = nextGedcomXref('F', 'FAM');
+      familyRecord = { xref: familyId, tag: 'FAM', lines: [`0 @${familyId}@ FAM`] };
+    }
+    appendRecordLine(familyRecord, `1 ${role} @${personId}@`);
+    appendRecordLine(familyRecord, relation === 'PARENT'
+      ? `1 CHIL @${selectedId}@` : `1 ${role === 'HUSB' ? 'WIFE' : 'HUSB'} @${selectedId}@`);
+    appendRecordLine(selectedRecord, `1 ${relation === 'PARENT' ? 'FAMC' : 'FAMS'} @${familyId}@`);
+    appendRecordLine(personRecord, `1 FAMS @${familyId}@`);
+    if (!record(familyId, 'FAM')) addRecordBeforeTrailer(familyRecord);
+    return personId;
+  }
+
   function createRelativeRecord() {
     const selected = state.people.get(state.selectedId);
     if (!selected) return false;
+    if (['PARENT', 'PARTNER'].includes(elements.relativeType.value)
+      && document.querySelector('#relativeMode').value === 'EXISTING') {
+      const errorBox = document.querySelector('#relativeError');
+      try {
+        const personId = linkExistingRelative(document.querySelector('#relativeExistingPerson').value,
+          elements.relativeType.value, elements.relativeParentRole.value, document.querySelector('#relativeFamily').value);
+        refreshAfterGedcomMutation(personId);
+        elements.addRelativeDialog.close();
+        elements.addRelativeForm.reset();
+        return true;
+      } catch (error) {
+        errorBox.textContent = error instanceof Error ? error.message : 'The existing person could not be linked.';
+        errorBox.hidden = false;
+        return false;
+      }
+    }
     const givenName = cleanGedcomValue(document.querySelector('#relativeGivenName').value).replaceAll('/', ' ').trim();
     const surname = cleanGedcomValue(document.querySelector('#relativeSurname').value).replaceAll('/', ' ').trim();
     if (!givenName) {
@@ -5737,9 +5888,9 @@
     duplicateWarning.hidden = true;
     duplicateConfirmation.hidden = true;
     const sex = document.querySelector('#relativeSex').value;
-    const birthDate = formatGedcomDate(document.querySelector('#relativeBirthDate').value);
+    const birthDate = enteredGedcomDate(document.querySelector('#relativeBirthDate').value);
     const birthPlace = cleanGedcomValue(document.querySelector('#relativeBirthPlace').value);
-    const deathDate = formatGedcomDate(document.querySelector('#relativeDeathDate').value);
+    const deathDate = enteredGedcomDate(document.querySelector('#relativeDeathDate').value);
     const deathPlace = cleanGedcomValue(document.querySelector('#relativeDeathPlace').value);
     const relation = elements.relativeType.value;
     const personId = nextGedcomXref('I', 'INDI');
@@ -6168,7 +6319,7 @@
     const givenName = cleanGedcomValue(document.querySelector('#newGedcomGivenName').value).replaceAll('/', ' ').trim();
     const surname = cleanGedcomValue(document.querySelector('#newGedcomSurname').value).replaceAll('/', ' ').trim();
     const sex = document.querySelector('#newGedcomSex').value;
-    const birthDate = formatGedcomDate(document.querySelector('#newGedcomBirthDate').value);
+    const birthDate = enteredGedcomDate(document.querySelector('#newGedcomBirthDate').value);
     const birthPlace = cleanGedcomValue(document.querySelector('#newGedcomBirthPlace').value);
     if (!givenName) {
       showToast('Enter at least one given name to create the GEDCOM.');
@@ -6591,6 +6742,7 @@
       document.querySelector('#relativeDuplicateWarning').hidden = true;
       document.querySelector('#relativeDuplicateConfirmationLabel').hidden = true;
       elements.relativeParentRoleField.hidden = elements.relativeType.value !== 'PARENT';
+      syncRelativeEntryMode();
       elements.addRelativeDialog.showModal();
       return;
     }
@@ -6606,6 +6758,7 @@
       document.querySelector('#relativeDuplicateWarning').hidden = true;
       document.querySelector('#relativeDuplicateConfirmationLabel').hidden = true;
       elements.relativeParentRoleField.hidden = elements.relativeType.value !== 'PARENT';
+      syncRelativeEntryMode();
       elements.addRelativeDialog.showModal();
       return;
     }
@@ -6674,6 +6827,15 @@
   elements.personSummaryBirthDate.addEventListener('input', () => {
     elements.personSummaryBirthDatePicker.value = datePickerValue(elements.personSummaryBirthDate.value);
   });
+  for (const id of ['newGedcomBirthDate', 'relativeBirthDate', 'relativeDeathDate']) {
+    const input = document.getElementById(id);
+    const picker = document.getElementById(`${id}Picker`);
+    input.addEventListener('input', () => { picker.value = datePickerValue(input.value); });
+    picker.addEventListener('change', () => {
+      if (picker.value) input.value = formatGedcomDate(picker.value);
+    });
+    input.form.addEventListener('reset', () => { picker.value = ''; });
+  }
   elements.personSummaryBirthDatePicker.addEventListener('change', () => {
     if (elements.personSummaryBirthDatePicker.value) {
       elements.personSummaryBirthDate.value = formatGedcomDate(elements.personSummaryBirthDatePicker.value);
@@ -6871,13 +7033,18 @@
   });
   elements.addRelativeForm.addEventListener('submit', (event) => {
     event.preventDefault();
-    if (!createRelativeRecord() && document.querySelector('#relativeDuplicateWarning').hidden) {
+    if (!createRelativeRecord() && document.querySelector('#relativeDuplicateWarning').hidden
+      && document.querySelector('#relativeError').hidden) {
       showToast('Enter a given name and ensure a person record is selected.');
     }
   });
   elements.relativeType.addEventListener('change', () => {
     elements.relativeParentRoleField.hidden = elements.relativeType.value !== 'PARENT';
+    syncRelativeEntryMode();
   });
+  document.querySelector('#relativeMode').addEventListener('change', syncRelativeEntryMode);
+  elements.relativeParentRole.addEventListener('change', syncRelativeEntryMode);
+  document.querySelector('#relativeSearch').addEventListener('input', syncExistingRelativeChoices);
   document.querySelector('#relationshipForm').addEventListener('submit', (event) => {
     event.preventDefault();
     saveRelationship();

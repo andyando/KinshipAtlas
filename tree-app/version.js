@@ -7,6 +7,20 @@
 window.KINSHIP_VERSION = {
   releases: [
     {
+      version: '1.10.0',
+      date: '2026-11-06',
+      changes: [
+        'Add relative can now search and link existing GEDCOM people as parents or partners/spouses without creating duplicate people.'
+      ]
+    },
+    {
+      version: '1.9.3',
+      date: '2026-11-06',
+      changes: [
+        'Date entry now clearly supports year-only or month-and-year dates alongside exact-date pickers, including new trees and relatives.'
+      ]
+    },
+    {
       version: '1.9.2',
       date: '2026-11-06',
       changes: [

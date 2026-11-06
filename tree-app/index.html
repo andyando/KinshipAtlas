@@ -360,7 +360,7 @@
               <li><strong>Delete person:</strong> removes the person and all links to them from the GEDCOM.</li>
             </ul>
             <h4>Dates</h4>
-            <p>Type dates in GEDCOM style, for example <code>12 MAR 1883</code> or <code>ABT 1883</code>, or use the calendar for an exact date.</p>
+            <p>Day and month are optional: type <code>1883</code> for a year, <code>MAR 1883</code> for a month and year, or <code>12 MAR 1883</code> for a full date. GEDCOM qualifiers such as <code>ABT 1883</code> are also supported. Use the calendar for an exact date; partial dates are saved without adding an unknown day or month.</p>
             <h4>Saving</h4>
             <ul>
               <li>Edits are written back to your GEDCOM file automatically whenever the browser allows it. Records and tags you did not edit are preserved.</li>
@@ -509,7 +509,7 @@
         <label class="new-gedcom-field" for="newGedcomGivenName">Given name(s)<input id="newGedcomGivenName" type="text" required maxlength="120" autocomplete="given-name"></label>
         <label class="new-gedcom-field" for="newGedcomSurname">Surname<input id="newGedcomSurname" type="text" maxlength="120" autocomplete="family-name"></label>
         <label class="new-gedcom-field" for="newGedcomSex">Sex<select id="newGedcomSex"><option value="">Not recorded</option><option value="F">Female</option><option value="M">Male</option></select></label>
-        <label class="new-gedcom-field" for="newGedcomBirthDate">Birth date<input id="newGedcomBirthDate" type="date"></label>
+        <label class="new-gedcom-field" for="newGedcomBirthDate">Birth date (day and month optional)<input id="newGedcomBirthDate" type="text" maxlength="40" placeholder="1883, MAR 1883 or 14 MAR 1883"><input id="newGedcomBirthDatePicker" type="date" aria-label="Choose exact birth date for new tree"></label>
         <label class="new-gedcom-field" for="newGedcomBirthPlace">Birth place<input id="newGedcomBirthPlace" type="text" maxlength="200"></label>
       </div>
       <div id="newGedcomNotice" class="dialog-notice" hidden></div>
@@ -544,7 +544,7 @@
         <label id="lifeEventSpouseField" class="new-gedcom-field life-event-wide" for="lifeEventSpouse" hidden>Spouse<select id="lifeEventSpouse"></select></label>
         <label id="lifeEventNewSpouseGivenField" class="new-gedcom-field" for="lifeEventNewSpouseGiven" hidden>New spouse given name(s)<input id="lifeEventNewSpouseGiven" type="text" maxlength="120" autocomplete="off"></label>
         <label id="lifeEventNewSpouseSurnameField" class="new-gedcom-field" for="lifeEventNewSpouseSurname" hidden>New spouse surname<input id="lifeEventNewSpouseSurname" type="text" maxlength="120" autocomplete="off"></label>
-        <label class="new-gedcom-field" for="lifeEventDate">Date (GEDCOM)<input id="lifeEventDate" type="text" maxlength="40" placeholder="e.g. ABT 1883"><input id="lifeEventDatePicker" type="date" aria-label="Choose exact event date"></label>
+        <label class="new-gedcom-field" for="lifeEventDate">Date (day and month optional)<input id="lifeEventDate" type="text" maxlength="40" placeholder="1883, MAR 1883 or 14 MAR 1883"><input id="lifeEventDatePicker" type="date" aria-label="Choose exact event date"></label>
         <label class="new-gedcom-field" for="lifeEventPlace">Place<input id="lifeEventPlace" type="text" maxlength="200" autocomplete="off"></label>
         <label id="lifeEventMarriageTypeField" class="new-gedcom-field life-event-wide" for="lifeEventMarriageType" hidden>Marriage type<input id="lifeEventMarriageType" type="text" maxlength="60" list="lifeEventMarriageTypes" placeholder="e.g. Religious, Civil" autocomplete="off"><datalist id="lifeEventMarriageTypes"><option value="Religious"><option value="Civil"><option value="Common law"><option value="Registered partnership"><option value="Same-sex marriage"></datalist></label>
         <label id="lifeEventDescriptionField" class="new-gedcom-field life-event-wide" for="lifeEventDescription"><span id="lifeEventDescriptionLabel">Notes</span><input id="lifeEventDescription" type="text" maxlength="250" autocomplete="off"></label>
@@ -646,9 +646,9 @@
         <label class="new-gedcom-field" for="personSummaryGivenName">Given name(s)<input id="personSummaryGivenName" type="text" maxlength="120" autocomplete="given-name"></label>
         <label class="new-gedcom-field" for="personSummarySurname">Surname<input id="personSummarySurname" type="text" maxlength="120" autocomplete="family-name"></label>
         <label class="new-gedcom-field" for="personSummarySex">Sex<select id="personSummarySex"><option value="">Not recorded</option><option value="F">Female / F</option><option value="M">Male / M</option><option value="X">Other / X</option><option value="U">Unknown / U</option></select></label>
-        <label class="new-gedcom-field" for="personSummaryBirthDate">Birth date (GEDCOM)<input id="personSummaryBirthDate" type="text" maxlength="40" placeholder="e.g. ABT 1883"><input id="personSummaryBirthDatePicker" type="date" aria-label="Choose exact birth date"></label>
+        <label class="new-gedcom-field" for="personSummaryBirthDate">Birth date (day and month optional)<input id="personSummaryBirthDate" type="text" maxlength="40" placeholder="1883, MAR 1883 or 14 MAR 1883"><input id="personSummaryBirthDatePicker" type="date" aria-label="Choose exact birth date"></label>
         <label class="new-gedcom-field" for="personSummaryBirthPlace">Birth location<input id="personSummaryBirthPlace" type="text" maxlength="200" autocomplete="off"></label>
-        <label class="new-gedcom-field" for="personSummaryDeathDate">Death date (GEDCOM)<input id="personSummaryDeathDate" type="text" maxlength="40" placeholder="e.g. ABT 1883"><input id="personSummaryDeathDatePicker" type="date" aria-label="Choose exact death date"></label>
+        <label class="new-gedcom-field" for="personSummaryDeathDate">Death date (day and month optional)<input id="personSummaryDeathDate" type="text" maxlength="40" placeholder="1883, MAR 1883 or 14 MAR 1883"><input id="personSummaryDeathDatePicker" type="date" aria-label="Choose exact death date"></label>
         <label class="new-gedcom-field" for="personSummaryDeathPlace">Death location<input id="personSummaryDeathPlace" type="text" maxlength="200" autocomplete="off"></label>
       </div>
       <p id="personSummaryError" class="form-error" role="alert" hidden></p>
@@ -685,18 +685,26 @@
   <dialog id="addRelativeDialog" class="app-dialog" aria-labelledby="addRelativeTitle">
     <form id="addRelativeForm" class="dialog-panel new-gedcom-panel">
       <h2 id="addRelativeTitle">Add a relative</h2>
-      <p>A new person and the required family links will be added to this GEDCOM.</p>
+      <p>Create a new relative, or choose <strong>Select existing person</strong> when adding a parent or partner/spouse. Search by name or GEDCOM ID, then select the matching record (dates and IDs distinguish people with the same name). For a parent, choose a family with a vacant role or create a separate parent family. Existing people are linked without changing their recorded details.</p>
       <div class="new-gedcom-fields">
         <label class="new-gedcom-field" for="relativeType">Relationship<select id="relativeType"><option value="PARENT">Parent</option><option value="CHILD">Child</option><option value="SIBLING">Sibling</option><option value="PARTNER">Partner</option></select></label>
         <label class="new-gedcom-field" for="relativeParentRole">Parent role<select id="relativeParentRole"><option value="HUSB">Father / HUSB</option><option value="WIFE">Mother / WIFE</option></select></label>
+        <label id="relativeModeField" class="new-gedcom-field" for="relativeMode">Person<select id="relativeMode"><option value="NEW">Create new person</option><option value="EXISTING">Select existing person</option></select></label>
+        <div id="relativeExistingFields" hidden>
+          <label class="new-gedcom-field" for="relativeSearch">Search existing people<input id="relativeSearch" type="search" placeholder="Name or GEDCOM ID"></label>
+          <label class="new-gedcom-field" for="relativeExistingPerson">Select person<select id="relativeExistingPerson" size="6" aria-describedby="relativeSearchCount"></select></label>
+          <p id="relativeSearchCount" role="status"></p>
+          <label id="relativeFamilyField" class="new-gedcom-field" for="relativeFamily">Parent family (applies to all children in that family)<select id="relativeFamily"></select></label>
+        </div>
         <label class="new-gedcom-field" for="relativeGivenName">Given name(s)<input id="relativeGivenName" type="text" required maxlength="120"></label>
         <label class="new-gedcom-field" for="relativeSurname">Surname<input id="relativeSurname" type="text" maxlength="120"></label>
         <label class="new-gedcom-field" for="relativeSex">Sex<select id="relativeSex"><option value="">Not recorded</option><option value="F">Female</option><option value="M">Male</option></select></label>
-        <label class="new-gedcom-field" for="relativeBirthDate">Birth date<input id="relativeBirthDate" type="date"></label>
+        <label class="new-gedcom-field" for="relativeBirthDate">Birth date (day and month optional)<input id="relativeBirthDate" type="text" maxlength="40" placeholder="1883, MAR 1883 or 14 MAR 1883"><input id="relativeBirthDatePicker" type="date" aria-label="Choose exact relative birth date"></label>
         <label class="new-gedcom-field" for="relativeBirthPlace">Birth place<input id="relativeBirthPlace" type="text" maxlength="200"></label>
-        <label class="new-gedcom-field" for="relativeDeathDate">Death date<input id="relativeDeathDate" type="date"></label>
+        <label class="new-gedcom-field" for="relativeDeathDate">Death date (day and month optional)<input id="relativeDeathDate" type="text" maxlength="40" placeholder="1883, MAR 1883 or 14 MAR 1883"><input id="relativeDeathDatePicker" type="date" aria-label="Choose exact relative death date"></label>
         <label class="new-gedcom-field" for="relativeDeathPlace">Death place<input id="relativeDeathPlace" type="text" maxlength="200"></label>
       </div>
+      <p id="relativeError" class="form-error" role="alert" hidden></p>
       <p id="relativeDuplicateWarning" class="form-error" role="alert" hidden>A person with this name already exists. Confirm below only if this is a distinct individual.</p>
       <label id="relativeDuplicateConfirmationLabel" class="research-consent" hidden><input id="relativeDuplicateConfirmed" type="checkbox"> This is a different person with the same name.</label>
       <div class="dialog-actions">
