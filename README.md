@@ -56,6 +56,8 @@ Install Inno Setup 6, then run `.\tree-app\installer\build-installer.ps1` from t
 
 For automated signing, commit the changes and push a new tag such as `v1.9.0` matching the top entry in `version.js`. The **Build portable installer** GitHub Actions workflow runs tests, builds setup, signs it using Sigstore's GitHub OIDC identity, verifies the bundle, and attaches setup, bundle and checksums to a **draft** release. It requires repository Actions and workflow token write access; no personal signing token is embedded. Inspect the workflow result and scan/test the installer before publishing the draft as a stable release. Do not publish first or reuse an immutable release: assets must be attached before publication. The workflow never uploads the family archive or the locally created launcher signing bundle.
 
+If uploading fails because a release is already published/immutable, rerunning that tag cannot add assets. Commit the fix and use a new version/tag matching `version.js`, wait for the workflow to attach all assets to its draft, then publish. The workflow retains available build files under **Artifacts > portable-installer** even when release upload fails; verify signing succeeded before using those files.
+
 ## Using the app
 
 ### Opening, creating and importing trees

@@ -11,8 +11,8 @@ jobs:
       contents: write
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
       - name: Validate tag and tests
@@ -51,15 +51,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          gh release view $env:GITHUB_REF_NAME --repo $env:GITHUB_REPOSITORY
+          $releaseJson = gh release view $env:GITHUB_REF_NAME --repo $env:GITHUB_REPOSITORY --json isDraft
           if ($LASTEXITCODE -ne 0) {
             gh release create $env:GITHUB_REF_NAME --repo $env:GITHUB_REPOSITORY --draft --title "Kinship Atlas $($env:GITHUB_REF_NAME)" --notes "Portable Windows setup with SHA-256 checksums and Sigstore provenance. Verify before running; Sigstore is not Authenticode."
             if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed.' }
+          } else {
+            $release = $releaseJson | ConvertFrom-Json
+            if (-not $release.isDraft) {
+              throw 'This release is already published. Assets must be uploaded to a draft before publication. Use a new version/tag; do not rerun against an immutable release. Build files are available in the portable-installer workflow artifact.'
+            }
           }
           $files = (Get-ChildItem dist -File).FullName
           gh release upload $env:GITHUB_REF_NAME @files --repo $env:GITHUB_REPOSITORY
           if ($LASTEXITCODE -ne 0) { throw 'Release asset upload failed.' }
       - uses: actions/upload-artifact@v4
+        if: ${{ always() && hashFiles('dist/*') != '' }}
         with:
           name: portable-installer
           path: dist/*
+          if-no-files-found: error
