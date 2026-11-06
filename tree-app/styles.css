@@ -392,10 +392,15 @@ button { color: inherit; }
 .research-consent input { flex: 0 0 auto; margin: 1px 0 0; accent-color: var(--green); }
 .new-gedcom-panel { width: auto; }
 .birth-country-dialog { width: min(760px, calc(100vw - 28px)); }
-.about-dialog { width: min(620px, calc(100vw - 28px)); }
+.about-dialog { width: min(760px, calc(100vw - 28px)); overflow: hidden; }
+.about-dialog .dialog-panel { display: flex; flex-direction: column; max-height: min(90vh, 760px); }
+.about-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-shrink: 0; margin-bottom: 12px; }
+.about-header h2 { margin: 0; }
+.about-content { min-height: 0; overflow: auto; padding-right: 4px; }
+.about-content > p { margin: 0 0 15px; color: #687a72; font-size: 12px; line-height: 1.55; }
 .about-version { margin-top: 4px; color: var(--green); font-weight: 700; }
 .about-history-title { margin: 16px 0 6px; font-size: 14px; }
-.about-history { max-height: 46vh; overflow: auto; padding-right: 4px; }
+.about-history { padding-right: 4px; }
 .about-history[hidden], .about-history-title[hidden] { display: none; }
 .about-release + .about-release { margin-top: 12px; padding-top: 10px; border-top: 1px solid #e1e9e4; }
 .about-release h4 { margin: 0 0 4px; font-size: 13px; }

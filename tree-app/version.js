@@ -7,6 +7,13 @@
 window.KINSHIP_VERSION = {
   releases: [
     {
+      version: '1.8.1',
+      date: '2026-11-06',
+      changes: [
+        'Resized the About window to use one scrollbar and keep its Close button at the top.'
+      ]
+    },
+    {
       version: '1.8.0',
       date: '2026-11-06',
       changes: [

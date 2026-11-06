@@ -235,13 +235,15 @@
   </dialog>
   <dialog id="aboutDialog" class="app-dialog about-dialog" aria-labelledby="aboutTitle">
     <section class="dialog-panel">
-      <h2 id="aboutTitle">About Kinship Atlas</h2>
-      <p id="aboutVersion" class="about-version"></p>
-      <p>A local family archive for exploring GEDCOM relationships, places, and media. Your tree and media stay on this device.</p>
-      <h3 class="about-history-title">Version history</h3>
-      <div id="aboutHistory" class="about-history"></div>
-      <div class="dialog-actions">
+      <div class="about-header">
+        <h2 id="aboutTitle">About Kinship Atlas</h2>
         <button class="dialog-button dialog-button-primary" type="button" data-close-dialog="aboutDialog">Close</button>
+      </div>
+      <div class="about-content">
+        <p id="aboutVersion" class="about-version"></p>
+        <p>A local family archive for exploring GEDCOM relationships, places, and media. Your tree and media stay on this device.</p>
+        <h3 class="about-history-title">Version history</h3>
+        <div id="aboutHistory" class="about-history"></div>
       </div>
     </section>
   </dialog>
