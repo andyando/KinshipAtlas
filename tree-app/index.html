@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="styles.css">
   <script src="primary-data.js" defer></script>
   <script src="version.js" defer></script>
+  <script src="updater.js" defer></script>
   <script src="data/world-data.js" defer></script>
   <script src="map.js" defer></script>
   <script src="app.js" defer></script>
@@ -53,6 +54,7 @@
           <button id="mediaLibraryMenuButton" class="menu-item" type="button" role="menuitem" disabled>Media library</button>
           <button id="birthCountryMenuButton" class="menu-item" type="button" role="menuitem" disabled title="List people whose birth place does not identify a country, and fix them">People without a birth country</button>
           <button id="defaultsButton" class="menu-item" type="button" role="menuitem" title="Choose the GEDCOM file and media folder that open automatically">Update defaults</button>
+          <button id="updateAppButton" class="menu-item" type="button" role="menuitem">Check for application updates</button>
           <button id="clearButton" class="menu-item" type="button" role="menuitem" disabled>Start Again</button>
           <button id="exitButton" class="menu-item" type="button" role="menuitem">Exit Kinship Atlas</button>
         </div>
@@ -414,11 +416,25 @@
             </ul>
             <h4>Finishing a session</h4>
             <p><strong>Settings &gt; Exit Kinship Atlas</strong> saves your preferences and stops the local helper. If there are unsaved GEDCOM changes, you are asked before exiting.</p>
+            <h4>Updating the application</h4>
+            <p>Choose <strong>Settings &gt; Check for application updates</strong> to check for a published, numbered GitHub release. When one is available, choose the Kinship Atlas application folder to install it. This requires Edge or Chrome with local folder access and a public repository. The updater changes application files only; it does not update the Windows launcher or touch your GEDCOM, media, defaults, or image selections. A currently selected media folder inside the application folder is also excluded. Refresh the tab after the update completes.</p>
           </article>
         </div>
       </div>
       <div class="dialog-actions">
         <button class="dialog-button dialog-button-primary" type="button" data-close-dialog="helpDialog">Close</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="updateDialog" class="app-dialog" aria-labelledby="updateDialogTitle">
+    <section class="dialog-panel">
+      <h2 id="updateDialogTitle">Application update available</h2>
+      <p id="updateDialogSummary"></p>
+      <p id="updateDialogNotes" class="dialog-hint" hidden></p>
+      <p class="dialog-hint">The updater changes application files only. Your GEDCOM, media, defaults, and image selections are not changed.</p>
+      <div class="dialog-actions">
+        <button id="installAppUpdate" class="dialog-button dialog-button-primary" type="button">Choose app folder and install</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="updateDialog">Cancel</button>
       </div>
     </section>
   </dialog>

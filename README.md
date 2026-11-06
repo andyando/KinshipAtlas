@@ -9,7 +9,7 @@ No family data is included in this repository. Version history is shown in the a
 Kinship Atlas does not need installing system-wide and can live in any folder you choose: a local drive, a synced folder, or a USB stick. All of its paths are relative to its own folder.
 
 1. Copy the `tree-app` folder to the location you want, and rename it if you like.
-2. Keep these together in that folder: `index.html`, `app.js`, `map.js`, `styles.css`, `version.js`, `favicon.svg`, `data/`, `flags/` and `launcher/kinship-atlas.ico`, plus `Kinship Atlas.exe` on Windows and `server.js` if you use the Node.js helper.
+2. Keep these together in that folder: `index.html`, `app.js`, `updater.js`, `map.js`, `styles.css`, `version.js`, `favicon.svg`, `data/`, `flags/` and `launcher/kinship-atlas.ico`, plus `Kinship Atlas.exe` on Windows and `server.js` if you use the Node.js helper.
 3. Keep your GEDCOM file and media folder wherever suits you. They do not need to be inside the app folder unless you use the optional `Primary GEDCOM` and `Primary Media Library` folders described below.
 
 Requirements:
@@ -26,6 +26,10 @@ Choose one of these:
 - **Node.js helper:** run `node server.js "<media folder>" [port]` from the app folder, then open `http://127.0.0.1:8765/` (or the port you chose). This is useful for browsers without folder-write access, such as Brave.
 
 To open the same tree every time, use **Settings > Update defaults** to choose a default GEDCOM, media folder and home person. They are saved in `kinship-defaults.json` beside the app.
+
+### Updating the application
+
+In Edge or Chrome, choose **Settings > Check for application updates**. Updates are downloaded only from published, numbered GitHub Releases. The repository must be public and the release version must be listed in the app's version history. When prompted, select the installed `tree-app` folder and allow write access. The updater verifies files against GitHub's release tree, updates application files only, and does not change GEDCOM files, media folders, `primary-data.js`, `kinship-defaults.json` or `kinship-selections.json`. It also excludes any currently selected media folder inside the application folder. Save GEDCOM edits before updating, then refresh the tab when the update finishes. The Windows launcher executable is not replaced by the in-app updater.
 
 ## Using the app
 

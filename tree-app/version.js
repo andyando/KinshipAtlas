@@ -7,6 +7,13 @@
 window.KINSHIP_VERSION = {
   releases: [
     {
+      version: '1.8.0',
+      date: '2026-11-06',
+      changes: [
+        'Added Settings > Check for application updates for installing published, numbered GitHub releases without changing GEDCOM files, media, defaults or image selections.'
+      ]
+    },
+    {
       version: '1.7.2',
       date: '2026-11-06',
       changes: [
