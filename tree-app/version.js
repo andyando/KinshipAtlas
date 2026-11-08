@@ -7,6 +7,15 @@
 window.KINSHIP_VERSION = {
   releases: [
     {
+      version: '1.14.1',
+      date: '2026-11-08',
+      changes: [
+        'Made the duplicate-name warning when adding a relative bold and red so it is easier to notice.',
+        'Fixed missing siblings in person records and the tree view when children share recorded parents across separate family records.',
+        'Kept the selected person and partners together in the tree view, with siblings outside the couple on their relative\'s side rather than between them.'
+      ]
+    },
+    {
       version: '1.14.0',
       date: '2026-11-08',
       changes: [

@@ -86,6 +86,7 @@ function harness() {
     vm.runInContext(source.slice(start, end), context);
   }
   load('  const relationGroupTypes =', '\n  function relationshipGroups(');
+  load('  function siblingFamiliesOf(', '\n  function generationLevels(');
   load('  function relationshipGroups(', '\n  function ');
   load('  function openRelativeEditor(', '\n  function linkExistingRelative(');
   load('  function linkExistingRelative(', '\n  const relationshipSentences =');

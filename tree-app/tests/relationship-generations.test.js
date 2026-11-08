@@ -10,8 +10,8 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const graphSource = source.slice(source.indexOf('  function renderGraph()'), source.indexOf('  function renderRoster()'));
 const levelsSource = source.slice(source.indexOf('  function generationLevels('), source.indexOf('  function yearFrom('));
 
-function harness({ children = false, greatGrandparents = true, siblings = false, couple = false } = {}) {
-  const people = new Map(['focus', 'parent', 'grandparent', 'great', 'wife', 'child', 'sibling'].map((id) => [id, { id, parentFamilyIds: [] }]));
+function harness({ children = false, greatGrandparents = true, siblings = false, couple = false, partners = [] } = {}) {
+  const people = new Map(['focus', 'parent', 'grandparent', 'great', 'wife', 'child', 'sibling', ...partners].map((id) => [id, { id, parentFamilyIds: [] }]));
   people.get('grandparent').parentFamilyIds = ['great'];
   const parents = new Map([['focus', ['parent']], ['parent', ['grandparent']], ['grandparent', greatGrandparents ? (couple ? ['great', 'wife'] : ['great']) : []]]);
   const offspring = new Map([['parent', ['focus', 'sibling']], ['grandparent', ['parent']], ['great', ['grandparent']], ['focus', children ? ['child'] : []]]);
@@ -50,7 +50,7 @@ function harness({ children = false, greatGrandparents = true, siblings = false,
     parentsOf: (id) => parents.get(id) || [],
     childrenOf: (id) => offspring.get(id) || [],
     siblingsOf: () => ['sibling'],
-    partnersOf: () => [],
+    partnersOf: () => partners.map((id) => ({ id })),
     sortedPeople: (ids) => [...ids].sort().map((id) => people.get(id)),
     appendGeneration(canvas, label, generation, people, relation, navigation, familyGroups) {
       rows.push({ label, generation, ids: people.map((person) => person.id), navigation, familyGroups });
@@ -107,6 +107,33 @@ test('siblings do not prevent extra ancestors and focusing a parent recalculates
   h.context.renderGraph();
   assert.ok(!h.rows.some((row) => row.generation === -3));
   assert.ok(h.rows.some((row) => row.generation === 1));
+});
+
+test('siblings stay outside the selected person and partners instead of splitting couples by name', () => {
+  const h = harness({ siblings: true, partners: ['spouse', 'zpartner'] });
+  h.context.renderGraph();
+  assert.deepEqual(Array.from(h.rows.find((row) => row.generation === 0).ids), ['sibling', 'focus', 'spouse', 'zpartner']);
+  h.context.state.showSiblings = false;
+  h.context.renderGraph();
+  assert.deepEqual(Array.from(h.rows.find((row) => row.generation === 0).ids), ['focus', 'spouse', 'zpartner']);
+});
+
+test('siblings are on the right when their relative is on the right of the couple', () => {
+  const h = harness({ siblings: true, partners: ['aspouse'] });
+  h.context.renderGraph();
+  assert.deepEqual(Array.from(h.rows.find((row) => row.generation === 0).ids), ['aspouse', 'focus', 'sibling']);
+});
+
+test('without a partner, siblings remain beside the selected person', () => {
+  const h = harness({ siblings: true });
+  h.context.renderGraph();
+  assert.deepEqual(Array.from(h.rows.find((row) => row.generation === 0).ids), ['focus', 'sibling']);
+});
+
+test('a person listed as both partner and sibling is rendered only once', () => {
+  const h = harness({ siblings: true, partners: ['sibling', 'spouse'] });
+  h.context.renderGraph();
+  assert.deepEqual(Array.from(h.rows.find((row) => row.generation === 0).ids), ['focus', 'sibling', 'spouse']);
 });
 
 test('great-grandparent couples stack the wife first and use a single connector below the pair', () => {

@@ -702,15 +702,30 @@
     return steps;
   }
 
-  function siblingsOf(personId) {
+  function siblingFamiliesOf(personId) {
     const person = state.people.get(personId);
-    if (!person) return [];
-    const siblings = new Set();
-    for (const familyId of person.parentFamilyIds) {
+    const siblings = new Map();
+    if (!person) return siblings;
+    const parentFamilyIds = new Set(person.parentFamilyIds);
+    const parentIds = new Set();
+    for (const familyId of parentFamilyIds) {
       const family = state.families.get(familyId);
-      if (family) family.childIds.forEach((id) => { if (id !== personId && state.people.has(id)) siblings.add(id); });
+      for (const id of [family?.husbandId, family?.wifeId]) {
+        if (id && state.people.has(id)) parentIds.add(id);
+      }
     }
-    return [...siblings];
+    for (const family of state.families.values()) {
+      if (!parentFamilyIds.has(family.id)
+        && ![family.husbandId, family.wifeId].some((id) => parentIds.has(id))) continue;
+      for (const id of family.childIds) {
+        if (id !== personId && state.people.has(id) && !siblings.has(id)) siblings.set(id, family.id);
+      }
+    }
+    return siblings;
+  }
+
+  function siblingsOf(personId) {
+    return [...siblingFamiliesOf(personId).keys()];
   }
 
   function generationLevels(startId, direction, depth) {
@@ -2110,7 +2125,11 @@
     const ancestorIds = (generation) => ancestors.get(generation) || new Set();
     const descendantIds = (generation) => descendants.get(generation) || new Set();
     const selectedAndPartners = nameOrder(new Set([selected.id, ...partners]));
-    const rowZero = nameOrder(new Set([selected.id, ...partners, ...siblingIds]));
+    const coupleIds = new Set(selectedAndPartners.map((person) => person.id));
+    const siblingsRow = nameOrder(new Set([...siblingIds].filter((id) => !coupleIds.has(id))));
+    const rowZero = selectedAndPartners.length > 1 && selectedAndPartners[0].id === selected.id
+      ? [...siblingsRow, ...selectedAndPartners]
+      : [...selectedAndPartners, ...siblingsRow];
     const parentsRow = orderByRelatives(ancestorIds(-1), [selected], parentsOf);
     const grandparentsRow = orderByRelatives(ancestorIds(-2), parentsRow, parentsOf);
     const greatGrandparentsRow = orderByRelatives(ancestorIds(-3), grandparentsRow, parentsOf);
@@ -2493,14 +2512,13 @@
   function relationshipGroups(person) {
     const parentFamilies = person.parentFamilyIds.map((id) => state.families.get(id)).filter(Boolean);
     const parents = [];
-    const siblings = new Map();
+    const siblings = siblingFamiliesOf(person.id);
     for (const family of parentFamilies) {
       const present = [family.husbandId, family.wifeId].filter(Boolean);
       for (const id of present) if (state.people.has(id)) parents.push({ id, label: personName(id), familyId: family.id });
       for (const [parentRole, id] of [['HUSB', family.husbandId], ['WIFE', family.wifeId]]) {
         if (!id) parents.push({ id: '', label: 'Parent not identified', familyId: family.id, parentRole });
       }
-      family.childIds.forEach((id) => { if (id !== person.id && state.people.has(id) && !siblings.has(id)) siblings.set(id, family.id); });
     }
     const partners = partnersOf(person.id).map(({ id, family }) => ({
       id, label: personName(id), familyId: family.id

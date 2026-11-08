@@ -579,6 +579,7 @@ a.life-event-media-thumb:hover, a.life-event-media-thumb:focus-visible { border-
 .gedcom-field-remove { width: 30px; height: 32px; border: 1px solid #e0d7d4; border-radius: 3px; color: #9c5546; background: #fff; cursor: pointer; font-size: 17px; }
 .gedcom-field-remove:hover { background: #fff2ed; }
 .form-error { margin: 9px 0 0; color: #a33e34; font-size: 11px; }
+#relativeDuplicateWarning { color: #b91c1c; font-weight: 700; }
 .toast { position: fixed; z-index: 10; right: 22px; bottom: 48px; max-width: min(420px, calc(100vw - 32px)); padding: 11px 14px; transform: translateY(10px); opacity: 0; pointer-events: none; border: 1px solid #d7c38b; border-radius: 4px; color: #5b4925; background: #fff8df; box-shadow: var(--shadow); font-size: 12px; line-height: 1.45; transition: opacity .16s ease, transform .16s ease; }
 .toast.visible { transform: translateY(0); opacity: 1; }
 
