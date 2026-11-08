@@ -33,3 +33,6 @@ Desktop.ini
 /tree-app/Primary Media Library/
 /tree-app/Primary GEDCOM/
 *_media/
+
+# Aider local files
+.aider*
