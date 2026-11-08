@@ -353,6 +353,7 @@
               <li><strong>Edit person details:</strong> name, sex, and birth and death dates and places.</li>
               <li><strong>Add Life Event:</strong> record another event, such as a residence, marriage, occupation, military service, burial or an event of your own.</li>
               <li><strong>Add relative:</strong> create a new person linked as a parent, child, sibling or partner. You are asked to confirm if the name matches someone already in the tree.</li>
+              <li><strong>Parent not identified:</strong> click to create a new parent or select an existing person. The missing parent role and family are preselected; adding a parent to that family links them to all its children.</li>
               <li><strong>✎ next to a relative:</strong> edit the relationship (for example, parent role or marriage details) or delete it.</li>
               <li><strong>Set as primary person:</strong> adds the <strong>Home Person</strong> button and shows how others are related to this person.</li>
               <li><strong>Print record:</strong> prints the record on A4, without attached media.</li>
@@ -389,7 +390,11 @@
           <article class="help-article" data-help-article="maps-reports" hidden>
             <h3>Map View, Reports &amp; data checks</h3>
             <h4>Map View</h4>
+            <p>The <strong>Bloodline only</strong> slider, beside the family-tree icon, hides everyone except the primary person and blood relatives, within your current Directory filters. It is off by default on app startup and disabled until a primary person is set. Clearing the primary person turns it off. Map counts and the unplaced-person list follow this filter; the Directory is unchanged.</p>
+            <p>Below it, the icon sliders for <strong>Mother's side</strong>, <strong>Father's side</strong> and <strong>Descendants</strong> also start off. Turn on one or more to show only those groups combined. Relatives on both parent sides match either parent slider; the gold primary person and descendants are included using <strong>Descendants</strong>. With all three off, only the existing Bloodline only setting applies. Side filters work whether Bloodline only is on or off. Clearing the primary person resets and disables all four sliders.</p>
             <p><strong>Map View</strong> plots people on a world map using the places recorded in the tree. Click a pin to open that person. Choose <strong>Relationship View</strong> to return to the map of relationships.</p>
+            <p>When a primary person is set, <strong>blue</strong> marks the father's side, <strong>pink</strong> the mother's side, <strong>purple</strong> relatives on both sides, <strong>gold</strong> the primary person and their descendants, and <strong>green</strong> everyone else. The bottom legend includes matching colour swatches. Each side includes that parent's ancestors and their descendants, so full siblings normally belong to both sides; the primary person and their descendants always use gold. Father/mother sides follow GEDCOM husband/wife parent roles, not guesses from names or sex. Missing parent links are not inferred.</p>
+            <p>Spouses are not included merely through marriage. Unspecified parent relationships are presumed biological; explicit adopted, foster, sealing and other non-birth pedigree links are excluded. This is a relationship inference from GEDCOM links, not proof of biological ancestry. Mixed clusters have coloured segments proportional to the number of people in each category, with category counts in their labels and badges in the person list. A gold outline indicates selection without replacing the bloodline colour. Directory filters limit visible people, not the relationships used for this calculation.</p>
             <h4>Reports</h4>
             <p><strong>Reports</strong> summarises the tree, including the most popular occupations, media coverage, and how many people have a birth or death country recorded. The death country count only includes people with a dated death, so people who may still be living are left out. Use the printer button to print the reports on A4.</p>
             <p>Occupation categories are worked out from the wording in the GEDCOM, which is left unchanged. Hover over a bar to see how each description was grouped.</p>
@@ -410,10 +415,10 @@
               <li>Choose <strong>Save default</strong>. The choice is stored in <strong>kinship-defaults.json</strong> next to the app, and the browser remembers access to the file and folder.</li>
             </ol>
             <p>This needs a browser with local file access, such as Edge or Chrome. <strong>Clear default</strong> stops opening a tree automatically.</p>
-            <h4>Primary person and home person</h4>
+            <h4>Primary person and Home Person shortcut</h4>
             <ul>
-              <li><strong>Primary person</strong> (<strong>Set as primary person</strong> in a record) adds the <strong>Home Person</strong> button to the top bar and shows how others are related to that person.</li>
-              <li><strong>Home person</strong> (<strong>☆ Set as home person</strong>, shown when your default GEDCOM is open) is the person selected when the default tree opens.</li>
+              <li><strong>Primary person</strong> (<strong>Set as primary person</strong> in a record) adds the <strong>Home Person</strong> button to the top bar, shows how others are related to that person, and is the reference for bloodline highlighting and filtering on the World Map.</li>
+              <li>The separate starred <strong>Home person</strong> record option has been removed. Previously saved startup-person preferences still apply when opening the default tree; setting a primary person does not change those preferences.</li>
               <li>When a primary person is set, the welcome page offers <strong>Go to Home/Default Person in Tree</strong>.</li>
             </ul>
             <h4>Finishing a session</h4>
@@ -697,8 +702,8 @@
           <label class="new-gedcom-field" for="relativeSearch">Search existing people<input id="relativeSearch" type="search" placeholder="Name or GEDCOM ID"></label>
           <label class="new-gedcom-field" for="relativeExistingPerson">Select person<select id="relativeExistingPerson" size="6" aria-describedby="relativeSearchCount"></select></label>
           <p id="relativeSearchCount" role="status"></p>
-          <label id="relativeFamilyField" class="new-gedcom-field" for="relativeFamily">Parent family (applies to all children in that family)<select id="relativeFamily"></select></label>
         </div>
+        <label id="relativeFamilyField" class="new-gedcom-field" for="relativeFamily">Parent family (applies to all children in that family)<select id="relativeFamily"></select></label>
         <label class="new-gedcom-field" for="relativeGivenName">Given name(s)<input id="relativeGivenName" type="text" required maxlength="120"></label>
         <label class="new-gedcom-field" for="relativeSurname">Surname<input id="relativeSurname" type="text" maxlength="120"></label>
         <label class="new-gedcom-field" for="relativeSex">Sex<select id="relativeSex"><option value="">Not recorded</option><option value="F">Female</option><option value="M">Male</option></select></label>

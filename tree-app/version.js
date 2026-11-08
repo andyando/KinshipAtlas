@@ -7,6 +7,33 @@
 window.KINSHIP_VERSION = {
   releases: [
     {
+      version: '1.14.0',
+      date: '2026-11-08',
+      changes: [
+        'Added Naturalization as a life event type.',
+        'Click Parent not identified in a person record to create a new parent or select an existing person for that family.'
+      ]
+    },
+    {
+      version: '1.13.0',
+      date: '2026-11-07',
+      changes: [
+        'World Map now distinguishes father\'s side (blue), mother\'s side (pink), both sides (purple), the primary person and descendants (gold), and others (green), with colour swatches in the bottom legend and segmented mixed clusters.',
+        'Added a family-tree icon beside the Bloodline only slider.',
+        'Added icon sliders below Bloodline only for Mother\'s side, Father\'s side and Descendants. All start off; enabled groups combine and respect Directory filters.',
+        'Alphabetized media classifications and added Religious as a life event type.'
+      ]
+    },
+    {
+      version: '1.12.0',
+      date: '2026-11-06',
+      changes: [
+        'World Map highlights the primary person and blood relatives in purple, including mixed-group indicators and a legend. Unspecified parent relationships are presumed biological.',
+        'Added a Bloodline only map slider switch, off by default, to hide people outside the primary person\'s bloodline.',
+        'Removed the separate starred Home person option from person records, retaining primary-person controls and existing saved startup preferences.'
+      ]
+    },
+    {
       version: '1.11.2',
       date: '2026-11-06',
       changes: [

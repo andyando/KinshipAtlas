@@ -8,6 +8,13 @@
   const MIN_LAT = -58;
   const CLUSTER_PX = 34;
   const SVG_NS = 'http://www.w3.org/2000/svg';
+  const bloodlineLabels = {
+    paternal: "Father's side",
+    maternal: "Mother's side",
+    both: 'Both sides',
+    descendants: 'Primary person / descendants',
+    other: 'Others'
+  };
 
   const countryAliases = {
     usa: 'US', us: 'US', 'u s a': 'US', 'u s': 'US', 'united states': 'US', 'united states of america': 'US', america: 'US',
@@ -142,6 +149,13 @@
     let svg; let landGroup; let markerGroup; let popup; let statusChip; let popupOwner = null;
     let width = 0; let height = 0; let k = 1; let tx = 0; let ty = 0; let minK = 1;
     let pins = [];
+    let bloodRelativeIds = new Set();
+    let bloodlines;
+    let relativeLegend;
+    let bloodlineOnly = false;
+    let bloodlineToggle;
+    const sideFilters = { maternal: false, paternal: false, descendants: false };
+    const sideFilterToggles = {};
     let unplaced = [];
     let visible = false;
     let built = false;
@@ -169,6 +183,22 @@
       }
       markerGroup = el('g', { class: 'map-markers' }, svg);
       container.append(svg);
+      relativeLegend = document.createElement('div');
+      relativeLegend.className = 'map-relative-legend';
+      for (const [category, label] of Object.entries(bloodlineLabels)) {
+        const item = document.createElement('span');
+        item.className = 'map-legend-item';
+        const swatch = document.createElement('span');
+        swatch.className = `map-legend-swatch map-lineage-${category}`;
+        swatch.setAttribute('aria-hidden', 'true');
+        item.append(swatch, document.createTextNode(label));
+        relativeLegend.append(item);
+      }
+      const legendNote = document.createElement('span');
+      legendNote.textContent = 'Segments: mixed group · Gold outline: selected';
+      relativeLegend.append(legendNote);
+      relativeLegend.hidden = true;
+      container.append(relativeLegend);
 
       const controls = document.createElement('div');
       controls.className = 'map-controls';
@@ -182,6 +212,39 @@
       statusChip = document.createElement('button');
       statusChip.type = 'button'; statusChip.className = 'map-status';
       statusChip.addEventListener('click', () => { if (unplaced.length) showUnplaced(); });
+      const filters = document.createElement('div');
+      filters.className = 'map-bloodline-filters';
+      filters.setAttribute('role', 'group');
+      filters.setAttribute('aria-label', 'Bloodline map filters');
+      for (const [key, label] of [
+        ['bloodline', 'Bloodline only'], ['maternal', "Mother's side"],
+        ['paternal', "Father's side"], ['descendants', 'Descendants']
+      ]) {
+        const control = document.createElement('label');
+        control.className = `map-bloodline-control map-lineage-${key === 'bloodline' ? 'both' : key}`;
+        const toggle = document.createElement('input');
+        toggle.type = 'checkbox';
+        toggle.setAttribute('role', 'switch');
+        toggle.checked = false;
+        if (key === 'bloodline') bloodlineToggle = toggle;
+        else sideFilterToggles[key] = toggle;
+        toggle.addEventListener('change', () => {
+          if (key === 'bloodline') bloodlineOnly = toggle.checked;
+          else sideFilters[key] = toggle.checked;
+          hidePopup();
+          rebuildPins();
+          drawMarkers();
+          options.onStatsChange?.({ placed: pins.length, unplaced: unplaced.length });
+        });
+        const slider = document.createElement('span');
+        slider.className = 'map-bloodline-slider';
+        slider.setAttribute('aria-hidden', 'true');
+        control.append(toggle, slider);
+        if (options.bloodlineIcons?.[key]) control.append(options.bloodlineIcons[key]);
+        control.append(document.createTextNode(label));
+        filters.append(control);
+      }
+      container.append(filters);
       const credit = document.createElement('div');
       credit.className = 'map-credit';
       credit.textContent = 'Offline map · Outlines: Natural Earth · Places: GeoNames (CC BY 4.0)';
@@ -308,13 +371,46 @@
 
     function rebuildPins() {
       pins = []; unplaced = [];
+      bloodlines = options.getBloodlines?.();
+      bloodRelativeIds = bloodlines?.all || new Set();
+      bloodlineToggle.disabled = !bloodRelativeIds.size;
+      bloodlineToggle.parentElement.title = bloodRelativeIds.size
+        ? 'Show only the primary person and blood relatives within the Directory filters'
+        : 'Set a primary person to use the bloodline filter';
+      if (!bloodRelativeIds.size) bloodlineOnly = false;
+      bloodlineToggle.checked = bloodlineOnly;
+      for (const [key, toggle] of Object.entries(sideFilterToggles)) {
+        toggle.disabled = !bloodRelativeIds.size;
+        toggle.parentElement.title = bloodRelativeIds.size
+          ? key === 'descendants'
+            ? 'Show the primary person and descendants; combine switches to include other groups'
+            : 'Show this parent side, including relatives on both sides; use Descendants for the primary person and descendants'
+          : 'Set a primary person to use the bloodline filters';
+        if (!bloodRelativeIds.size) sideFilters[key] = false;
+        toggle.checked = sideFilters[key];
+      }
+      const activeSides = Object.keys(sideFilters).filter((key) => sideFilters[key]);
+      relativeLegend.hidden = !bloodRelativeIds.size;
+      container.classList.toggle('map-relative-colors', bloodRelativeIds.size > 0);
       for (const person of options.getPeople()) {
+        if (bloodlineOnly && !bloodRelativeIds.has(person.id)) continue;
+        if (activeSides.length) {
+          const category = bloodlineCategory(person.id);
+          if (!activeSides.some((side) => category === side || (category === 'both' && side !== 'descendants'))) continue;
+        }
         const found = latestPlace(person);
         if (!found) { unplaced.push(person); continue; }
         pins.push({ person, x: projectX(found.lon), y: projectY(found.lat), found });
       }
       statusChip.textContent = `${pins.length} placed${unplaced.length ? ` · ${unplaced.length} not placed ▸` : ''}`;
       statusChip.classList.toggle('map-status-action', unplaced.length > 0);
+    }
+
+    function bloodlineCategory(id) {
+      if (bloodlines?.descendants.has(id)) return 'descendants';
+      const paternal = bloodlines?.paternal.has(id);
+      const maternal = bloodlines?.maternal.has(id);
+      return paternal && maternal ? 'both' : paternal ? 'paternal' : maternal ? 'maternal' : 'other';
     }
 
     function drawMarkers() {
@@ -335,17 +431,37 @@
         const count = cell.pins.length;
         const cx = cell.sx / count; const cy = cell.sy / count;
         const hasSelected = cell.pins.some((pin) => pin.person.id === selectedId);
-        const group = el('g', { class: `map-marker${count > 1 ? ' map-cluster' : ''}${hasSelected ? ' map-marker-selected' : ''}`, transform: `translate(${cx.toFixed(1)} ${cy.toFixed(1)})`, tabindex: '0', role: 'button', 'data-marker': '1' });
+        const categories = new Map();
+        for (const pin of cell.pins) {
+          const category = bloodlineCategory(pin.person.id);
+          categories.set(category, (categories.get(category) || 0) + 1);
+        }
+        const categoryClass = bloodRelativeIds.size
+          ? ` map-lineage-${categories.size === 1 ? categories.keys().next().value : 'mixed'}` : '';
+        const group = el('g', { class: `map-marker${count > 1 ? ' map-cluster' : ''}${categoryClass}${hasSelected ? ' map-marker-selected' : ''}`, transform: `translate(${cx.toFixed(1)} ${cy.toFixed(1)})`, tabindex: '0', role: 'button', 'data-marker': '1' });
         group.pinsRef = cell.pins;
         if (count === 1) {
           el('circle', { r: hasSelected ? 9 : 7 }, group);
-          el('title', {}, group).textContent = cell.pins[0].person.name;
-          group.setAttribute('aria-label', cell.pins[0].person.name);
+          const label = `${cell.pins[0].person.name}${bloodRelativeIds.size ? `, ${bloodlineLabels[bloodlineCategory(cell.pins[0].person.id)]}` : ''}`;
+          el('title', {}, group).textContent = label;
+          group.setAttribute('aria-label', label);
         } else {
-          el('circle', { r: Math.min(22, 11 + Math.log2(count) * 2.2) }, group);
+          const radius = Math.min(22, 11 + Math.log2(count) * 2.2);
+          el('circle', { r: radius }, group);
+          if (bloodRelativeIds.size && categories.size > 1) {
+            let angle = -Math.PI / 2;
+            for (const [category, amount] of categories) {
+              const next = angle + amount / count * Math.PI * 2;
+              const d = `M0 0L${radius * Math.cos(angle)} ${radius * Math.sin(angle)}A${radius} ${radius} 0 ${amount > count / 2 ? 1 : 0} 1 ${radius * Math.cos(next)} ${radius * Math.sin(next)}Z`;
+              el('path', { class: `map-lineage-slice map-lineage-${category}`, d }, group);
+              angle = next;
+            }
+            el('circle', { r: radius, class: 'map-cluster-outline' }, group);
+          }
           el('text', { 'text-anchor': 'middle', dy: '4' }, group).textContent = count > 999 ? '999+' : String(count);
-          el('title', {}, group).textContent = `${count} people`;
-          group.setAttribute('aria-label', `${count} people`);
+          const label = `${count} people${bloodRelativeIds.size ? `, ${Array.from(categories, ([category, amount]) => `${amount} ${bloodlineLabels[category]}`).join(', ')}` : ''}`;
+          el('title', {}, group).textContent = label;
+          group.setAttribute('aria-label', label);
         }
         group.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); handleMarker(group); } });
         if (hasSelected) selectedNode = group; else markerGroup.append(group);
@@ -388,6 +504,11 @@
       const approx = { exact: '', city: '', region: ' (region level)', country: ' (country level)' }[pin.found.precision];
       where.textContent = `${eventLabel}: ${pin.found.event.place || pin.found.label}${approx}`;
       popup.append(title, life, where, closeButton());
+      if (bloodRelativeIds.size) {
+        const relationship = document.createElement('span');
+        relationship.textContent = bloodlineLabels[bloodlineCategory(pin.person.id)];
+        popup.append(relationship);
+      }
       popupOwner = pin.person.id;
       placePopup(node);
     }
@@ -407,6 +528,12 @@
         const button = document.createElement('button');
         button.type = 'button'; button.className = 'map-popup-person';
         button.textContent = item.person.name;
+        if (bloodRelativeIds.size) {
+          button.classList.add('map-popup-lineage', `map-lineage-${bloodlineCategory(item.person.id)}`);
+          const relationship = document.createElement('small');
+          relationship.textContent = bloodlineLabels[bloodlineCategory(item.person.id)];
+          button.append(relationship);
+        }
         if (item.note) { const note = document.createElement('small'); note.textContent = item.note; button.append(note); }
         button.addEventListener('click', () => options.onSelect(item.person.id));
         list.append(button);
@@ -434,8 +561,11 @@
       hide() { visible = false; if (built) { hidePopup(); } container.hidden = true; },
       refresh() {
         if (!visible) return null;
-        if (popupOwner && popupOwner !== options.getSelectedId()) hidePopup();
+        const previousCategory = bloodRelativeIds.size ? bloodlineCategory(popupOwner) : '';
         rebuildPins();
+        const category = bloodRelativeIds.size ? bloodlineCategory(popupOwner) : '';
+        if (!popupOwner || popupOwner !== options.getSelectedId() || previousCategory !== category
+          || !pins.some((pin) => pin.person.id === popupOwner)) hidePopup();
         drawMarkers();
         return { placed: pins.length, unplaced: unplaced.length };
       },

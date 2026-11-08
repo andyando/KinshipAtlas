@@ -357,11 +357,37 @@ button { color: inherit; }
 .map-cluster circle { fill: #3f6f93; fill-opacity: .92; }
 .map-cluster text { fill: #fff; font-size: 12px; font-weight: 700; pointer-events: none; }
 .map-marker-selected circle { fill: #f2bf75; stroke: #17352f; stroke-width: 2.5; }
+.map-lineage-paternal { --lineage-color: #3478bd; }
+.map-lineage-maternal { --lineage-color: #ce5289; }
+.map-lineage-both { --lineage-color: #8056a3; }
+.map-lineage-descendants { --lineage-color: #d6a032; }
+.map-lineage-other { --lineage-color: #2f786a; }
+.map-relative-colors .map-marker circle { fill: var(--lineage-color, #2f786a); fill-opacity: 1; }
+.map-lineage-slice { fill: var(--lineage-color); pointer-events: none; }
+.map-relative-colors .map-marker circle.map-cluster-outline { fill: none; pointer-events: none; }
+.map-relative-colors .map-marker-selected circle { stroke: #f2bf75; stroke-width: 4; }
+.map-relative-colors .map-marker.map-lineage-descendants text { fill: #17352f; }
+.map-popup-person.map-popup-lineage { border-left: 4px solid var(--lineage-color); }
+.map-relative-legend { position: absolute; bottom: 30px; left: 10px; right: 10px; width: fit-content; max-width: calc(100% - 20px); padding: 5px 8px; border-radius: 4px; background: rgba(255,255,255,.94); color: #17352f; font-size: 11px; pointer-events: none; }
+.map-relative-legend:not([hidden]) { display: flex; flex-wrap: wrap; gap: 5px 12px; }
+.map-legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.map-legend-swatch { width: 10px; height: 10px; border-radius: 50%; background: var(--lineage-color); }
 .map-marker:focus { outline: none; }
 .map-controls { position: absolute; top: 12px; right: 12px; display: flex; flex-direction: column; gap: 4px; }
 .map-control { width: 32px; height: 32px; background: #fff; }
 .map-status { position: absolute; top: 12px; left: 12px; padding: 6px 10px; border: 1px solid #b9cdc2; border-radius: 4px; color: #17352f; background: rgba(255,255,255,.92); font-size: 11px; font-weight: 700; letter-spacing: .4px; cursor: default; }
 .map-status-action { cursor: pointer; }
+.map-bloodline-filters { position: absolute; top: 48px; left: 12px; display: flex; flex-direction: column; gap: 4px; max-height: calc(100% - 140px); overflow-y: auto; }
+.map-bloodline-control { position: relative; display: flex; align-items: center; gap: 7px; padding: 6px 10px; border: 1px solid #b9cdc2; border-radius: 4px; background: rgba(255,255,255,.94); color: #17352f; font-size: 12px; cursor: pointer; }
+.map-bloodline-control .button-icon { color: var(--lineage-color); }
+.map-bloodline-control input { position: absolute; width: 36px; height: 20px; margin: 0; opacity: 0; cursor: inherit; }
+.map-bloodline-slider { flex: 0 0 36px; height: 20px; border-radius: 10px; background: #687c75; pointer-events: none; }
+.map-bloodline-slider::before { content: ''; display: block; width: 16px; height: 16px; margin: 2px; border-radius: 50%; background: #fff; transition: transform .15s ease; }
+.map-bloodline-control input:checked + .map-bloodline-slider { background: var(--lineage-color); }
+.map-bloodline-control input:checked + .map-bloodline-slider::before { transform: translateX(16px); }
+.map-bloodline-control input:focus-visible + .map-bloodline-slider { outline: 2px solid #17352f; outline-offset: 3px; }
+.map-bloodline-control:has(input:disabled) { cursor: default; opacity: .7; }
+.map-view-container:has(.map-warning) .map-bloodline-filters { top: 112px; max-height: calc(100% - 204px); }
 .map-credit { position: absolute; left: 10px; bottom: 8px; padding: 2px 6px; border-radius: 3px; color: #48635e; background: rgba(255,255,255,.75); font-size: 10px; pointer-events: none; }
 .map-warning { position: absolute; top: 56px; left: 12px; right: 56px; padding: 10px 12px; border-radius: 4px; color: #7a4a00; background: #fff4de; border: 1px solid #f2bf75; font-size: 12px; }
 .map-popup { position: absolute; z-index: 2; max-width: 280px; max-height: 60%; overflow: auto; display: flex; flex-direction: column; gap: 3px; padding: 10px 28px 10px 12px; border: 1px solid #b9cdc2; border-radius: 6px; color: #17352f; background: #fff; box-shadow: 0 8px 24px rgba(23,53,47,.22); font-size: 12px; line-height: 1.4; }

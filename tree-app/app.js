@@ -993,13 +993,12 @@
   }
 
   const mediaTypeOptions = [
-    ['unclassified', 'Unclassified'], ['portrait', 'Portrait'], ['family-photo', 'Family photo'],
-    ['document', 'Document'], ['certificate', 'Certificate'], ['letter', 'Letter'],
-    ['newspaper', 'Newspaper'], ['map-plan', 'Map / plan'], ['will-probate', 'Will / Probate'],
-    ['building-house', 'Building / house'], ['military-records', 'Military records'],
-    ['wedding', 'Wedding'], ['birth', 'Birth'],
-    ['death', 'Death'], ['census', 'Census'],
-    ['directory', 'Directory'], ['other', 'Other']
+    ['birth', 'Birth'], ['building-house', 'Building / house'], ['census', 'Census'],
+    ['certificate', 'Certificate'], ['death', 'Death'], ['directory', 'Directory'],
+    ['document', 'Document'], ['family-photo', 'Family photo'], ['letter', 'Letter'],
+    ['map-plan', 'Map / plan'], ['military-records', 'Military records'], ['newspaper', 'Newspaper'],
+    ['other', 'Other'], ['portrait', 'Portrait'], ['unclassified', 'Unclassified'],
+    ['wedding', 'Wedding'], ['will-probate', 'Will / Probate']
   ];
   const mediaTypeStorageKey = (storageKey) => `kinship-atlas:media-types:v1:${storageKey}`;
 
@@ -2454,9 +2453,13 @@
     } else {
       for (const item of items) {
         if (!item.id) {
-          const unknown = document.createElement('span');
-          unknown.className = 'relation-button empty';
-          unknown.textContent = item.label;
+          const unknown = makeButton(item.label, 'relation-button empty relation-add');
+          unknown.dataset.addRelation = groupType;
+          if (item.familyId) unknown.dataset.parentFamilyId = item.familyId;
+          if (item.parentRole) unknown.dataset.parentRole = item.parentRole;
+          unknown.title = item.parentRole
+            ? `Add the missing ${item.parentRole === 'HUSB' ? 'father' : 'mother'}: create a new person or select an existing person`
+            : relationAddTitles[groupType];
           list.append(unknown);
           continue;
         }
@@ -2494,7 +2497,9 @@
     for (const family of parentFamilies) {
       const present = [family.husbandId, family.wifeId].filter(Boolean);
       for (const id of present) if (state.people.has(id)) parents.push({ id, label: personName(id), familyId: family.id });
-      if (present.length < 2) parents.push({ id: '', label: 'Parent not identified' });
+      for (const [parentRole, id] of [['HUSB', family.husbandId], ['WIFE', family.wifeId]]) {
+        if (!id) parents.push({ id: '', label: 'Parent not identified', familyId: family.id, parentRole });
+      }
       family.childIds.forEach((id) => { if (id !== person.id && state.people.has(id) && !siblings.has(id)) siblings.set(id, family.id); });
     }
     const partners = partnersOf(person.id).map(({ id, family }) => ({
@@ -2770,6 +2775,7 @@
     const saved = storeSelection(primaryPersonStorageKey(), clearing ? null : { id: person.id, name: person.name });
     syncPrimaryPersonBar();
     renderDetails();
+    refreshMapView();
     const suffix = saved ? '' : ' This browser could not remember it after closing.';
     showToast(clearing ? `Primary person cleared.${suffix}` : `${person.name} is now the primary person.${suffix}`);
   }
@@ -2905,13 +2911,6 @@
     saveRecordButton.hidden = !state.gedcomDirty;
     saveRecordButton.disabled = state.gedcomSaving;
     personActions.append(saveRecordButton);
-    if (state.defaultRecord?.gedcomHandle && state.defaultRecord.gedcomName === state.fileName) {
-      const isHome = state.defaultRecord.homePersonId === person.id;
-      const homeButton = makeButton(isHome ? '★ Home person' : '☆ Set as home person', 'research-button');
-      homeButton.dataset.homePerson = person.id;
-      homeButton.title = isHome ? 'Click to stop opening on this person' : 'Select this person when the default GEDCOM opens';
-      personActions.append(homeButton);
-    }
     if (isRecordedDeceased(person)) {
       const researchButton = iconButton('search', 'Search WikiTree');
       researchButton.dataset.wikitreeSearch = person.id;
@@ -3417,6 +3416,47 @@
 
   let mapInstance = null;
 
+  function primaryBloodlines() {
+    const empty = { all: new Set(), paternal: new Set(), maternal: new Set(), descendants: new Set() };
+    if (!state.people.has(state.primaryPersonId)) return empty;
+    const parents = new Map();
+    const children = new Map();
+    const fathers = new Set();
+    const mothers = new Set();
+    for (const family of state.families.values()) {
+      for (const childId of family.childIds) {
+        const pedigree = readPedigree(childId, family.id);
+        if (pedigree && pedigree !== 'birth') continue;
+        for (const parentId of [family.husbandId, family.wifeId]) {
+          if (!state.people.has(parentId) || !state.people.has(childId)) continue;
+          if (!parents.has(childId)) parents.set(childId, new Set());
+          if (!children.has(parentId)) children.set(parentId, new Set());
+          parents.get(childId).add(parentId);
+          children.get(parentId).add(childId);
+          if (childId === state.primaryPersonId) {
+            if (parentId === family.husbandId) fathers.add(parentId);
+            if (parentId === family.wifeId) mothers.add(parentId);
+          }
+        }
+      }
+    }
+    const walk = (seeds, edges) => {
+      const visited = new Set(seeds);
+      const pending = [...seeds];
+      while (pending.length) {
+        for (const id of edges.get(pending.pop()) || []) {
+          if (!visited.has(id)) { visited.add(id); pending.push(id); }
+        }
+      }
+      return visited;
+    };
+    // Descend only from each side's ancestors, never from relatives' spouses.
+    const paternal = walk(walk(fathers, parents), children);
+    const maternal = walk(walk(mothers, parents), children);
+    const descendants = walk([state.primaryPersonId], children);
+    return { all: new Set([...paternal, ...maternal, ...descendants]), paternal, maternal, descendants };
+  }
+
   function getMapInstance() {
     if (!mapInstance && window.KinshipMap) {
       mapInstance = window.KinshipMap.create({
@@ -3424,6 +3464,14 @@
         getPeople: () => state.directoryMatches || [],
         placeEventsFor: (person) => [...person.events, ...marriageEventsFor(person)],
         getSelectedId: () => state.selectedId,
+        getBloodlines: primaryBloodlines,
+        bloodlineIcons: {
+          bloodline: createButtonIcon('tree'),
+          maternal: createButtonIcon('parentLeft'),
+          paternal: createButtonIcon('parentRight'),
+          descendants: createButtonIcon('descendants')
+        },
+        onStatsChange: (stats) => { state.mapStats = stats; updateMapLabels(); },
         onSelect: (id) => setFocus(id),
         describe: (person) => lifespan(person),
         eventLabel: (event) => eventTitle(event)
@@ -3449,6 +3497,9 @@
   const buttonIcons = {
     map: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.4 4 5.6 4 9s-1.4 6.6-4 9c-2.6-2.4-4-5.6-4-9s1.4-6.6 4-9z"/>',
     tree: '<rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/>',
+    parentLeft: '<circle cx="6" cy="5" r="3"/><circle cx="12" cy="19" r="3"/><path d="M6 8v4h6v4M12 12h6V8"/><path d="M16 5h4"/>',
+    parentRight: '<circle cx="18" cy="5" r="3"/><circle cx="12" cy="19" r="3"/><path d="M18 8v4h-6v4M12 12H6V8"/><path d="M4 5h4"/>',
+    descendants: '<circle cx="12" cy="4" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 6v6M5 17v-5h14v5M9 9l3 3 3-3"/>',
     chart: '<path d="M3 21h18"/><rect x="5" y="11" width="3" height="7" rx=".5"/><rect x="10.5" y="5" width="3" height="13" rx=".5"/><rect x="16" y="8" width="3" height="10" rx=".5"/>',
     media: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="M21 15l-5-5L5 20"/>',
     exit: '<path d="M10 17l5-5-5-5M15 12H3"/><path d="M12 3h7a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-7"/>',
@@ -3471,13 +3522,18 @@
     book: '<path d="M4 5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2z"/><path d="M4 20a2 2 0 0 0 2 1h13v-3"/><path d="M9 8h6"/>'
   };
 
-  function setButtonContent(button, icon, text) {
+  function createButtonIcon(icon) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('class', 'button-icon');
     svg.setAttribute('viewBox', '0 0 24 24');
     svg.setAttribute('aria-hidden', 'true');
     svg.setAttribute('focusable', 'false');
     svg.innerHTML = buttonIcons[icon];
+    return svg;
+  }
+
+  function setButtonContent(button, icon, text) {
+    const svg = createButtonIcon(icon);
     button.replaceChildren(svg, document.createTextNode(text));
   }
 
@@ -4143,10 +4199,12 @@
     { key: 'RESI', label: 'Residence', tag: 'RESI', descLabel: 'Address / notes', mode: 'note' },
     { key: 'MARR', label: 'Marriage', tag: 'MARR', family: true, descLabel: '', mode: 'family' },
     { key: 'DIV', label: 'Divorce', tag: 'DIV', family: true, descLabel: '', mode: 'family' },
+    { key: 'NATU', label: 'Naturalization', tag: 'NATU', descLabel: 'Notes', mode: 'note' },
     { key: 'BAPM', label: 'Baptism', tag: 'BAPM', descLabel: 'Church / notes', mode: 'note' },
     { key: 'EDUC', label: 'Education', tag: 'EDUC', descLabel: 'School or qualification', mode: 'value' },
     { key: 'OCCU', label: 'Occupation', tag: 'OCCU', descLabel: 'Occupation', mode: 'value' },
     { key: 'MILT', label: 'Military', tag: 'EVEN', type: 'Military Service', descLabel: 'Unit / rank / notes', mode: 'value' },
+    { key: 'RELI', label: 'Religious', tag: 'EVEN', type: 'Religious', descLabel: 'Description / notes', mode: 'value' },
     { key: 'EMIG', label: 'Departure', tag: 'EMIG', descLabel: 'Notes', mode: 'note' },
     { key: 'IMMI', label: 'Arrival', tag: 'IMMI', descLabel: 'Notes', mode: 'note' },
     { key: 'BURI', label: 'Burial', tag: 'BURI', descLabel: 'Cemetery / notes', mode: 'note' },
@@ -5773,6 +5831,17 @@
     document.querySelector('#relativeSearchCount').textContent = `${Math.min(100, people.length)} of ${people.length} matches. Refine the search if needed.`;
   }
 
+  function openRelativeEditor(relation = 'PARENT', parentRole = '', parentFamilyId = '') {
+    elements.addRelativeForm.reset();
+    elements.relativeType.value = relation;
+    if (parentRole) elements.relativeParentRole.value = parentRole;
+    document.querySelector('#relativeFamily').value = '';
+    elements.relativeParentRoleField.hidden = relation !== 'PARENT';
+    syncRelativeEntryMode();
+    if (parentFamilyId) document.querySelector('#relativeFamily').value = parentFamilyId;
+    elements.addRelativeDialog.showModal();
+  }
+
   function syncRelativeEntryMode() {
     const supportsExisting = ['PARENT', 'PARTNER'].includes(elements.relativeType.value);
     document.querySelector('#relativeModeField').hidden = !supportsExisting;
@@ -5790,6 +5859,7 @@
     document.querySelector('#relativeError').hidden = true;
     document.querySelector('#relativeFamilyField').hidden = elements.relativeType.value !== 'PARENT';
     const familySelect = document.querySelector('#relativeFamily');
+    const selectedFamilyId = familySelect.value;
     familySelect.replaceChildren();
     const role = elements.relativeParentRole.value;
     const families = [...state.families.values()].filter((family) => family.childIds.includes(state.selectedId)
@@ -5805,7 +5875,11 @@
     newFamily.value = '';
     newFamily.textContent = 'Create a separate parent family';
     familySelect.append(newFamily);
-    if (families.length !== 1) familySelect.value = '';
+    if (selectedFamilyId && families.some((family) => family.id === selectedFamilyId)) {
+      familySelect.value = selectedFamilyId;
+    } else if (families.length !== 1) {
+      familySelect.value = '';
+    }
     if (existing) syncExistingRelativeChoices();
   }
 
@@ -5944,9 +6018,27 @@
     if (!selectedRecord) return false;
     if (relation === 'PARENT') {
       const parentRole = elements.relativeParentRole.value;
-      familyLines.push(`1 ${parentRole} @${personId}@`, `1 CHIL @${selected.id}@`);
-      newPersonLines.push(`1 FAMS @${familyId}@`);
-      selectedRecord.lines.push(`1 FAMC @${familyId}@`);
+      const parentFamilyId = document.querySelector('#relativeFamily').value;
+      const parentFamily = state.families.get(parentFamilyId);
+      const parentFamilyRecord = state.gedcomRecords.find((record) => record.tag === 'FAM' && record.xref === parentFamilyId);
+      if (!['HUSB', 'WIFE'].includes(parentRole) || (parentFamilyId && (!parentFamilyRecord
+        || !parentFamily?.childIds.includes(selected.id)
+        || (parentRole === 'HUSB' ? parentFamily.husbandId : parentFamily.wifeId)))) {
+        const errorBox = document.querySelector('#relativeError');
+        errorBox.textContent = 'That parent family is unavailable or the parent role is already occupied.';
+        errorBox.hidden = false;
+        return false;
+      }
+      if (parentFamilyId) {
+        appendRecordLine(parentFamilyRecord, `1 ${parentRole} @${personId}@`);
+        appendRecordLine(selectedRecord, `1 FAMC @${parentFamilyId}@`);
+        newPersonLines.push(`1 FAMS @${parentFamilyId}@`);
+        addFamilyRecord = false;
+      } else {
+        familyLines.push(`1 ${parentRole} @${personId}@`, `1 CHIL @${selected.id}@`);
+        newPersonLines.push(`1 FAMS @${familyId}@`);
+        selectedRecord.lines.push(`1 FAMC @${familyId}@`);
+      }
     } else if (relation === 'CHILD') {
       const selectedRole = selected.sex === 'F' ? 'WIFE' : 'HUSB';
       familyLines.push(`1 ${selectedRole} @${selected.id}@`, `1 CHIL @${personId}@`);
@@ -6719,11 +6811,6 @@
       if (person) openPersonSummaryEditor(person);
       return;
     }
-    const homeButton = event.target.closest('button[data-home-person]');
-    if (homeButton) {
-      toggleHomePerson(homeButton.dataset.homePerson);
-      return;
-    }
     const primaryPersonButton = event.target.closest('button[data-primary-person]');
     if (primaryPersonButton) {
       togglePrimaryPerson(primaryPersonButton.dataset.primaryPerson);
@@ -6764,13 +6851,8 @@
     }
     const addRelationButton = event.target.closest('button[data-add-relation]');
     if (addRelationButton && state.people.has(state.selectedId)) {
-      elements.addRelativeForm.reset();
-      elements.relativeType.value = addRelationButton.dataset.addRelation;
-      document.querySelector('#relativeDuplicateWarning').hidden = true;
-      document.querySelector('#relativeDuplicateConfirmationLabel').hidden = true;
-      elements.relativeParentRoleField.hidden = elements.relativeType.value !== 'PARENT';
-      syncRelativeEntryMode();
-      elements.addRelativeDialog.showModal();
+      openRelativeEditor(addRelationButton.dataset.addRelation,
+        addRelationButton.dataset.parentRole, addRelationButton.dataset.parentFamilyId);
       return;
     }
     const editRelationButton = event.target.closest('button[data-edit-relationship]');
@@ -6781,12 +6863,7 @@
     const relativeButton = event.target.closest('button[data-add-relative]');
     if (relativeButton) {
       state.selectedId = relativeButton.dataset.addRelative;
-      elements.addRelativeForm.reset();
-      document.querySelector('#relativeDuplicateWarning').hidden = true;
-      document.querySelector('#relativeDuplicateConfirmationLabel').hidden = true;
-      elements.relativeParentRoleField.hidden = elements.relativeType.value !== 'PARENT';
-      syncRelativeEntryMode();
-      elements.addRelativeDialog.showModal();
+      openRelativeEditor();
       return;
     }
     const addButton = event.target.closest('button[data-add-media-for]');
@@ -7520,30 +7597,6 @@
     } catch {
       // The home page button stays available.
     }
-  }
-
-  async function toggleHomePerson(personId) {
-    const record = state.defaultRecord;
-    const person = state.people.get(personId);
-    if (!record || !person) return;
-    const clearing = record.homePersonId === personId;
-    const updated = { ...record, homePersonId: clearing ? '' : personId, homePersonName: clearing ? '' : person.name };
-    state.defaultsDraft = { configHandle: record.configHandle || null };
-    try {
-      await writeDefaultRecord(updated);
-    } catch {
-      showToast('This browser could not remember the home person.');
-      return;
-    }
-    state.defaultRecord = updated;
-    try {
-      const wrote = await writeDefaultsFile(updated, false);
-      if (!wrote) showToast(clearing ? 'Home person cleared (saved in this browser only).' : `${person.name} is now the home person (saved in this browser only; use Update defaults to also update kinship-defaults.json).`);
-      else showToast(clearing ? 'Home person cleared.' : `${person.name} will be selected when the default GEDCOM opens.`);
-    } catch {
-      showToast('Home person saved in this browser; kinship-defaults.json could not be updated.');
-    }
-    renderDetails();
   }
 
   const topMenus = [
