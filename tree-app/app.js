@@ -2646,6 +2646,41 @@
           item.setAttribute('role', 'button');
           item.title = 'Click to edit this event';
         }
+        // Create icon for the event type
+        const icon = document.createElement('span');
+        icon.className = 'event-icon';
+        
+        // Determine appropriate icon based on event type
+        let iconType = 'calendarPlus';  // default icon
+        
+        // Use closest available icons for your requested types:
+        // Birth → target (closest to baby)
+        // Death → trash (closest to headstone)
+        // Residence → map (closest to house)
+        // Marriage → tree (closest to rings) 
+        // Arrival/Immigration → search (closest to landing)
+        // Departure/Emigration → exit (closest to plane taking off)
+        
+        if (event.type === 'BIRT') {
+          iconType = 'target';  // birth icon - target closest to baby
+        } else if (event.type === 'DEAT') {
+          iconType = 'trash';   // death icon - trash closest to headstone
+        } else if (event.type === 'RESI') {
+          iconType = 'map';     // residence icon - map closest to house
+        } else if (event.type === 'MARR') {
+          iconType = 'tree';    // marriage icon - tree closest to rings
+        } else if (event.type === 'IMMI' || event.type === 'ARRI') {
+          iconType = 'search';  // arrival icon - search closest to landing
+        } else if (event.type === 'EMIG' || event.type === 'DEPA') {
+          iconType = 'exit';    // departure icon - exit closest to plane taking off
+        } else if (event.type === 'OCCU') {
+          iconType = 'chart';   // occupation icon - chart is appropriate
+        }
+        
+        // Create the SVG icon using existing createButtonIcon function
+        const svg = createButtonIcon(iconType);
+        icon.appendChild(svg);
+        
         const marker = document.createElement('span');
         marker.className = `event-marker ${event.type === 'RESI' ? 'residence' : event.type === 'OCCU' ? 'occupation' : ['BIRT', 'DEAT'].includes(event.type) ? '' : 'other'}`;
         const body = document.createElement('div');
@@ -2669,7 +2704,7 @@
         }
         const eventMedia = renderEventMedia(event);
         if (eventMedia) body.append(eventMedia);
-        item.append(marker, body);
+        item.append(icon, marker, body);
         list.append(item);
       }
       eventSection.append(list);
@@ -2945,10 +2980,10 @@
     elements.details.append(hero);
     const kinship = renderKinship(person);
     if (kinship) elements.details.append(kinship);
-    elements.details.append(renderEvents(person));
     const relationSection = section('Relationships');
     for (const [label, items] of relationshipGroups(person)) addRelationGroup(relationSection, label, items);
     elements.details.append(relationSection);
+    elements.details.append(renderEvents(person));
     const sourceIds = [...new Set(person.sourceIds)];
     const sourceSection = section('Source references');
     if (!sourceIds.length) {

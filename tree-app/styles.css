@@ -281,7 +281,12 @@ button { color: inherit; }
 .detail-section-title { display: flex; align-items: center; gap: 8px; margin: 0 0 11px; color: #71817a; font-size: 9px; font-weight: 800; letter-spacing: 1.15px; text-transform: uppercase; }
 .detail-section-title::after { height: 1px; flex: 1; content: ""; background: #e4ebe6; }
 .event-list { display: grid; gap: 8px; }
-.event-item { display: grid; grid-template-columns: 8px minmax(0,1fr); gap: 8px; }
+.event-item { display: grid; grid-template-columns: 24px 8px minmax(0,1fr); gap: 8px; }
+.event-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .event-marker { width: 6px; height: 6px; margin-top: 4px; border-radius: 50%; background: var(--coral); }
 .event-marker.residence { background: var(--blue); }
 .event-marker.occupation { background: var(--gold); }
