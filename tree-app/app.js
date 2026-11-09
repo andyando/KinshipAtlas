@@ -61,7 +61,11 @@
     gedcomSaveQueue: Promise.resolve(), gedcomPickerDeclined: false,
     directoryFilters: { birthCountry: '', deathCountry: '', occupationType: '', birthMin: null, birthMax: null, deathMin: null, deathMax: null },
     directoryYearBounds: { birth: null, death: null },
-    expandedSurnames: new Set(), surnameFilter: new Set()
+    expandedSurnames: new Set(), surnameFilter: new Set(),
+    mediaLibraryCache: null,
+    mediaLibraryCacheKey: '',
+    mediaLibraryRenderTimer: 0,
+    mediaLibrarySearchDebounce: 0
   };
   const elements = {
     fileInput: document.querySelector('#gedcomInput'), mediaInput: document.querySelector('#mediaInput'),
@@ -1586,6 +1590,8 @@
     }
     const recordsChanged = removedLinks > 0 || records.length !== state.gedcomRecords.length;
     state.gedcomRecords = records;
+    state.mediaLibraryCache = null;
+    state.mediaLibraryCacheKey = '';
 
     let additionalChanged = false;
     for (const [id, paths] of [...state.additionalMedia]) {
@@ -1722,6 +1728,8 @@
     state.additionalMedia = loadAdditionalMedia(storageKey, state.people);
     state.primaryMedia = loadPrimaryMedia(storageKey, state.people);
     state.mediaTypes = loadMediaTypes(storageKey);
+    state.mediaLibraryCache = null;
+    state.mediaLibraryCacheKey = '';
     document.querySelector('#mediaLibrarySearch').value = '';
     document.querySelector('#mediaLibraryTypeFilter').value = '';
     state.fileName = fileName;
@@ -1738,6 +1746,7 @@
     elements.mediaLibraryButton.disabled = false;
     document.querySelector('#mediaLibraryMenuButton').disabled = false;
     document.querySelector('#birthCountryMenuButton').disabled = false;
+    document.querySelector('#duplicateFinderMenuButton').disabled = false;
     elements.printMapButton.disabled = false;
     elements.showSiblings.disabled = false;
     document.querySelector('#openGedcomLabel').hidden = true;
@@ -2650,32 +2659,27 @@
         const icon = document.createElement('span');
         icon.className = 'event-icon';
         
-        // Determine appropriate icon based on event type
-        let iconType = 'calendarPlus';  // default icon
-        
-        // Use closest available icons for your requested types:
-        // Birth → target (closest to baby)
-        // Death → trash (closest to headstone)
-        // Residence → map (closest to house)
-        // Marriage → tree (closest to rings) 
-        // Arrival/Immigration → search (closest to landing)
-        // Departure/Emigration → exit (closest to plane taking off)
-        
-        if (event.type === 'BIRT') {
-          iconType = 'target';  // birth icon - target closest to baby
-        } else if (event.type === 'DEAT') {
-          iconType = 'trash';   // death icon - trash closest to headstone
-        } else if (event.type === 'RESI') {
-          iconType = 'map';     // residence icon - map closest to house
-        } else if (event.type === 'MARR') {
-          iconType = 'tree';    // marriage icon - tree closest to rings
-        } else if (event.type === 'IMMI' || event.type === 'ARRI') {
-          iconType = 'search';  // arrival icon - search closest to landing
-        } else if (event.type === 'EMIG' || event.type === 'DEPA') {
-          iconType = 'exit';    // departure icon - exit closest to plane taking off
-        } else if (event.type === 'OCCU') {
-          iconType = 'chart';   // occupation icon - chart is appropriate
-        }
+        // Map event types to appropriate SVG icons from buttonIcons
+        const eventIconMap = {
+          BIRT: 'birth',
+          DEAT: 'death',
+          BAPM: 'religion',
+          CHR: 'religion',
+          BURI: 'burial',
+          RESI: 'residence',
+          IMMI: 'immigration',
+          EMIG: 'emigration',
+          NATU: 'immigration',
+          MARR: 'marriage',
+          DIV: 'targetClear',
+          OCCU: 'occupation',
+          EDUC: 'education',
+          MILT: 'military',
+          RELI: 'religion',
+          CENS: 'census',
+          EVEN: 'calendarPlus'
+        };
+        const iconType = eventIconMap[event.type] || 'calendarPlus';
         
         // Create the SVG icon using existing createButtonIcon function
         const svg = createButtonIcon(iconType);
@@ -2848,6 +2852,87 @@
     showToast('Select ☆ on an image to make it the card image.');
   }
 
+  function openHeroImageChooser(personId) {
+    const person = state.people.get(personId);
+    if (!person) return;
+
+    if (!state.mediaIndex) {
+      showToast('Link a media folder first to choose or add a card image.');
+      return;
+    }
+
+    const dialog = document.createElement('dialog');
+    dialog.className = 'hero-image-chooser';
+    dialog.innerHTML = `
+      <form method="dialog">
+        <header>
+          <h2>Choose card image for ${person.name}</h2>
+          <button type="submit" class="dialog-close" value="close" aria-label="Close">&times;</button>
+        </header>
+        <div class="chooser-content"></div>
+        <footer>
+          <button type="submit" class="button button-secondary" value="close">Cancel</button>
+        </footer>
+      </form>
+    `;
+
+    const content = dialog.querySelector('.chooser-content');
+    const images = [];
+
+    for (const path of person.mediaPaths) {
+      const file = resolveMediaFile(path);
+      if (file && isImageFile(file)) {
+        images.push({ path, file });
+      }
+    }
+
+    if (images.length === 0) {
+      const note = document.createElement('p');
+      note.className = 'chooser-empty';
+      note.textContent = 'No attached images found. Add a photo to use as the card image.';
+      content.append(note);
+    } else {
+      const grid = document.createElement('div');
+      grid.className = 'chooser-grid';
+      for (const { path, file } of images) {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'chooser-item';
+        item.dataset.mediaPath = path;
+        item.setAttribute('aria-label', `Use ${file.name} as card image`);
+        const img = document.createElement('img');
+        img.src = mediaUrl(file);
+        img.alt = file.name;
+        item.append(img);
+        grid.append(item);
+        item.addEventListener('click', () => {
+          state.primaryMedia.set(personId, path);
+          const saved = savePrimaryMedia();
+          render();
+          dialog.close();
+          showToast(saved ? 'Card image set.' : 'Card image set for this tab; browser storage is unavailable.');
+        });
+      }
+      content.append(grid);
+    }
+
+    const addButton = document.createElement('button');
+    addButton.type = 'button';
+    addButton.className = 'chooser-add-button';
+    addButton.textContent = '+ Add new photo or PDF';
+    addButton.addEventListener('click', () => {
+      state.pendingUploadPersonId = personId;
+      dialog.close();
+      elements.mediaUploadInput.click();
+    });
+    content.append(addButton);
+
+    document.body.append(dialog);
+    dialog.showModal();
+
+    dialog.addEventListener('close', () => dialog.remove());
+  }
+
   function personHeaderCountries(person) {
     const birth = countryFlagForPlace(person.events.find((event) => event.type === 'BIRT')?.place);
     const death = countryFlagForPlace(person.events.find((event) => event.type === 'DEAT')?.place);
@@ -2901,8 +2986,22 @@
       monogram.append(photo, changeImage);
     } else {
       monogram.textContent = initials(person.name);
+      monogram.classList.add('detail-monogram-placeholder');
+      monogram.title = 'Click to choose a card image from attached media or add a new photo';
+      monogram.setAttribute('role', 'button');
+      monogram.setAttribute('tabindex', '0');
+      monogram.dataset.chooseHeroImage = person.id;
     }
-    const kicker = document.createElement('div'); kicker.className = 'eyebrow'; kicker.textContent = person.sex ? `PERSON RECORD · ${person.sex}` : 'PERSON RECORD';
+    const kicker = document.createElement('div');
+    kicker.className = 'eyebrow';
+    kicker.textContent = 'PERSON RECORD';
+    if (person.sex === 'M' || person.sex === 'F') {
+      const sexIcon = document.createElement('span');
+      sexIcon.className = 'person-sex-icon';
+      sexIcon.setAttribute('aria-hidden', 'true');
+      sexIcon.appendChild(createButtonIcon(person.sex === 'M' ? 'male' : 'female'));
+      kicker.append(' ', sexIcon);
+    }
     const title = document.createElement('h2'); title.textContent = person.name;
     const life = document.createElement('p'); life.className = 'detail-life'; life.textContent = lifespan(person);
     const id = document.createElement('span'); id.className = 'detail-id'; id.textContent = `GEDCOM @${person.id}@`;
@@ -3159,7 +3258,15 @@
     return mediaSection;
   }
 
-  function mediaLibraryEntries() {
+  function computeMediaLibraryCacheKey() {
+    return `${state.gedcomRecords.length}:${state.people.size}:${state.families.size}:${state.gedcomDirty ? 'dirty' : 'clean'}`;
+  }
+
+  function getMediaLibraryEntries() {
+    const cacheKey = computeMediaLibraryCacheKey();
+    if (state.mediaLibraryCache && state.mediaLibraryCacheKey === cacheKey) {
+      return state.mediaLibraryCache;
+    }
     const entries = new Map();
     const entriesByFile = new Map();
     const ensureEntry = (path) => {
@@ -3171,7 +3278,7 @@
       let entry = file ? entriesByFile.get(file) : null;
       if (!entry) entry = entries.get(key);
       if (!entry) {
-        entry = { key, path: displayPath, file, aliases: new Set(), people: new Map(), events: new Set() };
+        entry = { key, path: displayPath, file, aliases: new Set(), people: new Map(), events: new Set(), searchText: '' };
         entries.set(key, entry);
       }
       entry.aliases.add(key);
@@ -3253,7 +3360,14 @@
         for (const personId of personIds) linkPerson(path, personId, path, eventLabel);
       }
     }
-    return [...entries.values()].sort((a, b) => (a.file?.name || a.path).localeCompare(b.file?.name || b.path, undefined, { sensitivity: 'base' }));
+    const result = [...entries.values()].sort((a, b) => (a.file?.name || a.path).localeCompare(b.file?.name || b.path, undefined, { sensitivity: 'base' }));
+    for (const entry of result) {
+      const names = [...entry.people.values()].map(({ person }) => person.name).join(' ');
+      entry.searchText = `${entry.file?.name || entry.path} ${names}`.toLocaleLowerCase();
+    }
+    state.mediaLibraryCache = result;
+    state.mediaLibraryCacheKey = cacheKey;
+    return result;
   }
 
   function renderMediaLibrary() {
@@ -3264,12 +3378,11 @@
     document.querySelector('#mediaLibraryFileName').textContent = state.fileName;
     const search = document.querySelector('#mediaLibrarySearch').value.trim().toLocaleLowerCase();
     const selectedType = document.querySelector('#mediaLibraryTypeFilter').value;
-    const allEntries = mediaLibraryEntries();
+    const allEntries = getMediaLibraryEntries();
     const entries = allEntries.filter((entry) => {
       const type = state.mediaTypes.get(entry.key) || 'unclassified';
       if (selectedType && type !== selectedType) return false;
-      const names = [...entry.people.values()].map(({ person }) => person.name).join(' ');
-      return !search || `${entry.file?.name || entry.path} ${names}`.toLocaleLowerCase().includes(search);
+      return !search || entry.searchText.includes(search);
     });
     const total = allEntries.length;
     document.querySelector('#mediaLibraryCount').textContent = `${entries.length.toLocaleString()} of ${total.toLocaleString()} items`;
@@ -3282,146 +3395,172 @@
       elements.mediaLibraryContent.append(empty);
       return;
     }
-    for (const entry of entries) {
-      const card = document.createElement('article');
-      card.className = 'media-library-card';
-      const preview = document.createElement('div');
-      preview.className = 'media-library-preview';
-      if (entry.file && isImageFile(entry.file)) {
-        const link = document.createElement('a');
-        link.href = mediaUrl(entry.file);
-        link.target = '_blank';
-        link.rel = 'noopener';
-        link.setAttribute('aria-label', `View ${entry.file.name}`);
-        const image = document.createElement('img');
-        image.src = mediaUrl(entry.file);
-        image.alt = entry.file.name;
-        link.append(image);
-        preview.append(link);
-      } else if (entry.file) {
-        const link = document.createElement('a');
-        link.className = 'media-library-document';
-        link.href = mediaUrl(entry.file);
-        link.target = '_blank';
-        link.rel = 'noopener';
-        link.textContent = 'Open document';
-        preview.append(link);
+    if (state.mediaLibraryRenderTimer) clearTimeout(state.mediaLibraryRenderTimer);
+    let index = 0;
+    const batchSize = 10;
+    const fragment = document.createDocumentFragment();
+
+    function renderBatch() {
+      const end = Math.min(index + batchSize, entries.length);
+      for (; index < end; index++) {
+        const entry = entries[index];
+        fragment.append(createMediaLibraryCard(entry));
+      }
+      elements.mediaLibraryContent.appendChild(fragment);
+      if (index < entries.length) {
+        state.mediaLibraryRenderTimer = requestIdleCallback(renderBatch, { timeout: 200 });
       } else {
-        const missing = document.createElement('span');
-        missing.className = 'media-library-missing';
-        missing.textContent = 'File not found';
-        preview.append(missing);
+        state.mediaLibraryRenderTimer = 0;
       }
-
-      const details = document.createElement('div');
-      details.className = 'media-library-details';
-      const heading = document.createElement('h2');
-      heading.textContent = entry.file?.name || entry.path.split(/[\\/]/).pop() || entry.path;
-      heading.title = entry.path;
-      const pathLabel = document.createElement('p');
-      pathLabel.className = 'media-library-path';
-      pathLabel.textContent = entry.path;
-      details.append(heading, pathLabel);
-
-      const typeLabel = document.createElement('label');
-      typeLabel.className = 'media-library-type';
-      typeLabel.textContent = 'Classify';
-      const typeSelect = document.createElement('select');
-      typeSelect.dataset.mediaTypeKey = entry.key;
-      const currentType = state.mediaTypes.get(entry.key) || 'unclassified';
-      for (const [value, label] of mediaTypeOptions) {
-        const option = document.createElement('option');
-        option.value = value;
-        option.textContent = label;
-        option.selected = value === currentType;
-        typeSelect.append(option);
-      }
-      typeSelect.addEventListener('change', () => {
-        state.mediaTypes.set(entry.key, typeSelect.value);
-        const saved = saveMediaTypes();
-        renderMediaLibrary();
-        if (!saved) showToast('Classification saved for this tab only; browser storage is unavailable.');
-      });
-      typeLabel.append(typeSelect);
-      details.append(typeLabel);
-
-      const linked = document.createElement('div');
-      linked.className = 'media-library-links';
-      const linkedLabel = document.createElement('strong');
-      linkedLabel.textContent = 'Linked people';
-      linked.append(linkedLabel);
-      const peopleList = document.createElement('div');
-      peopleList.className = 'media-library-people';
-      if (entry.people.size) {
-        for (const { person, path } of [...entry.people.values()].sort((a, b) => a.person.name.localeCompare(b.person.name))) {
-          const personLink = makeButton(person.name, 'media-library-person');
-          personLink.dataset.mediaPerson = person.id;
-          personLink.dataset.mediaPath = path;
-          personLink.addEventListener('click', () => {
-            setMediaLibraryMode(false);
-            setFocus(person.id);
-          });
-          peopleList.append(personLink);
-          const selected = state.primaryMedia.get(person.id);
-          const primary = selected && (entry.file ? resolveMediaFile(selected) === entry.file : normalizeMediaPath(selected) === entry.key);
-          if (primary) {
-            const badge = document.createElement('span');
-            badge.className = 'media-library-primary-badge';
-            badge.textContent = 'Primary card image';
-            peopleList.append(badge);
-          }
-          if (entry.events.size) {
-            const eventNote = document.createElement('span');
-            eventNote.className = 'media-library-event-note';
-            eventNote.textContent = [...entry.events].filter((item) => item.startsWith(`${person.name} · `)).map((item) => item.slice(person.name.length + 3)).join(', ');
-            if (eventNote.textContent) peopleList.append(eventNote);
-          }
-        }
-      } else {
-        const none = document.createElement('span');
-        none.className = 'media-library-unlinked';
-        none.textContent = 'No person link recorded';
-        peopleList.append(none);
-      }
-      linked.append(peopleList);
-      details.append(linked);
-
-      const actions = document.createElement('div');
-      actions.className = 'media-library-actions';
-      if (entry.file && isImageFile(entry.file) && entry.people.size) {
-        const primaryPerson = document.createElement('select');
-        primaryPerson.className = 'media-library-primary-person';
-        primaryPerson.setAttribute('aria-label', 'Person to assign this card image to');
-        for (const { person } of entry.people.values()) {
-          const option = document.createElement('option');
-          option.value = person.id;
-          option.textContent = person.name;
-          primaryPerson.append(option);
-        }
-        const setPrimary = makeButton('Set as card image', 'media-library-primary-action');
-        setPrimary.addEventListener('click', () => {
-          const personId = primaryPerson.value;
-          const path = entry.people.get(personId)?.path;
-          if (!path) return;
-          state.primaryMedia.set(personId, path);
-          const saved = savePrimaryMedia();
-          render();
-          renderMediaLibrary();
-          showToast(saved ? `${entry.file.name} is now ${state.people.get(personId)?.name}'s primary card image.` : 'Primary card image selected for this tab; browser storage is unavailable.');
-        });
-        actions.append(primaryPerson, setPrimary);
-      }
-      const deleteButton = makeButton('Delete file', 'media-library-delete');
-      deleteButton.disabled = !canDeleteMediaFile(entry.file);
-      deleteButton.title = deleteButton.disabled
-        ? entry.file ? 'Select a writable media folder or use the local helper to delete files.' : 'The file is unavailable in the linked media folder.'
-        : 'Permanently delete this file and remove its links from the GEDCOM.';
-      deleteButton.addEventListener('click', () => openMediaLibraryDeleteDialog(entry));
-      actions.append(deleteButton);
-      details.append(actions);
-      card.append(preview, details);
-      elements.mediaLibraryContent.append(card);
     }
+    renderBatch();
+  }
+
+  function createMediaLibraryCard(entry) {
+    const card = document.createElement('article');
+    card.className = 'media-library-card';
+    card.dataset.mediaKey = entry.key;
+    const preview = document.createElement('div');
+    preview.className = 'media-library-preview';
+    if (entry.file && isImageFile(entry.file)) {
+      const link = document.createElement('a');
+      link.href = mediaUrl(entry.file);
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.setAttribute('aria-label', `View ${entry.file.name}`);
+      const image = document.createElement('img');
+      image.loading = 'lazy';
+      image.src = mediaUrl(entry.file);
+      image.alt = entry.file.name;
+      link.append(image);
+      preview.append(link);
+    } else if (entry.file) {
+      const link = document.createElement('a');
+      link.className = 'media-library-document';
+      link.href = mediaUrl(entry.file);
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.textContent = 'Open document';
+      preview.append(link);
+    } else {
+      const missing = document.createElement('span');
+      missing.className = 'media-library-missing';
+      missing.textContent = 'File not found';
+      preview.append(missing);
+    }
+
+    const details = document.createElement('div');
+    details.className = 'media-library-details';
+    const heading = document.createElement('h2');
+    heading.textContent = entry.file?.name || entry.path.split(/[\\/]/).pop() || entry.path;
+    heading.title = entry.path;
+    const pathLabel = document.createElement('p');
+    pathLabel.className = 'media-library-path';
+    pathLabel.textContent = entry.path;
+    details.append(heading, pathLabel);
+
+    const typeLabel = document.createElement('label');
+    typeLabel.className = 'media-library-type';
+    typeLabel.textContent = 'Classify';
+    const typeSelect = document.createElement('select');
+    typeSelect.dataset.mediaTypeKey = entry.key;
+    const currentType = state.mediaTypes.get(entry.key) || 'unclassified';
+    for (const [value, label] of mediaTypeOptions) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      option.selected = value === currentType;
+      typeSelect.append(option);
+    }
+    typeSelect.addEventListener('change', () => {
+      state.mediaTypes.set(entry.key, typeSelect.value);
+      const saved = saveMediaTypes();
+      const cardEl = elements.mediaLibraryContent.querySelector(`[data-media-key="${entry.key}"]`);
+      if (cardEl) {
+        const selectEl = cardEl.querySelector('[data-media-type-key]');
+        if (selectEl) selectEl.value = typeSelect.value;
+      }
+      if (!saved) showToast('Classification saved for this tab only; browser storage is unavailable.');
+    });
+    typeLabel.append(typeSelect);
+    details.append(typeLabel);
+
+    const linked = document.createElement('div');
+    linked.className = 'media-library-links';
+    const linkedLabel = document.createElement('strong');
+    linkedLabel.textContent = 'Linked people';
+    linked.append(linkedLabel);
+    const peopleList = document.createElement('div');
+    peopleList.className = 'media-library-people';
+    if (entry.people.size) {
+      for (const { person, path } of [...entry.people.values()].sort((a, b) => a.person.name.localeCompare(b.person.name))) {
+        const personLink = makeButton(person.name, 'media-library-person');
+        personLink.dataset.mediaPerson = person.id;
+        personLink.dataset.mediaPath = path;
+        personLink.addEventListener('click', () => {
+          setMediaLibraryMode(false);
+          setFocus(person.id);
+        });
+        peopleList.append(personLink);
+        const selected = state.primaryMedia.get(person.id);
+        const primary = selected && (entry.file ? resolveMediaFile(selected) === entry.file : normalizeMediaPath(selected) === entry.key);
+        if (primary) {
+          const badge = document.createElement('span');
+          badge.className = 'media-library-primary-badge';
+          badge.textContent = 'Primary card image';
+          peopleList.append(badge);
+        }
+        if (entry.events.size) {
+          const eventNote = document.createElement('span');
+          eventNote.className = 'media-library-event-note';
+          eventNote.textContent = [...entry.events].filter((item) => item.startsWith(`${person.name} · `)).map((item) => item.slice(person.name.length + 3)).join(', ');
+          if (eventNote.textContent) peopleList.append(eventNote);
+        }
+      }
+    } else {
+      const none = document.createElement('span');
+      none.className = 'media-library-unlinked';
+      none.textContent = 'No person link recorded';
+      peopleList.append(none);
+    }
+    linked.append(peopleList);
+    details.append(linked);
+
+    const actions = document.createElement('div');
+    actions.className = 'media-library-actions';
+    if (entry.file && isImageFile(entry.file) && entry.people.size) {
+      const primaryPerson = document.createElement('select');
+      primaryPerson.className = 'media-library-primary-person';
+      primaryPerson.setAttribute('aria-label', 'Person to assign this card image to');
+      for (const { person } of entry.people.values()) {
+        const option = document.createElement('option');
+        option.value = person.id;
+        option.textContent = person.name;
+        primaryPerson.append(option);
+      }
+      const setPrimary = makeButton('Set as card image', 'media-library-primary-action');
+      setPrimary.addEventListener('click', () => {
+        const personId = primaryPerson.value;
+        const path = entry.people.get(personId)?.path;
+        if (!path) return;
+        state.primaryMedia.set(personId, path);
+        const saved = savePrimaryMedia();
+        render();
+        renderMediaLibrary();
+        showToast(saved ? `${entry.file.name} is now ${state.people.get(personId)?.name}'s primary card image.` : 'Primary card image selected for this tab; browser storage is unavailable.');
+      });
+      actions.append(primaryPerson, setPrimary);
+    }
+    const deleteButton = makeButton('Delete file', 'media-library-delete');
+    deleteButton.disabled = !canDeleteMediaFile(entry.file);
+    deleteButton.title = deleteButton.disabled
+      ? entry.file ? 'Select a writable media folder or use the local helper to delete files.' : 'The file is unavailable in the linked media folder.'
+      : 'Permanently delete this file and remove its links from the GEDCOM.';
+    deleteButton.addEventListener('click', () => openMediaLibraryDeleteDialog(entry));
+    actions.append(deleteButton);
+    details.append(actions);
+    card.append(preview, details);
+    return card;
   }
 
   let logoPersonId = null;
@@ -3587,7 +3726,9 @@
     dna: '<path d="M8 3c6 4 6 14 0 18"/><path d="M16 3c-6 4-6 14 0 18"/><path d="M9 7h6"/><path d="M8 12h8"/><path d="M9 17h6"/>',
     photo: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-6 6"/>',
     document: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/>',
-    religion: '<path d="M12 4v16"/><path d="M7 9h10"/>'
+    religion: '<path d="M12 4v16"/><path d="M7 9h10"/>',
+    male: '<circle cx="12" cy="12" r="9"/><path d="M18 6l-6 6M22 6h-6v6"/>',
+    female: '<circle cx="12" cy="12" r="9"/><path d="M12 6v12M12 6h4a4 4 0 0 1 0 8h-4"/>'
   };
 
   function createButtonIcon(icon) {
@@ -3645,6 +3786,14 @@
 
   function setMediaLibraryMode(on) {
     if (on && !state.people.size) return;
+    if (!on) {
+      if (state.mediaLibraryRenderTimer) {
+        cancelIdleCallback(state.mediaLibraryRenderTimer);
+        state.mediaLibraryRenderTimer = 0;
+      }
+      clearTimeout(state.mediaLibrarySearchDebounce);
+      state.mediaLibrarySearchDebounce = 0;
+    }
     state.mediaLibraryMode = on;
     if (on && state.reportsMode) {
       state.reportsMode = false;
@@ -5167,6 +5316,8 @@
     for (const id of state.primaryMedia.keys()) {
       if (!mediaPathsForPerson(id).includes(state.primaryMedia.get(id))) state.primaryMedia.delete(id);
     }
+    state.mediaLibraryCache = null;
+    state.mediaLibraryCacheKey = '';
     elements.peopleCount.textContent = state.people.size.toLocaleString();
   }
 
@@ -5187,6 +5338,167 @@
       .filter((person) => !countryFlagForPlace(birthPlaceOf(person)))
       .sort((a, b) => (a.surname || '').localeCompare(b.surname || '', undefined, { sensitivity: 'base' })
         || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  }
+
+  // ---------- Duplicate Finder ----------
+
+  function duplicateScore(a, b) {
+    let score = 0;
+    if ((a.surname || '').trim() && (b.surname || '').trim()
+      && a.surname.toLocaleLowerCase() === b.surname.toLocaleLowerCase()) score += 25;
+    if ((a.givenName || '').trim() && (b.givenName || '').trim()
+      && a.givenName.toLocaleLowerCase() === b.givenName.toLocaleLowerCase()) score += 15;
+    if (a.name && b.name && a.name.toLocaleLowerCase() === b.name.toLocaleLowerCase()) {
+      score = Math.max(score, 40);
+    }
+    const aBirth = a.events.find((e) => e.type === 'BIRT');
+    const bBirth = b.events.find((e) => e.type === 'BIRT');
+    if (aBirth && bBirth) {
+      const aDate = (aBirth.date || '').trim();
+      const bDate = (bBirth.date || '').trim();
+      if (aDate && bDate && aDate === bDate) score += 20;
+      else if (aDate && bDate && aDate.slice(-4) === bDate.slice(-4)) score += 10;
+      const aPlace = (aBirth.place || '').trim();
+      const bPlace = (bBirth.place || '').trim();
+      if (aPlace && bPlace && aPlace.toLocaleLowerCase() === bPlace.toLocaleLowerCase()) score += 5;
+    }
+    const aDeath = a.events.find((e) => e.type === 'DEAT');
+    const bDeath = b.events.find((e) => e.type === 'DEAT');
+    if (aDeath && bDeath) {
+      const aDate = (aDeath.date || '').trim();
+      const bDate = (bDeath.date || '').trim();
+      if (aDate && bDate && aDate === bDate) score += 20;
+      else if (aDate && bDate && aDate.slice(-4) === bDate.slice(-4)) score += 10;
+      const aPlace = (aDeath.place || '').trim();
+      const bPlace = (bDeath.place || '').trim();
+      if (aPlace && bPlace && aPlace.toLocaleLowerCase() === bPlace.toLocaleLowerCase()) score += 5;
+    }
+    if (a.sex && b.sex && a.sex === b.sex) score += 5;
+    return score;
+  }
+
+  function findDuplicates(threshold) {
+    const people = [...state.people.values()];
+    const pairs = [];
+    for (let i = 0; i < people.length; i += 1) {
+      for (let j = i + 1; j < people.length; j += 1) {
+        const score = duplicateScore(people[i], people[j]);
+        if (score >= threshold) {
+          pairs.push({ personA: people[i], personB: people[j], score });
+        }
+      }
+    }
+    pairs.sort((a, b) => b.score - a.score);
+    return pairs;
+  }
+
+  function renderDuplicateFinder() {
+    const list = document.querySelector('#duplicateFinderList');
+    const threshold = Number(document.querySelector('#duplicateThreshold').value);
+    const pairs = findDuplicates(threshold);
+    const summary = document.querySelector('#duplicateFinderSummary');
+
+    list.replaceChildren();
+
+    if (pairs.length === 0) {
+      summary.textContent = `No duplicate candidates found with a score of ${threshold} or higher.`;
+      const empty = document.createElement('div');
+      empty.className = 'duplicate-finder-empty';
+      empty.textContent = 'Try lowering the minimum score threshold.';
+      list.append(empty);
+      updateDuplicateSelected();
+      return;
+    }
+
+    summary.textContent = `${pairs.length} candidate pair${pairs.length === 1 ? '' : 's'} found.`;
+
+    for (const pair of pairs) {
+      const card = document.createElement('div');
+      card.className = 'duplicate-pair';
+
+      const scoreBadge = document.createElement('div');
+      scoreBadge.className = `duplicate-pair-score is-${pair.score >= 75 ? 'high' : pair.score >= 50 ? 'medium' : 'low'}`;
+      scoreBadge.textContent = pair.score;
+      card.append(scoreBadge);
+
+      const deleteHint = document.createElement('div');
+      deleteHint.className = 'duplicate-pair-delete';
+      deleteHint.dataset.duplicateDeleteHint = pair.personB.id;
+      deleteHint.textContent = 'DELETE THIS';
+      deleteHint.hidden = true;
+      card.append(deleteHint);
+
+      for (const person of [pair.personA, pair.personB]) {
+        const personDiv = document.createElement('div');
+        personDiv.className = 'duplicate-pair-person';
+        const nameBtn = makeButton(person.name, 'duplicate-pair-name');
+        nameBtn.dataset.personId = person.id;
+        const details = document.createElement('div');
+        details.className = 'duplicate-pair-detail';
+        const parts = [];
+        if (person.sex) parts.push(person.sex === 'M' ? 'Male' : 'Female');
+        const yrs = lifespan(person);
+        if (yrs) parts.push(yrs);
+        const birth = person.events.find((e) => e.type === 'BIRT');
+        const death = person.events.find((e) => e.type === 'DEAT');
+        if (birth?.place) parts.push(`Born: ${birth.place}`);
+        if (death?.place) parts.push(`Died: ${death.place}`);
+        if (parts.length) details.textContent = parts.join(' · ');
+        personDiv.append(nameBtn, details);
+        card.append(personDiv);
+      }
+
+      const checkboxLabel = document.createElement('label');
+      checkboxLabel.className = 'duplicate-pair-delete';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.dataset.duplicateDelete = pair.personB.id;
+      checkbox.title = `Mark ${pair.personB.name} for deletion`;
+      checkboxLabel.append(checkbox, document.createTextNode(` Delete ${pair.personB.name}`));
+      checkboxLabel.hidden = true;
+      checkboxLabel.dataset.duplicateDeleteLabel = pair.personB.id;
+      card.append(checkboxLabel);
+
+      card.addEventListener('click', (event) => {
+        const isCheckboxArea = event.target.closest('label');
+        if (!isCheckboxArea) {
+          checkbox.checked = !checkbox.checked;
+          checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        deleteHint.hidden = !checkbox.checked;
+        checkboxLabel.hidden = !checkbox.checked;
+        card.classList.toggle('is-selected', checkbox.checked);
+      });
+
+      list.append(card);
+    }
+
+    updateDuplicateSelected();
+  }
+
+  function updateDuplicateSelected() {
+    const selected = document.querySelectorAll('#duplicateFinderList input[data-duplicate-delete]:checked');
+    const count = selected.length;
+    const label = document.querySelector('#duplicateFinderSelected');
+    const deleteButton = document.querySelector('#deleteDuplicatesButton');
+    label.textContent = count ? `${count} duplicate${count > 1 ? 's' : ''} selected` : '';
+    deleteButton.disabled = !count;
+  }
+
+  function openDuplicateFinder() {
+    const dialog = document.querySelector('#duplicateFinderDialog');
+    renderDuplicateFinder();
+    dialog.showModal();
+  }
+
+  function closeDuplicateFinder() {
+    const dialog = document.querySelector('#duplicateFinderDialog');
+    const confirm = document.querySelector('#duplicateDeleteConfirm');
+    if (confirm) confirm.remove();
+    const deleteBtn = document.querySelector('#deleteDuplicatesButton');
+    deleteBtn.dataset.confirm = '';
+    deleteBtn.textContent = 'Delete selected duplicates';
+    dialog.close();
   }
 
   function birthCountryHint(place) {
@@ -6702,6 +7014,7 @@
     elements.mediaLibraryButton.disabled = true;
     document.querySelector('#mediaLibraryMenuButton').disabled = true;
     document.querySelector('#birthCountryMenuButton').disabled = true;
+    document.querySelector('#duplicateFinderMenuButton').disabled = true;
     releaseMediaUrls(); state.mediaIndex = null; state.mediaFolderPicked = false;
     state.mediaRelativePaths = new WeakMap(); state.mediaDirectoryHandle = null; state.pendingUploadPersonId = null;
     syncMediaButton();
@@ -6711,6 +7024,8 @@
     state.gedcomSource = ''; state.gedcomFileHandle = null; state.gedcomBaseHash = ''; state.gedcomPickerDeclined = false;
     state.people.clear(); state.families.clear(); state.sources.clear(); state.selectedId = null;
     state.primaryPersonId = ''; syncPrimaryPersonBar();
+    state.mediaLibraryCache = null;
+    state.mediaLibraryCacheKey = '';
     refreshDirectoryFilters(true);
     state.fileName = ''; state.gedcomText = ''; state.history = []; state.historyIndex = -1; state.searchText = '';
     state.rememberedMediaDirectoryHandle = null;
@@ -6784,6 +7099,52 @@
     saveBirthCountries();
   });
   document.querySelector('#closeBirthCountries').addEventListener('click', closeBirthCountryDialog);
+  document.querySelector('#duplicateFinderMenuButton').addEventListener('click', openDuplicateFinder);
+  document.querySelector('#duplicateThreshold').addEventListener('input', (event) => {
+    document.querySelector('#duplicateThresholdLabel').textContent = event.target.value;
+    renderDuplicateFinder();
+  });
+  document.querySelector('#duplicateFinderList').addEventListener('change', (event) => {
+    if (event.target.dataset.duplicateDelete !== undefined) updateDuplicateSelected();
+  });
+  document.querySelector('#deleteDuplicatesButton').addEventListener('click', () => {
+    const checkboxes = document.querySelectorAll('#duplicateFinderList input[data-duplicate-delete]:checked');
+    const idsToDelete = new Set();
+    for (const cb of checkboxes) idsToDelete.add(cb.dataset.duplicateDelete);
+    if (!idsToDelete.size) return;
+    // Check no one would be the last person
+    if (state.people.size - idsToDelete.size < 1) {
+      showToast('Cannot delete the last person in the tree.');
+      return;
+    }
+    // Show confirmation
+    const dialog = document.querySelector('#duplicateFinderDialog');
+    const names = [...idsToDelete].map((id) => {
+      const p = state.people.get(id);
+      return p ? p.name : `@${id}@`;
+    });
+    const confirmP = document.createElement('p');
+    confirmP.id = 'duplicateDeleteConfirm';
+    confirmP.textContent = `You are about to delete ${idsToDelete.size} person${idsToDelete.size > 1 ? 's' : ''}. This cannot be undone.`;
+    dialog.querySelector('.dialog-panel').prepend(confirmP);
+    // Re-render delete button to trigger confirmation
+    const deleteBtn = document.querySelector('#deleteDuplicatesButton');
+    if (!deleteBtn.dataset.confirm) {
+      deleteBtn.dataset.confirm = 'pending';
+      deleteBtn.textContent = `Confirm delete ${idsToDelete.size} person${idsToDelete.size > 1 ? 's' : ''}`;
+      return;
+    }
+    deleteBtn.dataset.confirm = '';
+    // Proceed with deletion
+    confirmP.remove();
+    for (const id of idsToDelete) {
+      const plan = planPersonDeletion(id);
+      if (plan) deletePersonRecord(plan);
+    }
+    closeDuplicateFinder();
+    showToast(`Deleted ${idsToDelete.size} duplicate person${idsToDelete.size > 1 ? 's' : ''}.`);
+  });
+  document.querySelector('#closeDuplicateFinder').addEventListener('click', closeDuplicateFinder);
   document.querySelector('#geonamesLookup').addEventListener('click', runGeonamesLookup);
   document.querySelector('#geonamesUsername').addEventListener('input', syncGeonamesControls);
   document.querySelector('#geonamesConsent').addEventListener('change', syncGeonamesControls);
@@ -6798,7 +7159,10 @@
     closeBirthCountryDialog();
   });
   document.querySelector('#mediaLibraryBackButton').addEventListener('click', () => setMediaLibraryMode(false));
-  document.querySelector('#mediaLibrarySearch').addEventListener('input', renderMediaLibrary);
+  document.querySelector('#mediaLibrarySearch').addEventListener('input', () => {
+    clearTimeout(state.mediaLibrarySearchDebounce);
+    state.mediaLibrarySearchDebounce = setTimeout(renderMediaLibrary, 150);
+  });
   document.querySelector('#mediaLibraryTypeFilter').addEventListener('change', renderMediaLibrary);
   document.querySelector('#printReportsButton').addEventListener('click', printReports);
   elements.reportsContent.addEventListener('click', (event) => {
@@ -6899,6 +7263,11 @@
     }
     if (event.target.closest('button[data-change-card-image]')) {
       showCardImageChoices();
+      return;
+    }
+    const chooseHero = event.target.closest('[data-choose-hero-image]');
+    if (chooseHero) {
+      openHeroImageChooser(chooseHero.dataset.chooseHeroImage);
       return;
     }
     const editButton = event.target.closest('button[data-add-life-event]');
@@ -8027,6 +8396,7 @@
   setButtonContent(elements.mediaLibraryButton, 'media', 'Media');
   setButtonContent(document.querySelector('#mediaLibraryMenuButton'), 'media', 'Media library');
   setButtonContent(document.querySelector('#birthCountryMenuButton'), 'map', 'People without a birth country');
+  setButtonContent(document.querySelector('#duplicateFinderMenuButton'), 'search', 'Find duplicate people');
   setButtonContent(document.querySelector('#exitButton'), 'exit', 'Exit Kinship Atlas');
   setButtonContent(document.querySelector('#aboutMenuButton'), 'info', 'About Kinship Atlas');
   setButtonContent(document.querySelector('#defaultsButton'), 'sliders', 'Update defaults');

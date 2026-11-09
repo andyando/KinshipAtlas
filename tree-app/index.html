@@ -53,6 +53,7 @@
           <input id="mediaUploadInput" type="file" accept="image/*,.pdf,application/pdf" multiple>
           <button id="mediaLibraryMenuButton" class="menu-item" type="button" role="menuitem" disabled>Media library</button>
           <button id="birthCountryMenuButton" class="menu-item" type="button" role="menuitem" disabled title="List people whose birth place does not identify a country, and fix them">People without a birth country</button>
+          <button id="duplicateFinderMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Find people who may have been entered more than once">Find duplicate people</button>
           <button id="defaultsButton" class="menu-item" type="button" role="menuitem" title="Choose the GEDCOM file and media folder that open automatically">Update defaults</button>
           <button id="updateAppButton" class="menu-item" type="button" role="menuitem">Check for application updates</button>
           <button id="clearButton" class="menu-item" type="button" role="menuitem" disabled>Start Again</button>
@@ -690,6 +691,23 @@
         <button id="closeBirthCountries" class="dialog-button dialog-button-quiet" type="button">Close</button>
       </div>
     </form>
+  </dialog>
+  <dialog id="duplicateFinderDialog" class="app-dialog duplicate-finder-dialog" aria-labelledby="duplicateFinderTitle">
+    <section class="dialog-panel">
+      <h2 id="duplicateFinderTitle">Find duplicate people</h2>
+      <p id="duplicateFinderSummary">Scoring each person against every other one to find potential duplicates.</p>
+      <label class="duplicate-finder-threshold">
+        Minimum score
+        <input id="duplicateThreshold" type="range" min="30" max="95" value="60">
+        <output id="duplicateThresholdLabel">60</output>
+      </label>
+      <div id="duplicateFinderList" class="duplicate-finder-list" aria-live="polite"></div>
+      <div class="dialog-actions">
+        <span id="duplicateFinderSelected" class="duplicate-finder-selected"></span>
+        <button id="deleteDuplicatesButton" class="dialog-button dialog-button-danger" type="button" disabled>Delete selected duplicates</button>
+        <button id="closeDuplicateFinder" class="dialog-button dialog-button-quiet" type="button">Close</button>
+      </div>
+    </section>
   </dialog>
   <dialog id="addRelativeDialog" class="app-dialog" aria-labelledby="addRelativeTitle">
     <form id="addRelativeForm" class="dialog-panel new-gedcom-panel">
