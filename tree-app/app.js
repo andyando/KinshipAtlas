@@ -1,6 +1,32 @@
-/* Kinship Atlas runs entirely in this browser tab. It does not upload or persist imported GEDCOM data. */
+/* Kinship Atlas runs entirely in this browser tab. It does not upload or persist imported GEDCOM data.
+ *
+ * This file is intentionally a single, no-build browser script (loaded directly by index.html).
+ * It is organised into labelled sections so it can be navigated like modules:
+ *
+ *   1. Constants and application state
+ *   2. Cached DOM elements
+ *   3. GEDCOM primitives (parsing, serialising, record helpers)
+ *   4. Session persistence (IndexedDB)
+ *   5. GEDCOM parsing
+ *   6. Kinship graph and relationship terms
+ *   7. WikiTree research integration
+ *   8. Media handling (index, storage, resolution)
+ *   9. Selections and per-tree storage keys
+ *  10. Rendering (tree, roster, details, media library, reports)
+ *  11. Editors and dialogs (person, life events, relationships, deletion)
+ *  12. Directory, duplicate finder and birth-country suggestions
+ *  13. GEDCOM import, merging and saving
+ *  14. Map, print, defaults, about/help and startup wiring
+ *
+ * Section banners below match this list. Functions within a section keep their historical
+ * ordering because the automated test suite locates some helpers by exact source position.
+ */
 (() => {
   'use strict';
+
+  // ---------------------------------------------------------------------------
+  // 1. Constants and application state
+  // ---------------------------------------------------------------------------
 
   const eventNames = {
     BIRT: 'Birth', DEAT: 'Death', BAPM: 'Baptism', CHR: 'Christening', BURI: 'Burial',
@@ -67,6 +93,11 @@
     mediaLibraryRenderTimer: 0,
     mediaLibrarySearchDebounce: 0
   };
+
+  // ---------------------------------------------------------------------------
+  // 2. Cached DOM elements
+  // ---------------------------------------------------------------------------
+
   const elements = {
     fileInput: document.querySelector('#gedcomInput'), mediaInput: document.querySelector('#mediaInput'),
     mediaUploadInput: document.querySelector('#mediaUploadInput'), mediaButton: document.querySelector('#mediaButton'),
@@ -139,8 +170,19 @@
   };
   let toastTimer = 0;
 
+  // ---------------------------------------------------------------------------
+  // 3. GEDCOM primitives (parsing, serialising, record helpers)
+  // ---------------------------------------------------------------------------
+
   function splitXref(value) {
     return value ? value.replace(/^@|@$/g, '') : '';
+  }
+
+  // Opens a <dialog> as modal and moves focus to its quiet (cancel-style) button so
+  // Enter/Space is safe and the dialog closes cleanly with keyboard navigation.
+  function showModalFocused(dialog) {
+    dialog.showModal();
+    dialog.querySelector('.dialog-button-quiet')?.focus();
   }
 
   function normalizeDirectoryName(value) {
@@ -237,7 +279,18 @@
 
   function parseGedcomField(line) {
     const match = line.match(/^(\d+)\s+([A-Za-z0-9_]+)(?:\s+(.*))?$/);
+    // Single place that knows the field shape shared by every consumer below.
     return match ? { level: Number(match[1]), tag: match[2].toUpperCase(), value: match[3] || '' } : null;
+  }
+
+  // Index of the first `n TAG` line at or after `from`. Line 0 of a record is the
+  // header ("0 @X@ INDI"), so callers scanning record bodies start at 1.
+  function gedcomLineIndexOf(lines, tag, level = 1, from = 1) {
+    for (let index = from; index < lines.length; index++) {
+      const field = parseGedcomField(lines[index]);
+      if (field?.level === level && field.tag === tag) return index;
+    }
+    return -1;
   }
 
   function serializeGedcomRecords(records) {
@@ -256,6 +309,10 @@
     }
     return files;
   }
+
+  // ---------------------------------------------------------------------------
+  // 4. Session persistence (IndexedDB)
+  // ---------------------------------------------------------------------------
 
   function getActiveSessionId() {
     let sessionId = sessionStorage.getItem('kinship-atlas-session-id');
@@ -334,6 +391,10 @@
     }
     state.sessionSaveQueue = Promise.resolve();
   }
+
+  // ---------------------------------------------------------------------------
+  // 5. GEDCOM parsing
+  // ---------------------------------------------------------------------------
 
   function parseGedcom(text) {
     const people = new Map();
@@ -522,6 +583,10 @@
     if (!people.size) throw new Error('No individual records were found in this file.');
     return { people, families, sources, gedcomRecords };
   }
+
+  // ---------------------------------------------------------------------------
+  // 6. Kinship graph and relationship terms
+  // ---------------------------------------------------------------------------
 
   function personName(id) {
     return state.people.get(id)?.name || 'Unknown person';
@@ -768,6 +833,10 @@
     return Boolean(person?.events.some((event) => event.type === 'DEAT' && (event.date || event.place || event.value)));
   }
 
+  // ---------------------------------------------------------------------------
+  // 7. WikiTree research integration
+  // ---------------------------------------------------------------------------
+
   function buildWikiTreeQuery(person) {
     const birth = person.events.find((event) => event.type === 'BIRT');
     const death = person.events.find((event) => event.type === 'DEAT');
@@ -902,6 +971,10 @@
     window.clearTimeout(toastTimer);
     toastTimer = window.setTimeout(() => elements.toast.classList.remove('visible'), 4200);
   }
+
+  // ---------------------------------------------------------------------------
+  // 8. Media handling (index, storage, resolution)
+  // ---------------------------------------------------------------------------
 
   function normalizeMediaPath(path) {
     return String(path || '').trim().replace(/^['"]|['"]$/g, '').replaceAll('\\', '/').replace(/\/+/g, '/').toLocaleLowerCase();
@@ -1048,6 +1121,10 @@
   let helperSelections = null;
   const loadedSelectionKeys = new Set();
   let selectionSyncQueue = Promise.resolve(true);
+
+  // ---------------------------------------------------------------------------
+  // 9. Selections and per-tree storage keys
+  // ---------------------------------------------------------------------------
 
   function readSelection(key) {
     if (!helperSelections) return JSON.parse(localStorage.getItem(key) || 'null');
@@ -1495,8 +1572,7 @@
   function pendingEventBlock(pending) {
     if (pending.familyId) {
       const record = state.gedcomRecords.find((entry) => entry.tag === 'FAM' && entry.xref === pending.familyId);
-      const start = record ? record.lines.findIndex((line, index) => index > 0 &&
-        parseGedcomField(line)?.level === 1 && parseGedcomField(line)?.tag === pending.config.tag) : -1;
+      const start = record ? gedcomLineIndexOf(record.lines, pending.config.tag) : -1;
       return start < 0 ? null : { record, start, end: lifeEventBlockEnd(record.lines, start) };
     }
     const record = state.gedcomRecords.find((entry) => entry.tag === 'INDI' && entry.xref === pending.personId);
@@ -1702,6 +1778,10 @@
     }
     showToast('Media unlinked from this person. The file remains in the media folder.');
   }
+
+  // ---------------------------------------------------------------------------
+  // 10. Rendering (tree, roster, details, media library, reports)
+  // ---------------------------------------------------------------------------
 
   function setLoaded(fileName, data, storageKey, gedcomText = '') {
     releaseMediaUrls();
@@ -4280,6 +4360,10 @@
     window.addEventListener('afterprint', cleanup);
     window.print();
   }
+  // ---------------------------------------------------------------------------
+  // 11. Editors and dialogs (person, life events, relationships, deletion)
+  // ---------------------------------------------------------------------------
+
   function appendGedcomFieldRow(field = { level: 1, tag: 'NOTE', value: '' }) {
     const row = document.createElement('div');
     row.className = 'gedcom-field-row';
@@ -4340,7 +4424,7 @@
   }
 
   function updatePrimaryName(lines, givenName, surname) {
-    const nameIndex = lines.findIndex((line, index) => index > 0 && parseGedcomField(line)?.level === 1 && parseGedcomField(line)?.tag === 'NAME');
+    const nameIndex = gedcomLineIndexOf(lines, 'NAME');
     const nameValue = `${givenName}${surname ? `${givenName ? ' ' : ''}/${surname}/` : ''}`;
     if (nameIndex < 0) {
       lines.push(`1 NAME ${nameValue}`);
@@ -4379,8 +4463,7 @@
   }
 
   function updateEventField(lines, eventTag, fieldTag, value) {
-    let eventIndex = lines.findIndex((line, index) => index > 0 &&
-      parseGedcomField(line)?.level === 1 && parseGedcomField(line)?.tag === eventTag);
+    let eventIndex = gedcomLineIndexOf(lines, eventTag);
     if (eventIndex < 0) {
       if (!value) return;
       lines.push(`1 ${eventTag}`, `2 ${fieldTag} ${value}`);
@@ -4492,7 +4575,7 @@
       let stop = index + 1;
       while (stop < end && (parseGedcomField(lines[stop])?.level ?? 3) > 2) stop += 1;
       const block = lines.slice(index, stop);
-      const pageIndex = block.findIndex((line, offset) => offset > 0 && parseGedcomField(line)?.level === 3 && parseGedcomField(line)?.tag === 'PAGE');
+      const pageIndex = gedcomLineIndexOf(block, 'PAGE', 3);
       let page = '';
       if (pageIndex >= 0) {
         page = parseGedcomField(block[pageIndex]).value;
@@ -4513,7 +4596,7 @@
     if (pending.familyId) {
       const record = findGedcomRecord('FAM', pending.familyId);
       const lines = record?.lines || [];
-      const start = lines.findIndex((line, index) => index > 0 && parseGedcomField(line)?.level === 1 && parseGedcomField(line)?.tag === pending.config.tag);
+      const start = gedcomLineIndexOf(lines, pending.config.tag);
       return start < 0 ? null : { lines, start };
     }
     if (pending.ordinal === null) return null;
@@ -4651,7 +4734,7 @@
         const block = [...original.lines];
         if (sourceId !== original.sourceId) block[0] = `2 SOUR @${sourceId}@`;
         if (page !== original.page) {
-          const pageIndex = block.findIndex((line, index) => index > 0 && parseGedcomField(line)?.level === 3 && parseGedcomField(line)?.tag === 'PAGE');
+          const pageIndex = gedcomLineIndexOf(block, 'PAGE', 3);
           if (pageIndex >= 0) {
             let stop = pageIndex + 1;
             while (stop < block.length && (parseGedcomField(block[stop])?.level ?? 4) > 3) stop += 1;
@@ -5089,7 +5172,7 @@
     if (pending.familyId) {
       const familyRecord = findRecord('FAM', pending.familyId);
       const lines = familyRecord ? [...familyRecord.lines] : [];
-      const start = lines.findIndex((line, index) => index > 0 && parseGedcomField(line)?.level === 1 && parseGedcomField(line)?.tag === tag);
+      const start = gedcomLineIndexOf(lines, tag);
       if (start < 0) return showError(`This ${noun} could not be found in the GEDCOM.`);
       if (deleteEvent) {
         lines.splice(start, lifeEventBlockEnd(lines, start) - start);
@@ -5328,6 +5411,10 @@
     markGedcomDirty();
     setFocus(state.people.has(personId) ? personId : state.people.keys().next().value, true);
   }
+
+  // ---------------------------------------------------------------------------
+  // 12. Directory, duplicate finder and birth-country suggestions
+  // ---------------------------------------------------------------------------
 
   function birthPlaceOf(person) {
     return person.events.find((event) => event.type === 'BIRT')?.place || '';
@@ -5828,6 +5915,10 @@
     elements.personEditorDialog.close();
     return true;
   }
+
+  // ---------------------------------------------------------------------------
+  // 13. GEDCOM import, merging and saving
+  // ---------------------------------------------------------------------------
 
   function nextGedcomXref(prefix, tag) {
     const existing = new Set(state.gedcomRecords.filter((record) => record.tag === tag).map((record) => record.xref));
@@ -6472,7 +6563,11 @@
     };
   }
 
-  const findGedcomRecord = (tag, xref) => state.gedcomRecords.find((record) => record.tag === tag && record.xref === xref);
+  // Declared as a hoisted function (not a const arrow) because several editors defined
+  // earlier in this file call it at runtime, after initialisation has completed.
+  function findGedcomRecord(tag, xref) {
+    return state.gedcomRecords.find((record) => record.tag === tag && record.xref === xref);
+  }
 
   function findLinkLine(lines, tag, xref) {
     return lines.findIndex((line, index) => {
@@ -6566,7 +6661,7 @@
       const place = clean(parts.place.value);
       const marriageType = clean(parts.marriageType.value);
       const original = pending.original;
-      const start = lines.findIndex((line, index) => index > 0 && parseGedcomField(line)?.level === 1 && parseGedcomField(line)?.tag === 'MARR');
+      const start = gedcomLineIndexOf(lines, 'MARR');
       if (start >= 0) {
         if (date !== original.date) setLifeEventSubfield(lines, start, 'DATE', date);
         if (place !== original.place) setLifeEventSubfield(lines, start, 'PLAC', place);
@@ -6624,12 +6719,13 @@
     return true;
   }
 
-  // Works out everything a person deletion touches. Families left with one member or none are removed too,
-  // as are NOTE/OBJE records used only by removed records. Sources, repositories and media files are kept.
+  // True for "@Xref@" values; returns the bare xref, or '' when the value is not a pointer.
   function gedcomPointer(value) {
     return /^@[^@\s]+@$/.test(value.trim()) ? value.trim().slice(1, -1) : '';
   }
 
+  // Works out everything a person deletion touches. Families left with one member or none are removed too,
+  // as are NOTE/OBJE records used only by removed records. Sources, repositories and media files are kept.
   function planPersonDeletion(personId) {
     const person = state.people.get(personId);
     const personRecord = findGedcomRecord('INDI', personId);
@@ -6735,9 +6831,7 @@
       'Relatives stay in the tree. Sources, repositories and media files are kept.' +
       (plan.keptFamilies.length ? ` ${plural(plan.keptFamilies.length, 'family', 'families')} with other members will keep their remaining people.` : '');
     pendingPersonDelete = plan;
-    const dialog = document.querySelector('#personDeleteDialog');
-    dialog.showModal();
-    dialog.querySelector('.dialog-button-quiet').focus();
+    showModalFocused(document.querySelector('#personDeleteDialog'));
   }
 
   function ensureCreateGedcomWelcomeAction() {
@@ -7438,9 +7532,7 @@
       : 'The change is saved to the GEDCOM file straight away.';
     document.querySelector('#personDeleteConfirmText').textContent =
       `${plan.name} and all of their links will be permanently removed from ${state.fileName}. This cannot be undone in Kinship Atlas. ${saveNote}`;
-    const dialog = document.querySelector('#personDeleteConfirmDialog');
-    dialog.showModal();
-    dialog.querySelector('.dialog-button-quiet').focus();
+    showModalFocused(document.querySelector('#personDeleteConfirmDialog'));
   });
   document.querySelector('#confirmPersonDelete').addEventListener('click', () => {
     const plan = pendingPersonDelete;
@@ -7483,8 +7575,7 @@
     document.querySelector('#eventMediaDeleteConfirmName').textContent = pending.name;
     document.querySelector('#eventMediaDeleteConfirmText').textContent =
       `This file will be deleted from the media folder and cannot be recovered from Kinship Atlas.${linkedTo ? ` It is linked to ${linkedTo} in this tree; all of those links will be removed.` : ''}`;
-    document.querySelector('#eventMediaDeleteConfirmDialog').showModal();
-    document.querySelector('#eventMediaDeleteConfirmDialog .dialog-button-quiet').focus();
+    showModalFocused(document.querySelector('#eventMediaDeleteConfirmDialog'));
   });
   document.querySelector('#confirmEventMediaDelete').addEventListener('click', async () => {
     const pending = pendingEventMediaDelete;
@@ -7651,6 +7742,10 @@
   let printCleanup = null;
 
   // Measure the map heading, summary line and print footer at print width so the map gets only the height left on one page.
+  // ---------------------------------------------------------------------------
+  // 14. Map, print, defaults, about/help and startup wiring
+  // ---------------------------------------------------------------------------
+
   function printMapHeightBudget() {
     const measure = (element, extraStyles = {}) => {
       if (!element) return 0;
