@@ -3572,7 +3572,22 @@
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 7.5v.5"/>',
     sliders: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
     folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
-    book: '<path d="M4 5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2z"/><path d="M4 20a2 2 0 0 0 2 1h13v-3"/><path d="M9 8h6"/>'
+    book: '<path d="M4 5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2z"/><path d="M4 20a2 2 0 0 0 2 1h13v-3"/><path d="M9 8h6"/>',
+    birth: '<circle cx="12" cy="7" r="3"/><path d="M8 21v-3a4 4 0 0 1 8 0v3"/><path d="M10 13h4"/>',
+    death: '<path d="M8 8a4 4 0 1 1 8 0v10H8V8z"/><path d="M12 8v4"/><path d="M10 10h4"/><path d="M6 21h12"/>',
+    residence: '<path d="M3 11 12 4 21 11"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
+    marriage: '<circle cx="9" cy="12" r="4"/><circle cx="15" cy="12" r="4"/>',
+    immigration: '<path d="M2 19h20"/><path d="M3 11l18 5"/><path d="M10 5l3 8"/><path d="M17 9l4 7"/>',
+    emigration: '<path d="M2 19h20"/><path d="M3 15l18-8"/><path d="M10 17l3-9"/><path d="M17 15l4-8"/>',
+    burial: '<path d="M8 5h8l2 4v9l-2 1H8l-2-1V9z"/><path d="M10 5v14"/>',
+    occupation: '<rect x="3" y="7" width="18" height="12" rx="2"/><path d="M9 7V5h6v2"/><path d="M3 12h18"/>',
+    military: '<path d="M12 2l2.5 5L20 8l-4 4 1 6-5-3-5 3 1-6-4-4 5.5-1z"/>',
+    education: '<path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v4c0 2 3 4 6 4s6-2 6-4v-4"/>',
+    census: '<rect x="5" y="3" width="14" height="18" rx="1"/><path d="M8 8h8"/><path d="M8 12h8"/><path d="M8 16h5"/>',
+    dna: '<path d="M8 3c6 4 6 14 0 18"/><path d="M16 3c-6 4-6 14 0 18"/><path d="M9 7h6"/><path d="M8 12h8"/><path d="M9 17h6"/>',
+    photo: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-6 6"/>',
+    document: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/>',
+    religion: '<path d="M12 4v16"/><path d="M7 9h10"/>'
   };
 
   function createButtonIcon(icon) {
