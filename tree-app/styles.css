@@ -267,6 +267,16 @@ button { color: inherit; }
 .detail-monogram-edit { width: 22px; height: 22px; position: absolute; right: -4px; bottom: -4px; display: grid; place-items: center; padding: 0; border: 1px solid #c8d8ce; border-radius: 50%; color: #315d4d; background: #fff; box-shadow: 0 1px 3px rgba(23,53,47,.18); cursor: pointer; }
 .detail-monogram-edit:hover, .detail-monogram-edit:focus-visible { border-color: #2f786a; color: #fff; background: #2f786a; }
 .detail-monogram-edit .button-icon { width: 12px; height: 12px; margin: 0; }
+.detail-monogram-expand { width: 22px; height: 22px; position: absolute; right: -4px; top: -4px; display: grid; place-items: center; padding: 0; border: 1px solid #c8d8ce; border-radius: 50%; color: #315d4d; background: #fff; box-shadow: 0 1px 3px rgba(23,53,47,.18); cursor: pointer; }
+.detail-monogram-expand:hover, .detail-monogram-expand:focus-visible { border-color: #2f786a; color: #fff; background: #2f786a; }
+.detail-monogram-expand .expand-glyph { font-size: 12px; line-height: 1; }
+
+/* Full-screen expanded view: 5x the portrait size on a dimmed overlay. */
+.hero-expand-dialog { width: max-content; max-width: 92vw; padding: 12px; border: 0; border-radius: 8px; background: #fff; box-shadow: 0 24px 70px rgba(23,53,47,.35); }
+.hero-expand-dialog::backdrop { background: rgba(23, 53, 47, .55); }
+.hero-expand-image { display: block; max-width: 92vw; max-height: 88vh; width: 280px; height: 280px; border-radius: 8px; object-fit: cover; }
+.hero-expand-shrink { min-height: 34px; display: inline-flex; align-items: center; gap: 7px; margin-top: 10px; padding: 0 14px; border: 1px solid #c9d8cf; border-radius: 5px; color: #355f50; font-size: 13px; font-weight: 700; cursor: pointer; }
+.hero-expand-shrink:hover { background: #f0f7f2; border-color: #91b6a2; }
 .detail-media-section.is-choosing-card-image { animation: card-image-highlight 1.6s ease-out; }
 @keyframes card-image-highlight { 0%, 30% { background: #fdf3e2; } 100% { background: transparent; } }
 .detail-hero h2 { margin: 7px 0 5px; color: var(--ink); font-family: Baskerville, "Palatino Linotype", Georgia, serif; font-size: 24px; font-weight: 500; line-height: 1.15; overflow-wrap: anywhere; }
@@ -938,6 +948,13 @@ a.life-event-media-thumb:hover, a.life-event-media-thumb:focus-visible { border-
   font-size: 12px; color: var(--coral); font-weight: 600;
 }
 .duplicate-pair-delete-choice input { accent-color: var(--coral); }
+.duplicate-pair-merge-choice {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding-top: 3px;
+  font-size: 11px; color: var(--green); font-weight: 600;
+}
+.duplicate-pair-merge-choice input { accent-color: var(--green); }
+.duplicate-pair-merge-choice input:disabled { opacity: .4; cursor: not-allowed; }
 
 .duplicate-finder-empty {
   padding: 20px; text-align: center; color: var(--muted); font-size: 13px;

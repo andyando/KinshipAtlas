@@ -30,8 +30,12 @@
 
   const eventNames = {
     BIRT: 'Birth', DEAT: 'Death', BAPM: 'Baptism', CHR: 'Christening', BURI: 'Burial',
+    CREM: 'Cremation', ADOP: 'Adoption', BARM: 'Bar Mitzvah', BASM: 'Bas Mitzvah',
+    BLES: 'Blessing', CHRA: 'Adult Christening', CONF: 'Confirmation', FCOM: 'First Communion',
     RESI: 'Residence', IMMI: 'Immigration', EMIG: 'Emigration', NATU: 'Naturalization',
-    MARR: 'Marriage', DIV: 'Divorce', OCCU: 'Occupation', EDUC: 'Education', EVEN: 'Event'
+    CENS: 'Census', EDUC: 'Education', GRAD: 'Graduation', OCCU: 'Occupation', RETI: 'Retirement',
+    MARR: 'Marriage', DIV: 'Divorce', MILT: 'Military', RELI: 'Religious',
+    ORDN: 'Ordination', PROB: 'Probate', WILL: 'Will', SSN: 'Social Security Number', EVEN: 'Event'
   };
   const eventTags = new Set(Object.keys(eventNames));
   const countryFlagAliases = [
@@ -2745,7 +2749,22 @@
           DEAT: 'death',
           BAPM: 'religion',
           CHR: 'religion',
+          CHRA: 'religion',
           BURI: 'burial',
+          CREM: 'burial',
+          ADOP: 'userPlus',
+          BARM: 'religion',
+          BASM: 'religion',
+          BLES: 'religion',
+          CONF: 'religion',
+          FCOM: 'religion',
+          ORDN: 'religion',
+          CENS: 'census',
+          GRAD: 'education',
+          RETI: 'occupation',
+          PROB: 'document',
+          WILL: 'document',
+          SSN: 'document',
           RESI: 'residence',
           IMMI: 'immigration',
           EMIG: 'emigration',
@@ -2756,10 +2775,11 @@
           EDUC: 'education',
           MILT: 'military',
           RELI: 'religion',
-          CENS: 'census',
           EVEN: 'calendarPlus'
         };
-        const iconType = eventIconMap[event.type] || 'calendarPlus';
+        // Typed EVEN records (e.g. TYPE Arrival / Departure) reuse the icon of their resolved type config.
+        const evenConfig = event.type === 'EVEN' ? lifeEventConfigFor(event) : null;
+        const iconType = eventIconMap[evenConfig && !evenConfig.custom ? evenConfig.key : event.type] || 'calendarPlus';
         
         // Create the SVG icon using existing createButtonIcon function
         const svg = createButtonIcon(iconType);
@@ -2932,6 +2952,48 @@
     showToast('Select ☆ on an image to make it the card image.');
   }
 
+  // Full-screen preview of the card image: expands to 5x the portrait size in a
+  // modal overlay with a shrink button (and Escape/backdrop close) to return.
+  function makeHeroExpandButton(person) {
+    const expand = document.createElement('button');
+    expand.type = 'button';
+    expand.className = 'detail-monogram-expand';
+    expand.title = 'Expand image';
+    expand.setAttribute('aria-label', 'Expand the card image to full screen');
+    const icon = document.createElement('span');
+    icon.className = 'expand-glyph';
+    icon.textContent = '⤢';
+    expand.append(icon);
+    expand.addEventListener('click', (event) => {
+      event.stopPropagation();
+      showExpandedHeroImage(person);
+    });
+    return expand;
+  }
+
+  function showExpandedHeroImage(person) {
+    const cardImage = primaryImageFor(person);
+    if (!cardImage) return;
+    const overlay = document.createElement('dialog');
+    overlay.className = 'hero-expand-dialog';
+    const img = document.createElement('img');
+    img.className = 'hero-expand-image';
+    img.src = mediaUrl(cardImage.file);
+    img.alt = `${person.name} — enlarged card image`;
+    const shrink = document.createElement('button');
+    shrink.type = 'button';
+    shrink.className = 'hero-expand-shrink';
+    shrink.title = 'Shrink image back to normal size';
+    shrink.setAttribute('aria-label', 'Shrink the image back to normal size');
+    shrink.textContent = '⤡ Shrink';
+    const close = () => { overlay.close(); overlay.remove(); };
+    shrink.addEventListener('click', close);
+    overlay.addEventListener('click', (event) => { if (event.target === overlay) close(); });
+    overlay.append(img, shrink);
+    document.body.append(overlay);
+    overlay.showModal();
+  }
+
   function openHeroImageChooser(personId) {
     const person = state.people.get(personId);
     if (!person) return;
@@ -3064,6 +3126,7 @@
       changeImage.setAttribute('aria-label', 'Choose a different card image from attached media');
       setButtonContent(changeImage, 'edit', '');
       monogram.append(photo, changeImage);
+      monogram.append(makeHeroExpandButton(person));
     } else {
       monogram.textContent = initials(person.name);
       monogram.classList.add('detail-monogram-placeholder');
@@ -3799,8 +3862,9 @@
     marriage: '<circle cx="9" cy="12" r="4"/><circle cx="15" cy="12" r="4"/>',
     // Arrival / departure: a dart-shaped plane landing (nose down toward the runway)
     // or taking off (climbing away from it), with a ground line underneath.
-    immigration: '<path d="M2 20h20"/><path d="M21 15 7 8l4-3z"/>',
-    emigration: '<path d="M2 20h20"/><path d="M21 5 7 12l4 3z"/><path d="M4 16l4-1.4"/>',
+    // Plane landing (plane-landing, Lucide) / taking off (plane-takeoff, Lucide).
+    immigration: '<path d="M2 22h20"/><path d="M3.77 10.77 2 9l2-4.5 1.1.55c.55.28.9.84.9 1.45s.35 1.17.9 1.45L8 8.5l3-6 1.05.53a2 2 0 0 1 1.09 1.52l.72 5.4a2 2 0 0 0 1.09 1.52l4.4 2.2c.42.22.78.55 1.01.96l.6 1.03c.49.88-.06 1.98-1.06 2.1l-1.18.15c-.47.06-.95-.02-1.37-.24L4.29 11.15a2 2 0 0 1-.52-.38Z"/>',
+    emigration: '<path d="M2 22h20"/><path d="M6.36 17.4 4 17l-2-4 1.1-.55a2 2 0 0 1 1.8 0l.17.1a2 2 0 0 0 1.8 0L8 12 5 6l.9-.45a2 2 0 0 1 2.09.2l4.02 3a2 2 0 0 0 2.1.2l4.19-2.06a2.41 2.41 0 0 1 1.73-.17L21 7a1.4 1.4 0 0 1 .87 1.99l-.38.76c-.23.46-.6.84-1.07 1.08L7.58 17.2a2 2 0 0 1-1.22.18Z"/>',
     burial: '<path d="M8 5h8l2 4v9l-2 1H8l-2-1V9z"/><path d="M10 5v14"/>',
     occupation: '<rect x="3" y="7" width="18" height="12" rx="2"/><path d="M9 7V5h6v2"/><path d="M3 12h18"/>',
     military: '<path d="M12 2l2.5 5L20 8l-4 4 1 6-5-3-5 3 1-6-4-4 5.5-1z"/>',
@@ -4510,9 +4574,27 @@
     { key: 'OCCU', label: 'Occupation', tag: 'OCCU', descLabel: 'Occupation', mode: 'value' },
     { key: 'MILT', label: 'Military', tag: 'EVEN', type: 'Military Service', descLabel: 'Unit / rank / notes', mode: 'value' },
     { key: 'RELI', label: 'Religious', tag: 'EVEN', type: 'Religious', descLabel: 'Description / notes', mode: 'value' },
-    { key: 'EMIG', label: 'Departure', tag: 'EMIG', descLabel: 'Notes', mode: 'note' },
-    { key: 'IMMI', label: 'Arrival', tag: 'IMMI', descLabel: 'Notes', mode: 'note' },
+    { key: 'EMIG', label: 'Departure', tag: 'EMIG', type: 'Departure', descLabel: 'Notes', mode: 'note' },
+    { key: 'IMMI', label: 'Arrival', tag: 'IMMI', type: 'Arrival', descLabel: 'Notes', mode: 'note' },
     { key: 'BURI', label: 'Burial', tag: 'BURI', descLabel: 'Cemetery / notes', mode: 'note' },
+    { key: 'CREM', label: 'Cremation', tag: 'CREM', descLabel: 'Cemetery / notes', mode: 'note' },
+    { key: 'BIRT', label: 'Birth', tag: 'BIRT', descLabel: 'Notes', mode: 'note' },
+    { key: 'DEAT', label: 'Death', tag: 'DEAT', descLabel: 'Notes', mode: 'note' },
+    { key: 'ADOP', label: 'Adoption', tag: 'ADOP', descLabel: 'Family / notes', mode: 'note' },
+    { key: 'BARM', label: 'Bar Mitzvah', tag: 'BARM', descLabel: 'Synagogue / notes', mode: 'note' },
+    { key: 'BASM', label: 'Bas Mitzvah', tag: 'BASM', descLabel: 'Synagogue / notes', mode: 'note' },
+    { key: 'BLES', label: 'Blessing', tag: 'BLES', descLabel: 'Where / notes', mode: 'note' },
+    { key: 'CHR', label: 'Christening', tag: 'CHR', descLabel: 'Church / notes', mode: 'note' },
+    { key: 'CHRA', label: 'Adult Christening', tag: 'CHRA', descLabel: 'Church / notes', mode: 'note' },
+    { key: 'CONF', label: 'Confirmation', tag: 'CONF', descLabel: 'Church / notes', mode: 'note' },
+    { key: 'FCOM', label: 'First Communion', tag: 'FCOM', descLabel: 'Church / notes', mode: 'note' },
+    { key: 'CENS', label: 'Census', tag: 'CENS', descLabel: 'Household / notes', mode: 'note' },
+    { key: 'GRAD', label: 'Graduation', tag: 'GRAD', descLabel: 'School or qualification', mode: 'value' },
+    { key: 'RETI', label: 'Retirement', tag: 'RETI', descLabel: 'Occupation / notes', mode: 'note' },
+    { key: 'ORDN', label: 'Ordination', tag: 'ORDN', descLabel: 'Church / notes', mode: 'note' },
+    { key: 'PROB', label: 'Probate', tag: 'PROB', descLabel: 'Court / will details', mode: 'value' },
+    { key: 'WILL', label: 'Will', tag: 'WILL', descLabel: 'Bequest / notes', mode: 'value' },
+    { key: 'SSN', label: 'Social Security Number', tag: 'SSN', descLabel: 'Number', mode: 'value' },
     { key: 'OTHER', label: 'Other', tag: 'EVEN', custom: true, descLabel: 'Description / notes', mode: 'value' }
   ];
 
@@ -4523,7 +4605,7 @@
       return lifeEventTypes.find((entry) => entry.type && entry.type.toLocaleLowerCase() === detail) ||
         lifeEventTypes.find((entry) => entry.custom);
     }
-    return lifeEventTypes.find((entry) => entry.tag === event.type && !entry.custom && !entry.type && !entry.family) ||
+    return lifeEventTypes.find((entry) => entry.tag === event.type && !entry.custom && !entry.family && entry.tag !== 'EVEN') ||
       { key: event.type, label: eventNames[event.type] || event.type, tag: event.type, descLabel: 'Notes', mode: 'note' };
   }
 
@@ -5132,7 +5214,7 @@
       }
       applyLifeEventConfig(config);
     } else {
-      for (const config of lifeEventTypes) {
+      for (const config of [...lifeEventTypes].sort((a, b) => a.label.localeCompare(b.label))) {
         const option = document.createElement('option');
         option.value = config.key;
         option.textContent = config.label;
@@ -5144,8 +5226,9 @@
       fields.desc.value = '';
       fields.custom.value = '';
       populateSpouseOptions(person);
-      state.pendingLifeEvent.config = lifeEventTypes[0];
-      applyLifeEventConfig(lifeEventTypes[0]);
+      const firstOption = [...lifeEventTypes].sort((a, b) => a.label.localeCompare(b.label))[0];
+      state.pendingLifeEvent.config = firstOption;
+      applyLifeEventConfig(firstOption);
     }
     fields.picker.value = datePickerValue(fields.date.value);
     fields.mediaInput.value = '';
@@ -5321,7 +5404,8 @@
       if (config.custom && !customType) return showError('Enter a name for this event, such as Census or Probate.');
       if (!date && !place && !description) return showError('Enter a date, place or description for this event.');
       const eventLines = [`1 ${config.tag}${config.mode === 'value' && description ? ` ${description}` : ''}`];
-      const typeText = config.custom ? customType : config.type;
+      // Only typed EVEN records (Military, Religious, Other) carry a TYPE; IMMI/EMIG keep their plain standard tags.
+      const typeText = config.custom ? customType : config.tag === 'EVEN' ? config.type : '';
       if (typeText) eventLines.push(`2 TYPE ${typeText}`);
       if (date) eventLines.push(`2 DATE ${date}`);
       if (place) eventLines.push(`2 PLAC ${place}`);
@@ -5554,6 +5638,21 @@
         deleteLabel.append(checkbox, document.createTextNode('Delete this record'));
         checkboxById[person.id] = checkbox;
 
+        // Optional merge: if this record is the one being deleted, move its
+        // relationships, life events and media into the surviving record first.
+        const other = person.id === pair.personA.id ? pair.personB : pair.personA;
+        const mergeLabel = document.createElement('label');
+        mergeLabel.className = 'duplicate-pair-merge-choice';
+        const mergeBox = document.createElement('input');
+        mergeBox.type = 'checkbox';
+        mergeBox.dataset.duplicateMergeSource = person.id;
+        mergeBox.dataset.duplicateMergeKeeper = other.id;
+        // Disabled until the user picks this record for deletion; the change
+        // handler above arms the matching box (and only that one).
+        mergeBox.disabled = true;
+        mergeBox.title = `Before deleting ${person.name}, move their relationships, life events and media into ${other.name}`;
+        mergeLabel.append(mergeBox, document.createTextNode(`Merge this record's data into ${other.name} first`));
+
         const nameBtn = makeButton(person.name, 'duplicate-pair-name');
         nameBtn.dataset.personId = person.id;
         const facts = document.createElement('div');
@@ -5571,7 +5670,7 @@
         counts.className = 'duplicate-pair-counts';
         counts.textContent = `${connectedPeopleCount(graph, person.id)} connected people · ${person.events.length} life event${person.events.length === 1 ? '' : 's'}`;
 
-        personDiv.append(nameBtn, facts, counts, deleteLabel);
+        personDiv.append(nameBtn, facts, counts, deleteLabel, mergeLabel);
         card.append(personDiv);
       }
 
@@ -5579,7 +5678,8 @@
       const checkboxB = checkboxById[pair.personB.id];
 
       // Clicking anywhere on the card selects the first record for deletion;
-      // clicking it again clears the choice. Radios still allow picking the other one.
+      // clicking it again clears the choice. Radios and the merge checkboxes
+      // still let the user pick the other record or enable the merge option.
       card.addEventListener('click', (event) => {
         if (event.target.closest('label')) return;
         const current = duplicateDeleteChoice(checkboxA, checkboxB);
@@ -5590,7 +5690,13 @@
       });
 
       card.addEventListener('change', () => {
-        card.classList.toggle('is-selected', Boolean(duplicateDeleteChoice(checkboxA, checkboxB)));
+        // Only the chosen record's merge box can be armed.
+        const chosen = duplicateDeleteChoice(checkboxA, checkboxB);
+        for (const box of card.querySelectorAll('input[data-duplicate-merge-source]')) {
+          if (box.dataset.duplicateMergeSource !== chosen) box.checked = false;
+          box.disabled = box.dataset.duplicateMergeSource !== chosen;
+        }
+        card.classList.toggle('is-selected', Boolean(chosen));
         updateDuplicateSelected();
       });
 
@@ -5603,9 +5709,12 @@
   function updateDuplicateSelected() {
     const selected = document.querySelectorAll('#duplicateFinderList input[data-duplicate-delete]:checked');
     const count = selected.length;
+    const merged = document.querySelectorAll('#duplicateFinderList input[data-duplicate-merge-source]:checked').length;
     const label = document.querySelector('#duplicateFinderSelected');
     const deleteButton = document.querySelector('#deleteDuplicatesButton');
-    label.textContent = count ? `${count} record${count > 1 ? 's' : ''} selected for deletion` : '';
+    label.textContent = count
+      ? `${count} record${count > 1 ? 's' : ''} selected for deletion${merged ? ` · ${merged} will merge first` : ''}`
+      : '';
     deleteButton.disabled = !count;
     if (!count) {
       deleteButton.dataset.confirm = '';
@@ -6766,6 +6875,111 @@
     return /^@[^@\s]+@$/.test(value.trim()) ? value.trim().slice(1, -1) : '';
   }
 
+  // Level-1 block splitter for an INDI record: each entry covers one top-level
+  // field (event, NOTE/SOUR/OBJE reference, FAMS/FAMC link…) plus its sub-lines.
+  function gedcomPersonBlocks(record) {
+    const blocks = [];
+    for (let index = 1; index < record.lines.length;) {
+      const field = parseGedcomField(record.lines[index]);
+      if (!field || field.level !== 1) { index += 1; continue; }
+      let end = index + 1;
+      while (end < record.lines.length) {
+        const next = parseGedcomField(record.lines[end]);
+        if (next && next.level <= 1) break;
+        end += 1;
+      }
+      blocks.push({ tag: field.tag, lines: record.lines.slice(index, end) });
+      index = end;
+    }
+    return blocks;
+  }
+
+  // Merges the source person's relationships, life events, custom fields and
+  // notes/source/media references into the keeper, so the caller can delete the
+  // now-redundant source record without losing anything. Returns small counts
+  // for the confirmation dialog.
+  function mergePersonIntoKeeper(keeperId, sourceId) {
+    const result = { families: 0, events: 0, media: 0 };
+    const keeperRecord = findGedcomRecord('INDI', keeperId);
+    const sourceRecord = findGedcomRecord('INDI', sourceId);
+    if (!keeperRecord || !sourceRecord || keeperId === sourceId) return result;
+
+    // Rewrites the FAM records: memberships of the source move to the keeper,
+    // dropping links that would leave the keeper listed twice in one family.
+    const spouseOf = (record, xref) => record.lines.some((line) => {
+      const field = parseGedcomField(line);
+      return field && (field.tag === 'HUSB' || field.tag === 'WIFE') && field.value.trim() === xref;
+    });
+    const childOf = (record, xref) => record.lines.some((line) => {
+      const field = parseGedcomField(line);
+      return field && field.tag === 'CHIL' && field.value.trim() === xref;
+    });
+    for (const record of state.gedcomRecords) {
+      if (record.tag !== 'FAM') continue;
+      const lines = [];
+      let changed = false;
+      for (const line of record.lines) {
+        const field = parseGedcomField(line);
+        if (field && (field.tag === 'HUSB' || field.tag === 'WIFE') && field.value.trim() === sourceId) {
+          changed = true;
+          if (spouseOf(record, keeperId)) continue; // keeper already a spouse here
+          lines.push(line.replace(sourceId, keeperId));
+          result.families += 1;
+          continue;
+        }
+        if (field && field.tag === 'CHIL' && field.value.trim() === sourceId) {
+          changed = true;
+          if (childOf(record, keeperId)) continue; // keeper already a child here
+          lines.push(line.replace(sourceId, keeperId));
+          result.families += 1;
+          continue;
+        }
+        lines.push(line);
+      }
+      if (changed) record.lines = lines;
+    }
+
+    // Moves every remaining level-1 block (life events, occupations, residences,
+    // NOTE/SOUR/OBJE references, custom tags) unless the keeper already carries
+    // an identical block — so re-running the merge cannot duplicate content.
+    const signature = (block) => block.lines.map((line) => line.replace(/\s+/g, ' ').trim().toUpperCase()).join('|');
+    const keeperSignatures = new Set(gedcomPersonBlocks(keeperRecord).map(signature));
+    const skippedTags = new Set(['NAME', 'SEX', 'FAMS', 'FAMC', 'CHAN', '_UID']);
+    const moved = gedcomPersonBlocks(sourceRecord)
+      .filter((block) => !skippedTags.has(block.tag) && !keeperSignatures.has(signature(block)));
+    if (moved.length) {
+      keeperRecord.lines.push(...moved.flatMap((block) => block.lines));
+      result.events = moved.filter((block) => eventTags.has(block.tag) || block.tag === 'EVEN' || block.tag === 'RESI' || block.tag === 'OCCU').length;
+    }
+
+    // Moves the media attachments; the keeper keeps its own primary image.
+    const keeperMedia = state.additionalMedia.get(keeperId) || [];
+    const sourceMedia = state.additionalMedia.get(sourceId);
+    if (sourceMedia?.length) {
+      const merged = [...new Set([...keeperMedia, ...sourceMedia])];
+      if (merged.length !== keeperMedia.length) {
+        state.additionalMedia.set(keeperId, merged);
+        saveAdditionalMedia();
+        result.media += merged.length - keeperMedia.length;
+      }
+      state.additionalMedia.delete(sourceId);
+    }
+    if (state.primaryMedia.has(sourceId)) {
+      if (!state.primaryMedia.has(keeperId)) {
+        state.primaryMedia.set(keeperId, state.primaryMedia.get(sourceId));
+        result.media += 1;
+      }
+      state.primaryMedia.delete(sourceId);
+      savePrimaryMedia();
+    }
+    if (state.primaryPersonId === sourceId) {
+      state.primaryPersonId = keeperId;
+      storeSelection(primaryPersonStorageKey(), keeperId);
+      syncPrimaryPersonBar();
+    }
+    return result;
+  }
+
   // Works out everything a person deletion touches. Families left with one member or none are removed too,
   // as are NOTE/OBJE records used only by removed records. Sources, repositories and media files are kept.
   function planPersonDeletion(personId) {
@@ -7255,6 +7469,9 @@
     const checkboxes = document.querySelectorAll('#duplicateFinderList input[data-duplicate-delete]:checked');
     const idsToDelete = new Set();
     for (const cb of checkboxes) idsToDelete.add(cb.dataset.duplicateDelete);
+    const merges = [...document.querySelectorAll('#duplicateFinderList input[data-duplicate-merge-source]:checked')]
+      .map((box) => ({ source: box.dataset.duplicateMergeSource, keeper: box.dataset.duplicateMergeKeeper }))
+      .filter(({ source }) => idsToDelete.has(source));
     if (!idsToDelete.size) return;
     // Check no one would be the last person
     if (state.people.size - idsToDelete.size < 1) {
@@ -7276,7 +7493,11 @@
     confirmP.id = 'duplicateDeleteConfirm';
     confirmP.className = 'duplicate-delete-confirm';
     confirmP.append(document.createTextNode(
-      `Delete ${details.join('; ')}? Their events, links to relatives and any note records used only by them are removed too. Relatives, sources and media files are kept. This cannot be undone.`
+      `${merges.length ? `First merge ${merges.map(({ source, keeper }) => {
+        const from = state.people.get(source)?.name || `@${source}@`;
+        const into = state.people.get(keeper)?.name || `@${keeper}@`;
+        return `${from} into ${into}`;
+      }).join(', ')}. ` : ''}Delete ${details.join('; ')}? Their events, links to relatives and any note records used only by them are removed too. Relatives, sources and media files are kept. This cannot be undone.`
     ));
     dialog.querySelector('.dialog-panel').prepend(confirmP);
     // Re-render delete button to trigger confirmation
@@ -7287,8 +7508,9 @@
       return;
     }
     deleteBtn.dataset.confirm = '';
-    // Proceed with deletion
+    // Proceed: merge first (so nothing is lost), then delete the leftovers.
     confirmP.remove();
+    for (const { source, keeper } of merges) mergePersonIntoKeeper(keeper, source);
     for (const id of idsToDelete) {
       const plan = planPersonDeletion(id);
       if (plan) deletePersonRecord(plan);
