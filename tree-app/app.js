@@ -3792,12 +3792,15 @@
     sliders: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
     folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
     book: '<path d="M4 5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2z"/><path d="M4 20a2 2 0 0 0 2 1h13v-3"/><path d="M9 8h6"/>',
-    birth: '<circle cx="12" cy="7" r="3"/><path d="M8 21v-3a4 4 0 0 1 8 0v3"/><path d="M10 13h4"/>',
+    // Birth: a baby — round head with a hair curl, smile, and a swaddled body below.
+    birth: '<circle cx="12" cy="8" r="4"/><path d="M12 4c.3-1.3 1.9-1.3 2-.1"/><path d="M10.8 9.4c.7.6 1.7.6 2.4 0"/><path d="M8 21v-2a4 4 0 0 1 8 0v2"/>',
     death: '<path d="M8 8a4 4 0 1 1 8 0v10H8V8z"/><path d="M12 8v4"/><path d="M10 10h4"/><path d="M6 21h12"/>',
     residence: '<path d="M3 11 12 4 21 11"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
     marriage: '<circle cx="9" cy="12" r="4"/><circle cx="15" cy="12" r="4"/>',
-    immigration: '<path d="M2 19h20"/><path d="M3 11l18 5"/><path d="M10 5l3 8"/><path d="M17 9l4 7"/>',
-    emigration: '<path d="M2 19h20"/><path d="M3 15l18-8"/><path d="M10 17l3-9"/><path d="M17 15l4-8"/>',
+    // Arrival / departure: a dart-shaped plane landing (nose down toward the runway)
+    // or taking off (climbing away from it), with a ground line underneath.
+    immigration: '<path d="M2 20h20"/><path d="M21 15 7 8l4-3z"/>',
+    emigration: '<path d="M2 20h20"/><path d="M21 5 7 12l4 3z"/><path d="M4 16l4-1.4"/>',
     burial: '<path d="M8 5h8l2 4v9l-2 1H8l-2-1V9z"/><path d="M10 5v14"/>',
     occupation: '<rect x="3" y="7" width="18" height="12" rx="2"/><path d="M9 7V5h6v2"/><path d="M3 12h18"/>',
     military: '<path d="M12 2l2.5 5L20 8l-4 4 1 6-5-3-5 3 1-6-4-4 5.5-1z"/>',
@@ -3807,8 +3810,10 @@
     photo: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-6 6"/>',
     document: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/>',
     religion: '<path d="M12 4v16"/><path d="M7 9h10"/>',
-    male: '<circle cx="12" cy="12" r="9"/><path d="M18 6l-6 6M22 6h-6v6"/>',
-    female: '<circle cx="12" cy="12" r="9"/><path d="M12 6v12M12 6h4a4 4 0 0 1 0 8h-4"/>'
+    // Gender signs: small circle low-left, stem/arrow extends up-right (♂) or a
+    // stem with crossbar below the circle (♀). Scaled to the 24x24 view box.
+    male: '<circle cx="10" cy="14" r="5"/><path d="M14 10l6-6M20 4h-5M20 4v5"/>',
+    female: '<circle cx="12" cy="9" r="5"/><path d="M12 14v7M9 18h6"/>'
   };
 
   function createButtonIcon(icon) {
@@ -5479,6 +5484,25 @@
     return pairs;
   }
 
+  // Distinct relatives connected to a person (parents, partners and children combined).
+  // `graph` is a shared kinshipGraph() so rendering many pairs stays cheap. The maps
+  // omit people without links, so every lookup needs an empty-set fallback.
+  function connectedPeopleCount(graph, personId) {
+    const relatives = [
+      ...(graph.parents.get(personId) || []),
+      ...(graph.partners.get(personId) || []),
+      ...(graph.children.get(personId) || [])
+    ];
+    return new Set(relatives.filter(Boolean)).size;
+  }
+
+  // Which of the two records a pair card currently marks for deletion ('' when none).
+  function duplicateDeleteChoice(checkboxA, checkboxB) {
+    if (checkboxA?.checked) return checkboxA.dataset.duplicateDelete;
+    if (checkboxB?.checked) return checkboxB.dataset.duplicateDelete;
+    return '';
+  }
+
   function renderDuplicateFinder() {
     const list = document.querySelector('#duplicateFinderList');
     const threshold = Number(document.querySelector('#duplicateThreshold').value);
@@ -5498,30 +5522,42 @@
     }
 
     summary.textContent = `${pairs.length} candidate pair${pairs.length === 1 ? '' : 's'} found.`;
+    const graph = kinshipGraph();
 
     for (const pair of pairs) {
       const card = document.createElement('div');
       card.className = 'duplicate-pair';
 
+      const heading = document.createElement('div');
+      heading.className = 'duplicate-pair-heading';
       const scoreBadge = document.createElement('div');
       scoreBadge.className = `duplicate-pair-score is-${pair.score >= 75 ? 'high' : pair.score >= 50 ? 'medium' : 'low'}`;
-      scoreBadge.textContent = pair.score;
-      card.append(scoreBadge);
+      scoreBadge.textContent = `Match score ${pair.score}`;
+      const prompt = document.createElement('div');
+      prompt.className = 'duplicate-pair-prompt';
+      prompt.textContent = 'These records may be the same person. Choose the one to delete:';
+      heading.append(scoreBadge, prompt);
+      card.append(heading);
 
-      const deleteHint = document.createElement('div');
-      deleteHint.className = 'duplicate-pair-delete';
-      deleteHint.dataset.duplicateDeleteHint = pair.personB.id;
-      deleteHint.textContent = 'DELETE THIS';
-      deleteHint.hidden = true;
-      card.append(deleteHint);
-
+      const checkboxById = {};
       for (const person of [pair.personA, pair.personB]) {
         const personDiv = document.createElement('div');
         personDiv.className = 'duplicate-pair-person';
+
+        const deleteLabel = document.createElement('label');
+        deleteLabel.className = 'duplicate-pair-delete-choice';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'radio';
+        checkbox.name = `duplicate-pair-${pair.personA.id}-${pair.personB.id}`;
+        checkbox.dataset.duplicateDelete = person.id;
+        checkbox.title = `Mark ${person.name} for deletion`;
+        deleteLabel.append(checkbox, document.createTextNode('Delete this record'));
+        checkboxById[person.id] = checkbox;
+
         const nameBtn = makeButton(person.name, 'duplicate-pair-name');
         nameBtn.dataset.personId = person.id;
-        const details = document.createElement('div');
-        details.className = 'duplicate-pair-detail';
+        const facts = document.createElement('div');
+        facts.className = 'duplicate-pair-detail';
         const parts = [];
         if (person.sex) parts.push(person.sex === 'M' ? 'Male' : 'Female');
         const yrs = lifespan(person);
@@ -5530,31 +5566,32 @@
         const death = person.events.find((e) => e.type === 'DEAT');
         if (birth?.place) parts.push(`Born: ${birth.place}`);
         if (death?.place) parts.push(`Died: ${death.place}`);
-        if (parts.length) details.textContent = parts.join(' · ');
-        personDiv.append(nameBtn, details);
+        if (parts.length) facts.textContent = parts.join(' · ');
+        const counts = document.createElement('div');
+        counts.className = 'duplicate-pair-counts';
+        counts.textContent = `${connectedPeopleCount(graph, person.id)} connected people · ${person.events.length} life event${person.events.length === 1 ? '' : 's'}`;
+
+        personDiv.append(nameBtn, facts, counts, deleteLabel);
         card.append(personDiv);
       }
 
-      const checkboxLabel = document.createElement('label');
-      checkboxLabel.className = 'duplicate-pair-delete';
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.dataset.duplicateDelete = pair.personB.id;
-      checkbox.title = `Mark ${pair.personB.name} for deletion`;
-      checkboxLabel.append(checkbox, document.createTextNode(` Delete ${pair.personB.name}`));
-      checkboxLabel.hidden = true;
-      checkboxLabel.dataset.duplicateDeleteLabel = pair.personB.id;
-      card.append(checkboxLabel);
+      const checkboxA = checkboxById[pair.personA.id];
+      const checkboxB = checkboxById[pair.personB.id];
 
+      // Clicking anywhere on the card selects the first record for deletion;
+      // clicking it again clears the choice. Radios still allow picking the other one.
       card.addEventListener('click', (event) => {
-        const isCheckboxArea = event.target.closest('label');
-        if (!isCheckboxArea) {
-          checkbox.checked = !checkbox.checked;
-          checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-        deleteHint.hidden = !checkbox.checked;
-        checkboxLabel.hidden = !checkbox.checked;
-        card.classList.toggle('is-selected', checkbox.checked);
+        if (event.target.closest('label')) return;
+        const current = duplicateDeleteChoice(checkboxA, checkboxB);
+        checkboxA.checked = !current;
+        checkboxB.checked = false;
+        card.classList.toggle('is-selected', checkboxA.checked);
+        updateDuplicateSelected();
+      });
+
+      card.addEventListener('change', () => {
+        card.classList.toggle('is-selected', Boolean(duplicateDeleteChoice(checkboxA, checkboxB)));
+        updateDuplicateSelected();
       });
 
       list.append(card);
@@ -5568,8 +5605,13 @@
     const count = selected.length;
     const label = document.querySelector('#duplicateFinderSelected');
     const deleteButton = document.querySelector('#deleteDuplicatesButton');
-    label.textContent = count ? `${count} duplicate${count > 1 ? 's' : ''} selected` : '';
+    label.textContent = count ? `${count} record${count > 1 ? 's' : ''} selected for deletion` : '';
     deleteButton.disabled = !count;
+    if (!count) {
+      deleteButton.dataset.confirm = '';
+      deleteButton.textContent = 'Delete selected duplicates';
+      document.querySelector('#duplicateDeleteConfirm')?.remove();
+    }
   }
 
   function openDuplicateFinder() {
@@ -7199,7 +7241,15 @@
     renderDuplicateFinder();
   });
   document.querySelector('#duplicateFinderList').addEventListener('change', (event) => {
-    if (event.target.dataset.duplicateDelete !== undefined) updateDuplicateSelected();
+    if (event.target.dataset.duplicateDelete !== undefined) {
+      // One choice per pair: selecting one record clears the other radio of that pair.
+      const card = event.target.closest('.duplicate-pair');
+      for (const other of card.querySelectorAll('input[data-duplicate-delete]')) {
+        if (other !== event.target) other.checked = false;
+      }
+      card.classList.toggle('is-selected', event.target.checked);
+      updateDuplicateSelected();
+    }
   });
   document.querySelector('#deleteDuplicatesButton').addEventListener('click', () => {
     const checkboxes = document.querySelectorAll('#duplicateFinderList input[data-duplicate-delete]:checked');
@@ -7211,15 +7261,23 @@
       showToast('Cannot delete the last person in the tree.');
       return;
     }
-    // Show confirmation
+    // Show confirmation naming the chosen records and what deletion removes
     const dialog = document.querySelector('#duplicateFinderDialog');
-    const names = [...idsToDelete].map((id) => {
-      const p = state.people.get(id);
-      return p ? p.name : `@${id}@`;
+    const details = [...idsToDelete].map((id) => {
+      const plan = planPersonDeletion(id);
+      if (!plan) return `@${id}@`;
+      const extras = [
+        plan.events ? `${plan.events} life event${plan.events === 1 ? '' : 's'}` : '',
+        plan.removedFamilyIds.length ? `${plan.removedFamilyIds.length} family record${plan.removedFamilyIds.length === 1 ? '' : 's'}` : ''
+      ].filter(Boolean).join(', ');
+      return `${plan.name}${extras ? ` (${extras})` : ''}`;
     });
     const confirmP = document.createElement('p');
     confirmP.id = 'duplicateDeleteConfirm';
-    confirmP.textContent = `You are about to delete ${idsToDelete.size} person${idsToDelete.size > 1 ? 's' : ''}. This cannot be undone.`;
+    confirmP.className = 'duplicate-delete-confirm';
+    confirmP.append(document.createTextNode(
+      `Delete ${details.join('; ')}? Their events, links to relatives and any note records used only by them are removed too. Relatives, sources and media files are kept. This cannot be undone.`
+    ));
     dialog.querySelector('.dialog-panel').prepend(confirmP);
     // Re-render delete button to trigger confirmation
     const deleteBtn = document.querySelector('#deleteDuplicatesButton');
