@@ -383,9 +383,19 @@ button { color: inherit; }
 .map-relative-colors .map-marker-selected circle { stroke: #f2bf75; stroke-width: 4; }
 .map-relative-colors .map-marker.map-lineage-descendants text { fill: #17352f; }
 .map-popup-person.map-popup-lineage { border-left: 4px solid var(--lineage-color); }
-.map-relative-legend { position: absolute; bottom: 30px; left: 10px; right: 10px; width: fit-content; max-width: calc(100% - 20px); padding: 5px 8px; border-radius: 4px; background: rgba(255,255,255,.94); color: #17352f; font-size: 11px; pointer-events: none; }
-.map-relative-legend:not([hidden]) { display: flex; flex-wrap: wrap; gap: 5px 12px; }
-.map-legend-item { display: inline-flex; align-items: center; gap: 5px; }
+/* Legend sits in the bottom-left corner as a vertical column so it never runs
+   under the timeline pill along the bottom edge. */
+.map-relative-legend {
+  position: absolute; left: 10px; bottom: 30px;
+  width: fit-content; max-width: min(260px, calc(100% - 20px));
+  padding: 7px 9px; border-radius: 5px;
+  background: rgba(255,255,255,.94); color: #17352f;
+  font-size: 11px; pointer-events: none;
+  /* Lift it clear of the timeline pill, which is centred on the bottom edge. */
+  margin-bottom: 46px;
+}
+.map-relative-legend:not([hidden]) { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; }
+.map-legend-item { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .map-legend-swatch { width: 10px; height: 10px; border-radius: 50%; background: var(--lineage-color); }
 .map-marker:focus { outline: none; }
 .map-controls { position: absolute; top: 12px; right: 12px; display: flex; flex-direction: column; gap: 4px; }
@@ -404,6 +414,9 @@ button { color: inherit; }
 .map-bloodline-control:has(input:disabled) { cursor: default; opacity: .7; }
 .map-view-container:has(.map-warning) .map-bloodline-filters { top: 112px; max-height: calc(100% - 204px); }
 .map-credit { position: absolute; left: 10px; bottom: 8px; padding: 2px 6px; border-radius: 3px; color: #48635e; background: rgba(255,255,255,.75); font-size: 10px; pointer-events: none; }
+/* When the timeline is on screen the credit would sit underneath it, so the
+   credit moves up above the pill. */
+.map-view-container:has(.map-timeline:not([hidden])) .map-credit { bottom: 62px; }
 .map-warning { position: absolute; top: 56px; left: 12px; right: 56px; padding: 10px 12px; border-radius: 4px; color: #7a4a00; background: #fff4de; border: 1px solid #f2bf75; font-size: 12px; }
 .map-popup { position: absolute; z-index: 2; max-width: 280px; max-height: 60%; overflow: auto; display: flex; flex-direction: column; gap: 3px; padding: 10px 28px 10px 12px; border: 1px solid #b9cdc2; border-radius: 6px; color: #17352f; background: #fff; box-shadow: 0 8px 24px rgba(23,53,47,.22); font-size: 12px; line-height: 1.4; }
 .map-popup[hidden] { display: none; }
@@ -532,6 +545,9 @@ button { color: inherit; }
 .life-event-media-list { display: flex; flex-wrap: wrap; gap: 8px; max-height: 180px; overflow-y: auto; }
 .life-event-media-empty { color: #83958c; font-size: 11px; font-style: italic; }
 .life-event-media-item { position: relative; width: 74px; display: grid; gap: 3px; color: #42584f; font-size: 9px; text-decoration: none; }
+/* Classification dropdown under media thumbnails, matching the Media page. */
+.media-classify { display: grid; gap: 2px; color: #71817a; font-size: 8px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; }
+.media-classify select { min-height: 24px; padding: 1px 2px; font-size: 10px; font-weight: 600; text-transform: none; }
 .life-event-media-thumb { width: 74px; height: 74px; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 1px solid #d5e0d9; border-radius: 4px; background: #f5f9f6; color: #2f786a; font-size: 11px; font-weight: 700; }
 .life-event-media-thumb img { width: 100%; height: 100%; display: block; object-fit: cover; }
 a.life-event-media-thumb:hover, a.life-event-media-thumb:focus-visible { border-color: #2f786a; }
@@ -700,6 +716,8 @@ a.life-event-media-thumb:hover, a.life-event-media-thumb:focus-visible { border-
 .settings-panel[hidden], .menu-item[hidden] { display: none; }
 .menu-item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 0 12px; border: 0; border-radius: 4px; background: transparent; color: #234536; font: inherit; font-size: 13px; font-weight: 700; text-align: left; cursor: pointer; }
 .menu-item:hover:not(:disabled), .menu-item:focus-visible { background: #eaf3ee; }
+.menu-item-icon { flex: 0 0 auto; width: 15px; height: 15px; opacity: .75; }
+.menu-item:hover:not(:disabled) .menu-item-icon { opacity: 1; }
 .menu-item:disabled { opacity: .45; cursor: default; }
 .menu-item.media-button-needed:not(:disabled) { background: #fff3c4; color: #5c4600; }
 .menu-item .button-icon { color: #234536; }
@@ -741,7 +759,9 @@ a.life-event-media-thumb:hover, a.life-event-media-thumb:focus-visible { border-
 .report-bars { display: grid; gap: 7px; }
 .report-bar-row { display: grid; grid-template-columns: minmax(90px, 190px) minmax(0, 1fr) 46px; align-items: center; gap: 10px; font-size: 12px; }
 .report-bar-row[hidden] { display: none; }
-.report-bar-label { overflow: hidden; color: var(--ink-soft); text-overflow: ellipsis; white-space: nowrap; }
+.report-bar-label { display: flex; align-items: center; gap: 6px; overflow: hidden; color: var(--ink-soft); text-overflow: ellipsis; white-space: nowrap; }
+/* Country flag shown before the name in report bar charts. */
+.report-bar-flag { flex: 0 0 auto; width: 16px; height: 11px; object-fit: cover; border-radius: 2px; border: 1px solid var(--line); }
 .report-bar-track { height: 10px; overflow: hidden; border-radius: 5px; background: #eef3f0; }
 .report-bar-fill { height: 100%; min-width: 2px; border-radius: 5px; background: var(--green); }
 .report-bar-value { color: var(--ink); font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
@@ -803,6 +823,41 @@ a.life-event-media-thumb:hover, a.life-event-media-thumb:focus-visible { border-
 }
 
 @page { size: A4 portrait; margin: 12mm; }
+/* Printed pages are always light. printSection() switches the theme to light
+   first; these rules are the guarantee for anything that slips through,
+   including pages printed with Ctrl+P while dark mode is on. */
+@media print {
+  :root[data-theme="dark"] {
+    --ink: #17352f; --ink-soft: #48635e; --muted: #71817e;
+    --paper: #f3f5f2; --white: #ffffff; --line: #dce4df; --line-strong: #c8d4cd;
+    --green: #2f786a; --green-pale: #dff0e9;
+    --coral: #c9694e; --coral-pale: #fae7df;
+    --blue: #5a88a1; --blue-pale: #e4eff4;
+    --gold: #c58f34; --gold-pale: #f6edcf;
+  }
+  html, body { background: #fff !important; color: #17352f !important; }
+  body { background-image: none !important; }
+  /* Neutralise the dark surfaces so text never lands on a dark block. */
+  .topbar, .person-card, .pedigree-card, .report-panel, .report-stat,
+  .event-item, .detail-hero, .details-panel, .roster-panel, .main-heading,
+  .graph-footer, .app-dialog, .settings-panel {
+    background: #fff !important; color: #17352f !important; box-shadow: none !important;
+  }
+  .person-card .card-name, .pedigree-card-name, .event-label, .detail-hero h2,
+  .report-stat-value, .detail-country, .card-years, .card-place, .card-relation,
+  .event-detail, .detail-life, .detail-section-title, .kinship-summary {
+    color: #17352f !important;
+  }
+  .card-years, .card-place, .card-relation, .event-detail, .detail-life,
+  .detail-section-title { color: #4a625b !important; }
+  .pedigree-links path { stroke: #9fb0a7 !important; }
+  .research-button, .dialog-button, .button-secondary, .icon-button {
+    background: #fff !important; color: #315d4d !important; border-color: #c9d8cf !important;
+  }
+}
+/* A pedigree chart is wide, so it prints on its own landscape sheet. A named page
+   must be static CSS: a rule injected at print time is not reliably applied. */
+@page pedigree-landscape { size: A4 landscape; margin: 10mm; }
 @media print {
   html, body { width: auto; min-width: 0; height: auto; min-height: 0; overflow: visible; background: #fff; }
   body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -824,6 +879,45 @@ a.life-event-media-thumb:hover, a.life-event-media-thumb:focus-visible { border-
   body.print-map .connector-layer path { stroke: #9fb0a7; }
   body.print-map .graph-footer { min-height: 0; margin-top: 4mm; padding: 0; background: none; border: 0; }
   body.print-map .graph-footer-right { display: none; }
+
+  /* Pedigree chart: one landscape page showing every generation side by side. */
+  body.print-pedigree .roster-panel, body.print-pedigree .details-panel { display: none !important; }
+  body.print-pedigree .history-controls, body.print-pedigree .relationship-options { display: none !important; }
+  body.print-pedigree .main-panel { display: block; overflow: visible; background: #fff; }
+  body.print-pedigree .main-heading { min-height: 0; padding: 0 0 3mm; margin-bottom: 4mm; background: none; border-bottom: 0.75pt solid #c8d4cd; }
+  body.print-pedigree .heading-copy p { white-space: normal; overflow: visible; }
+  body.print-pedigree .graph-viewport { overflow: visible; padding: 0; }
+  body.print-pedigree .tree-canvas, body.print-pedigree .graph-footer { display: none !important; }
+  /* The chart is scaled to one page, so nothing inside it may force a break:
+     break-inside:avoid on a full-height block is what produced blank pages. */
+  body.print-pedigree .pedigree-view {
+    position: static; display: block; overflow: visible;
+    background: #fff; height: auto; max-height: none;
+    break-inside: auto; page-break-inside: auto;
+    page: pedigree-landscape;
+  }
+  body.print-pedigree .pedigree-heading { padding: 0 0 3mm; break-after: avoid; }
+  body.print-pedigree .pedigree-chart {
+    display: block; overflow: visible; padding: 0;
+    height: auto; max-height: none; flex: none;
+  }
+  /* One sheet only: no page breaks anywhere inside the printed chart. */
+  body.print-pedigree, body.print-pedigree .app-shell, body.print-pedigree .main-panel,
+  body.print-pedigree .graph-viewport, body.print-pedigree .pedigree-view,
+  body.print-pedigree .pedigree-chart {
+    page-break-before: avoid; page-break-after: avoid; break-before: avoid; break-after: avoid;
+  }
+  body.print-pedigree .pedigree-flow {
+    margin: 0 auto; break-inside: avoid; page-break-inside: avoid;
+    transform: none;
+  }
+  body.print-pedigree .pedigree-card {
+    box-shadow: none; break-inside: avoid;
+    border: 0.5pt solid #b9c6bf;
+  }
+  body.print-pedigree .pedigree-card.is-focus { background: #eef3ee; border-color: #7d9187; }
+  body.print-pedigree .pedigree-links path { stroke: #8b9c93; }
+  body.print-pedigree .pedigree-card-media img { width: 40px; height: 40px; }
 
   body.print-person .roster-panel, body.print-person .main-panel { display: none !important; }
   body.print-person .details-panel { display: block; overflow: visible; border: 0; background: #fff; }
@@ -956,8 +1050,164 @@ a.life-event-media-thumb:hover, a.life-event-media-thumb:focus-visible { border-
 .duplicate-pair-merge-choice input { accent-color: var(--green); }
 .duplicate-pair-merge-choice input:disabled { opacity: .4; cursor: not-allowed; }
 
+/* Top bar view switcher (dropdown) and Pedigree view */
+.view-switch {
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.view-switch-label {
+  font-size: 11px; font-weight: 800; letter-spacing: 1px;
+  color: var(--muted); text-transform: uppercase;
+}
+.view-switch select {
+  font: inherit; font-size: 13px; font-weight: 600;
+  padding: 5px 8px; border-radius: 5px; border: 1px solid var(--line);
+  background: #fff; color: var(--ink); cursor: pointer;
+}
+.view-switch select:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Pedigree lives inside the relationship-map viewport so the roster (left) and
+   the person record (right) stay visible; header is above, footer below. */
+.graph-viewport { position: relative; }
+.main-panel.pedigree-mode .tree-canvas { display: none; }
+.main-panel.pedigree-mode .graph-footer { display: none; }
+.pedigree-view {
+  position: absolute; inset: 0; z-index: 3;
+  display: flex; flex-direction: column;
+  background: var(--paper, #fbf9f4); overflow: hidden;
+}
+.pedigree-view[hidden] { display: none; }
+.pedigree-heading {
+  flex: 0 0 auto;
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; padding: 10px 22px 4px; flex-wrap: wrap;
+}
+.pedigree-heading h2 { margin: 2px 0 0; font-size: 18px; }
+.pedigree-summary { font-size: 12px; color: var(--ink-soft); }
+.pedigree-chart {
+  flex: 1 1 auto; min-height: 0; overflow: auto;
+  padding: 8px 20px 20px;
+  display: flex; align-items: center; justify-content: center;
+}
+/* Generations run left to right: each column is one generation, newest first.
+   The flow is scaled down with zoom to fit four generations in the centre panel
+   instead of forcing horizontal scrolling. */
+.pedigree-flow {
+  position: relative;
+  display: flex; align-items: center; gap: 34px;
+  padding: 16px 8px;
+  transform-origin: center center;
+  flex: 0 0 auto;
+}
+.pedigree-links {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; overflow: visible;
+}
+.pedigree-links path {
+  fill: none; stroke: var(--line, #cfd6d2); stroke-width: 1.5;
+}
+.pedigree-column {
+  position: relative; z-index: 1;
+  display: flex; flex-direction: column; justify-content: center;
+  gap: 12px; flex: 0 0 auto;
+}
+.pedigree-column-label {
+  font-size: 10px; font-weight: 800; letter-spacing: 1px;
+  color: var(--muted); text-transform: uppercase; margin-bottom: 2px;
+}
+.pedigree-card {
+  position: relative;
+  width: 168px;
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 7px 9px; border-radius: 8px;
+  background: #fff; border: 1px solid var(--line);
+  box-shadow: 0 1px 2px rgba(0,0,0,.05);
+  text-align: left; font: inherit; cursor: pointer;
+}
+.pedigree-card:hover { border-color: var(--green); }
+.pedigree-card.is-focus {
+  border-color: var(--green); border-width: 2px; padding: 7px 9px;
+  background: var(--green-pale);
+}
+.pedigree-card-media { display: flex; justify-content: center; }
+.pedigree-card-name {
+  font-weight: 700; font-size: 13px; overflow-wrap: anywhere;
+}
+.pedigree-card-dates { font-size: 11px; color: var(--muted); white-space: nowrap; }
+/* Dates and flags sit on one line to keep the card short. */
+.pedigree-card-meta {
+  display: flex; align-items: center; gap: 6px; flex-wrap: nowrap;
+  min-height: 12px;
+}
+.pedigree-card-flags {
+  display: inline-flex; gap: 3px; align-items: center; flex: 0 0 auto;
+}
+.pedigree-card-flags img {
+  width: 16px; height: 11px; object-fit: cover;
+  border-radius: 2px; border: 1px solid var(--line);
+}
+.pedigree-card-compact .pedigree-card-media { display: none; }
+.pedigree-card-compact { padding: 5px 8px; gap: 2px; }
+/* The outermost generation gets 150% of the standard card width. */
+.pedigree-column-gen4 .pedigree-card { width: 252px; }
+/* The great-grandparents column is wider and puts the portrait to the left of
+   the text, so the extra width holds a photo plus name and dates. */
+.pedigree-column-gen3 .pedigree-card {
+  width: 252px;
+  min-width: 252px;
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  grid-template-areas: 'photo name' 'photo meta';
+  align-items: center;
+  column-gap: 9px; row-gap: 2px;
+  /* Overrides the compact padding this generation also carries. */
+  padding: 7px 10px;
+}
+.pedigree-column-gen3 .pedigree-card-media {
+  grid-area: photo; margin: 0;
+}
+.pedigree-column-gen3 .pedigree-card-media img { width: 46px; height: 46px; }
+.pedigree-column-gen3 .pedigree-card-name { grid-area: name; align-self: end; }
+.pedigree-column-gen3 .pedigree-card-meta { grid-area: meta; align-self: start; }
+.pedigree-card-empty {
+  border-style: dashed; background: transparent; box-shadow: none;
+  color: var(--muted); font-style: italic;
+}
+/* Round hero portraits, matching the person record's monogram photo. */
+.pedigree-card-media {
+  display: flex; justify-content: center; margin-bottom: 2px;
+}
+.pedigree-card-media img {
+  width: 52px; height: 52px; max-width: none;
+  display: block; border-radius: 50%;
+  object-fit: cover; object-position: center 25%;
+  border: 1px solid var(--line);
+}
+.pedigree-card-compact .pedigree-card-media img { width: 40px; height: 40px; }
+
 .duplicate-finder-empty {
   padding: 20px; text-align: center; color: var(--muted); font-size: 13px;
+}
+
+/* Duplicate relationship finder rows: one checkbox + description per finding. */
+.duplicate-finder-toolbar-label {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 700; color: var(--ink-soft);
+}
+.duplicate-finder-toolbar-label input { accent-color: var(--coral); }
+.duplicate-relation-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px; border: 1px solid transparent; border-radius: 5px;
+  margin-bottom: 6px;
+}
+.duplicate-relation-row:hover { background: var(--green-pale); }
+.duplicate-relation-choice {
+  display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto;
+  font-size: 12px; color: var(--coral); font-weight: 600; padding-top: 2px;
+}
+.duplicate-relation-choice input { accent-color: var(--coral); }
+.duplicate-relation-detail {
+  font-size: 12px; color: var(--ink); line-height: 1.5; min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .duplicate-finder-selected {
@@ -988,3 +1238,401 @@ a.life-event-media-thumb:hover, a.life-event-media-thumb:focus-visible { border-
 .dialog-button-danger:disabled {
   background: var(--line-strong); cursor: default;
 }
+
+/* ===========================================================================
+   Colour themes
+   Light is the default palette in :root above. Dark mode redefines the shared
+   variables and then overrides the components that use literal light colours
+   (white cards, pale panels, dark menu text) so text and icons stay readable.
+   =========================================================================== */
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #e6efe9;
+  --ink-soft: #b6c8c0;
+  --muted: #93a8a0;
+  --paper: #121a18;
+  --white: #1a2523;
+  --line: #2b3a37;
+  --line-strong: #3c4d49;
+  --green: #6fbfa5;
+  --green-pale: #1c2f2a;
+  --coral: #e58a6c;
+  --coral-pale: #3a2620;
+  --blue: #7fb0ca;
+  --blue-pale: #1e2c34;
+  --gold: #e0b364;
+  --gold-pale: #332c1b;
+  --shadow: 0 16px 38px rgba(0, 0, 0, .55);
+  color: var(--ink);
+  background: var(--paper);
+}
+
+:root[data-theme="dark"] body {
+  background-color: var(--paper);
+  background-image: repeating-linear-gradient(0deg, transparent 0, transparent 31px, rgba(111, 191, 165, .05) 32px), repeating-linear-gradient(90deg, transparent 0, transparent 31px, rgba(111, 191, 165, .035) 32px);
+  color: var(--ink);
+}
+
+/* Top bar keeps a deep tone, just darker than the page. */
+:root[data-theme="dark"] .topbar { background: #0d1413; color: #e9f2ee; border-bottom-color: var(--coral); }
+:root[data-theme="dark"] .brand-mark i { border-color: #0d1413; }
+
+/* Panels and cards: replace the translucent whites with solid dark surfaces. */
+:root[data-theme="dark"] .roster-panel,
+:root[data-theme="dark"] .details-panel { background: rgba(22, 31, 29, .96); }
+:root[data-theme="dark"] .main-panel { background: rgba(18, 26, 24, .8); }
+:root[data-theme="dark"] .person-card {
+  background: #1b2725; border-color: #33443f; color: var(--ink);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .4);
+}
+:root[data-theme="dark"] .person-card:hover { border-color: var(--green); }
+:root[data-theme="dark"] .person-card[aria-current="true"] { background: #22332e; border-color: var(--green); }
+:root[data-theme="dark"] .person-card.partner { border-color: #3d4a58; }
+:root[data-theme="dark"] .person-card.female { border-color: #43405a; }
+
+/* Dialogs and the settings menu. */
+:root[data-theme="dark"] .app-dialog {
+  background: #182220; border-color: var(--line-strong); color: var(--ink);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .7);
+}
+:root[data-theme="dark"] .app-dialog::backdrop { background: rgba(0, 0, 0, .62); }
+:root[data-theme="dark"] .settings-panel {
+  background: #182220; border-color: var(--line-strong);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .7);
+}
+:root[data-theme="dark"] .menu-item { color: #dcebe4; }
+:root[data-theme="dark"] .menu-item:hover:not(:disabled),
+:root[data-theme="dark"] .menu-item:focus-visible { background: #22332e; }
+:root[data-theme="dark"] .menu-item .button-icon { color: #dcebe4; }
+:root[data-theme="dark"] .menu-item.media-button-needed:not(:disabled) { background: #4a3c12; color: #ffe8a8; }
+
+/* Form controls: native widgets follow color-scheme, but explicit backgrounds
+   keep inputs from flashing white against dark panels. */
+:root[data-theme="dark"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] textarea {
+  background: #101817; color: var(--ink); border-color: var(--line-strong);
+}
+:root[data-theme="dark"] input::placeholder,
+:root[data-theme="dark"] textarea::placeholder { color: #7d908a; }
+:root[data-theme="dark"] option,
+:root[data-theme="dark"] optgroup { background: #101817; color: var(--ink); }
+
+/* Buttons that were white or pale on light backgrounds. */
+:root[data-theme="dark"] .button-secondary { background: #22332e; color: #d7ebe2; border-color: var(--line-strong); }
+:root[data-theme="dark"] .button-secondary:hover { background: #2a3f38; border-color: var(--green); }
+:root[data-theme="dark"] .dialog-button { background: #22332e; color: #dcebe4; border-color: var(--line-strong); }
+:root[data-theme="dark"] .dialog-button:hover:not(:disabled) { background: #2a3f38; }
+:root[data-theme="dark"] .dialog-button-quiet { background: transparent; }
+:root[data-theme="dark"] .icon-button { background: #1b2725; color: var(--ink); border-color: var(--line-strong); }
+:root[data-theme="dark"] .icon-button:hover:not(:disabled) { background: #22332e; }
+
+/* Pedigree cards and their connector lines. */
+:root[data-theme="dark"] .pedigree-view { background: #121a18; }
+:root[data-theme="dark"] .pedigree-card {
+  background: #1b2725; border-color: #33443f; color: var(--ink);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .5);
+}
+:root[data-theme="dark"] .pedigree-card:hover { border-color: var(--green); }
+:root[data-theme="dark"] .pedigree-card.is-focus { background: #22332e; border-color: var(--green); }
+:root[data-theme="dark"] .pedigree-card-empty { background: transparent; }
+:root[data-theme="dark"] .pedigree-links path { stroke: #4d635c; }
+
+/* Life-event and person-record media, reports and charts. */
+:root[data-theme="dark"] .life-event-media-thumb { background: #101817; border-color: var(--line-strong); }
+:root[data-theme="dark"] .media-image-item,
+:root[data-theme="dark"] .media-file-item { background: #1b2725; border-color: var(--line-strong); }
+:root[data-theme="dark"] .report-panel,
+:root[data-theme="dark"] .report-bar-track { background: var(--white); }
+:root[data-theme="dark"] .report-bar-fill { background: var(--green); }
+:root[data-theme="dark"] .report-column-bar { background: #2a3b37; }
+:root[data-theme="dark"] .report-column-bar.has-value { background: var(--green); }
+:root[data-theme="dark"] .event-item { background: #1b2725; border-color: var(--line-strong); }
+:root[data-theme="dark"] .duplicate-pair:hover,
+:root[data-theme="dark"] .duplicate-relation-row:hover { background: #22332e; }
+:root[data-theme="dark"] .duplicate-pair.is-selected { background: #332c1b; }
+:root[data-theme="dark"] .duplicate-pair-score.is-high { background: #3a2620; }
+:root[data-theme="dark"] .duplicate-pair-score.is-medium { background: #332c1b; }
+:root[data-theme="dark"] .duplicate-pair-score.is-low { background: #1e2c34; }
+:root[data-theme="dark"] .duplicate-delete-confirm { background: #332c1b; border-color: var(--gold); }
+
+/* Scrollbars in dark mode. */
+:root[data-theme="dark"] * { scrollbar-color: #3c4d49 #121a18; }
+:root[data-theme="dark"] ::-webkit-scrollbar { width: 12px; height: 12px; }
+:root[data-theme="dark"] ::-webkit-scrollbar-track { background: #121a18; }
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #3c4d49; border-radius: 6px; border: 2px solid #121a18; }
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb:hover { background: #4d635c; }
+
+/* Translucent light overlays that would otherwise wash out dark text. */
+:root[data-theme="dark"] .main-heading { background: rgba(26, 37, 35, .78); border-bottom-color: var(--line); }
+:root[data-theme="dark"] .graph-footer { background: rgba(20, 29, 27, .9); color: #93a8a0; border-top-color: var(--line); }
+:root[data-theme="dark"] .graph-footer-right { color: #84968f; }
+:root[data-theme="dark"] .heading-copy p { color: #a9bbb3; }
+:root[data-theme="dark"] .eyebrow { color: #8fa79e; }
+:root[data-theme="dark"] .media-library-toolbar { background: rgba(26, 37, 35, .85); border-color: var(--line); }
+:root[data-theme="dark"] .media-library-empty { background: rgba(26, 37, 35, .7); border-color: var(--line-strong); color: var(--muted); }
+/* Search and filter fields sit on the pale roster background. */
+:root[data-theme="dark"] .roster-panel { background: rgba(22, 31, 29, .97); }
+:root[data-theme="dark"] .details-panel { background: rgba(24, 34, 32, .97); }
+:root[data-theme="dark"] .search-field,
+:root[data-theme="dark"] .directory-filter { background: #101817; color: var(--ink); border-color: var(--line-strong); }
+/* Small toggle labels inherit light-mode ink (#17352f family). */
+:root[data-theme="dark"] .siblings-toggle span { color: var(--ink-soft); }
+:root[data-theme="dark"] .zoom-label { color: var(--ink-soft); }
+/* Maps keep their own tile colours, so give their overlays dark surfaces. */
+:root[data-theme="dark"] .map-status,
+:root[data-theme="dark"] .map-bloodline-control,
+:root[data-theme="dark"] .map-relative-legend { background: rgba(18, 26, 24, .92); border-color: var(--line-strong); color: var(--ink); }
+:root[data-theme="dark"] .map-credit { background: rgba(18, 26, 24, .82); color: var(--ink-soft); }
+/* Charts and report text that used fixed light-mode greys. */
+:root[data-theme="dark"] .report-note,
+:root[data-theme="dark"] .report-empty,
+:root[data-theme="dark"] .report-bar-label,
+:root[data-theme="dark"] .report-panel h2 { color: var(--ink-soft); }
+:root[data-theme="dark"] .report-bar-value { color: var(--ink); }
+:root[data-theme="dark"] .report-subtitle { color: var(--ink-soft); }
+/* Birth-country and duplicate-finder helpers. */
+:root[data-theme="dark"] .birth-country-row:hover { background: #22332e; }
+:root[data-theme="dark"] .birth-country-field input { background: #101817; color: var(--ink); }
+
+/* Search wrappers use a fixed pale surface in light mode. */
+:root[data-theme="dark"] .search-box,
+:root[data-theme="dark"] .birth-country-search { background: #101817; color: var(--ink-soft); border-color: var(--line-strong); }
+:root[data-theme="dark"] .search-box input,
+:root[data-theme="dark"] .birth-country-search input { background: transparent; color: var(--ink); }
+:root[data-theme="dark"] .surname-group-header { background: #182220; border-bottom-color: var(--line); }
+/* Surname group headings in the directory use a fixed mid-green in light mode. */
+:root[data-theme="dark"] .surname-group-toggle { color: var(--ink-soft); }
+:root[data-theme="dark"] .surname-group-toggle:hover { color: var(--ink); }
+/* ===========================================================================
+   Dark mode: components that hard-code light-mode text colours
+   These keep the same hierarchy (strong / normal / muted) but on dark surfaces,
+   all meeting WCAG AA against the dark backgrounds.
+   =========================================================================== */
+
+/* Tree person cards: serif names were near-black on white. */
+:root[data-theme="dark"] .person-card .card-name { color: #eaf3ee; }
+:root[data-theme="dark"] .person-card .card-years,
+:root[data-theme="dark"] .person-card .card-place { color: #a3b7ae; }
+:root[data-theme="dark"] .person-card .card-relation { color: #a9bdb4; }
+:root[data-theme="dark"] .generation-shift { color: var(--ink-soft); background: #22332e; border-color: var(--line-strong); }
+:root[data-theme="dark"] .generation-shift:hover:not(:disabled) { background: #2a3f38; color: var(--ink); }
+
+/* Person record (details panel). */
+:root[data-theme="dark"] .detail-life,
+:root[data-theme="dark"] .detail-section-title,
+:root[data-theme="dark"] .detail-country-label,
+:root[data-theme="dark"] .detail-id,
+:root[data-theme="dark"] .event-detail,
+:root[data-theme="dark"] .event-source,
+:root[data-theme="dark"] .relation-detail,
+:root[data-theme="dark"] .kinship-summary { color: #a9bdb4; }
+:root[data-theme="dark"] .detail-id { background: #1b2725; border-color: var(--line-strong); }
+:root[data-theme="dark"] .detail-section-title::after { background: var(--line); }
+:root[data-theme="dark"] .event-label { color: #dcebe4; }
+:root[data-theme="dark"] .event-marker { background: #3d534c; }
+:root[data-theme="dark"] .event-marker.residence { background: var(--blue); }
+:root[data-theme="dark"] .event-marker.occupation { background: var(--gold); }
+:root[data-theme="dark"] .detail-hero { border-bottom-color: var(--line); }
+:root[data-theme="dark"] .detail-section { border-bottom-color: var(--line); }
+:root[data-theme="dark"] .event-media-missing { color: var(--coral); }
+
+/* Reports: cards and stat text. */
+:root[data-theme="dark"] .report-stat,
+:root[data-theme="dark"] .report-panel { background: #1a2523; border-color: var(--line); box-shadow: 0 6px 18px rgba(0, 0, 0, .45); }
+:root[data-theme="dark"] .report-stat-label,
+:root[data-theme="dark"] .report-stat-detail { color: #a3b7ae; }
+:root[data-theme="dark"] .report-stat-value { color: #eaf3ee; }
+:root[data-theme="dark"] .report-panel h2 { color: #a9bdb4; }
+:root[data-theme="dark"] .report-bar-track { background: #24332f; }
+:root[data-theme="dark"] .report-bar-label { color: #b8cbc2; }
+:root[data-theme="dark"] .report-more { color: var(--green); }
+
+/* Media library cards. */
+:root[data-theme="dark"] .media-library-card,
+:root[data-theme="dark"] .media-card { background: #1b2725; border-color: var(--line-strong); }
+:root[data-theme="dark"] .media-library-type,
+:root[data-theme="dark"] .media-library-path { color: #a3b7ae; }
+
+/* Toast: keep the dark pill readable. */
+:root[data-theme="dark"] .toast { background: #22332e; color: #eaf3ee; border-color: var(--line-strong); }
+
+/* Directory rows and surname headings. */
+:root[data-theme="dark"] .roster-entry { color: var(--ink); }
+:root[data-theme="dark"] .roster-entry:hover { background: #22332e; }
+:root[data-theme="dark"] .surname-group-header { background: #182220; }
+/* Placeholder links and small media labels used fixed pale greens/warm greys. */
+:root[data-theme="dark"] .relation-button.empty,
+:root[data-theme="dark"] .relation-add { color: #a9bdb4; }
+:root[data-theme="dark"] .relation-button.empty:hover,
+:root[data-theme="dark"] .relation-add:hover { color: var(--green); }
+:root[data-theme="dark"] .media-add-button { color: var(--green); border-color: var(--line-strong); }
+:root[data-theme="dark"] .media-add-button:hover:not(:disabled) { background: #22332e; }
+:root[data-theme="dark"] .event-media-label { color: #a9bdb4; }
+:root[data-theme="dark"] .event-media { border-color: var(--line); }
+:root[data-theme="dark"] .source-chip { background: #22332e; color: #cfe3da; border-color: var(--line-strong); }
+/* Final contrast fixes: placeholder links and report captions. */
+:root[data-theme="dark"] .relation-button.empty { color: #b4c8bf; }
+:root[data-theme="dark"] .relation-button.empty:hover { color: var(--green); }
+:root[data-theme="dark"] .media-add-button,
+:root[data-theme="dark"] .media-folder-button { color: #bfe4d6; background: #22332e; border-color: var(--line-strong); }
+:root[data-theme="dark"] .media-add-button:hover:not(:disabled),
+:root[data-theme="dark"] .media-folder-button:hover:not(:disabled) { background: #2a4039; color: #e2f5ee; border-color: var(--green); }
+:root[data-theme="dark"] .media-add-button:disabled { background: #1a2422; color: #7d908a; }
+:root[data-theme="dark"] .relation-button.empty { background: #1b2725; border-color: var(--line-strong); }
+:root[data-theme="dark"] .relation-button.relation-add:hover { background: #2a4039; color: #e2f5ee; border-color: var(--green); }
+:root[data-theme="dark"] .report-earliest-meta,
+:root[data-theme="dark"] .report-runner-date,
+:root[data-theme="dark"] .report-column-label,
+:root[data-theme="dark"] .report-donut-caption,
+:root[data-theme="dark"] .report-subtitle,
+:root[data-theme="dark"] .report-heading p { color: #a9bdb4; }
+/* ===========================================================================
+   Dark mode: person record header and its action buttons
+   These sat on a fixed light gradient with white buttons, so they stayed light
+   while the rest of the panel went dark.
+   =========================================================================== */
+
+/* Header: replace the pale #f8fbf8 -> #edf4ef gradient with a dark one. */
+:root[data-theme="dark"] .detail-hero {
+  background: linear-gradient(135deg, #1e2b28 0%, #17211f 100%);
+  border-bottom-color: var(--line);
+}
+:root[data-theme="dark"] .detail-country-label { color: #9db3aa; }
+:root[data-theme="dark"] .detail-life { color: #a3b7ae; }
+:root[data-theme="dark"] .detail-id { color: #a9bdb4; background: #22332e; }
+
+/* Monogram initials: warm paper became a dark warm tile. */
+:root[data-theme="dark"] .detail-monogram {
+  border-color: #7d4a3c; color: #f0a68c; background: #2b1d19;
+}
+/* Round edit / expand badges over the portrait. */
+:root[data-theme="dark"] .detail-monogram-edit,
+:root[data-theme="dark"] .detail-monogram-expand {
+  border-color: var(--line-strong); color: #cfe3da; background: #22332e;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .5);
+}
+:root[data-theme="dark"] .detail-monogram-edit:hover,
+:root[data-theme="dark"] .detail-monogram-edit:focus-visible,
+:root[data-theme="dark"] .detail-monogram-expand:hover,
+:root[data-theme="dark"] .detail-monogram-expand:focus-visible {
+  border-color: var(--green); color: #0d1413; background: var(--green);
+}
+
+/* Every action button in the person record uses .research-button. */
+:root[data-theme="dark"] .research-button {
+  border-color: var(--line-strong); color: #cfe3da; background: #22332e;
+}
+:root[data-theme="dark"] .research-button:hover {
+  border-color: var(--green); background: #2a4039; color: #e2f5ee;
+}
+:root[data-theme="dark"] .research-button:disabled { opacity: .5; }
+/* Destructive action keeps the coral tone, inverted for a dark surface. */
+:root[data-theme="dark"] .research-button.danger-button,
+:root[data-theme="dark"] .person-action-row .danger-button {
+  border-color: #7d4a3c; color: #f0a68c; background: #2b1d19;
+}
+:root[data-theme="dark"] .research-button.danger-button:hover,
+:root[data-theme="dark"] .person-action-row .danger-button:hover {
+  border-color: var(--coral); background: #3a2620; color: #ffc2ad;
+}
+
+/* Section separators and small helper links in the record. */
+:root[data-theme="dark"] .detail-section { border-bottom-color: var(--line); }
+:root[data-theme="dark"] .detail-section-title { color: #a9bdb4; }
+:root[data-theme="dark"] .detail-section-title::after { background: var(--line); }
+:root[data-theme="dark"] .details-empty p { color: #9db3aa; }
+:root[data-theme="dark"] .kinship-step { background: #22332e; color: #cfe3da; border-color: var(--line-strong); }
+:root[data-theme="dark"] .relation-label { color: #a9bdb4; }
+
+/* Full-screen portrait viewer. */
+:root[data-theme="dark"] .hero-expand-dialog { background: #182220; }
+:root[data-theme="dark"] .hero-expand-shrink {
+  border-color: var(--line-strong); color: #cfe3da; background: #22332e;
+}
+:root[data-theme="dark"] .hero-expand-shrink:hover { background: #2a4039; border-color: var(--green); }
+
+/* ===========================================================================
+   Map: generational migration timeline
+   A play/pause button and year scrubber that reveal locations decade by decade.
+   =========================================================================== */
+.map-timeline {
+  position: absolute;
+  left: 50%; bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 4;
+  /* Never wider than the map, and never hidden behind the credit line. */
+  flex-wrap: nowrap; white-space: nowrap;
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 12px;
+  border: 1px solid #b9cdc2; border-radius: 999px;
+  background: rgba(255, 255, 255, .95);
+  box-shadow: 0 4px 14px rgba(23, 53, 47, .16);
+  max-width: calc(100% - 28px);
+}
+.map-timeline[hidden] { display: none; }
+.map-timeline-play {
+  width: 30px; height: 30px; flex: 0 0 auto;
+  display: grid; place-items: center; padding: 0;
+  border-radius: 50%; font-size: 12px; line-height: 1;
+}
+.map-timeline-range {
+  width: clamp(140px, 34vw, 380px);
+  accent-color: var(--green);
+  cursor: pointer;
+}
+.map-timeline-label {
+  font-size: 12px; font-weight: 700; color: #35584c;
+  min-width: 92px; text-align: center; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.map-timeline-reset {
+  flex: 0 0 auto; padding: 3px 8px;
+  border: 1px solid #c9d8cf; border-radius: 999px;
+  background: #fff; color: #35584c;
+  font-size: 11px; font-weight: 700; cursor: pointer;
+}
+.map-timeline-reset:hover { background: #f0f7f2; border-color: #91b6a2; }
+
+/* Dark mode: keep the pill readable over the (light) map tiles. */
+:root[data-theme="dark"] .map-timeline {
+  background: rgba(18, 26, 24, .96);
+  border-color: var(--line-strong);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .6);
+}
+:root[data-theme="dark"] .map-timeline-label { color: #cfe3da; }
+:root[data-theme="dark"] .map-timeline-reset {
+  background: #22332e; color: #cfe3da; border-color: var(--line-strong);
+}
+:root[data-theme="dark"] .map-timeline-reset:hover { background: #2a4039; border-color: var(--green); }
+
+/* Printed maps never include the playback controls. */
+@media print {
+  .map-timeline { display: none !important; }
+}
+
+/* Timeline speed buttons: play (1x), forward (2x), fast forward (4x). */
+.map-timeline-play {
+  font-size: 12px;
+  line-height: 1;
+  color: #35584c;
+  background: #fff;
+  border: 1px solid #c9d8cf;
+}
+.map-timeline-play:hover:not(:disabled) { background: #f0f7f2; border-color: #91b6a2; }
+/* The running speed is highlighted, and swaps to a pause glyph. */
+.map-timeline-play.is-playing {
+  color: #fff; background: var(--green); border-color: var(--green);
+}
+.map-timeline-forward, .map-timeline-fastForward { font-size: 11px; }
+/* "All years" reads as selected while every place is shown. */
+.map-timeline-reset.is-active {
+  color: #fff; background: var(--green); border-color: var(--green);
+}
+:root[data-theme="dark"] .map-timeline-play {
+  color: #cfe3da; background: #22332e; border-color: var(--line-strong);
+}
+:root[data-theme="dark"] .map-timeline-play:hover:not(:disabled) { background: #2a4039; border-color: var(--green); }
+:root[data-theme="dark"] .map-timeline-play.is-playing { color: #0d1413; background: var(--green); }
+:root[data-theme="dark"] .map-timeline-reset.is-active { color: #0d1413; background: var(--green); }

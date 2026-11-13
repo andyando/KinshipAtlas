@@ -22,9 +22,19 @@
         <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
         <span><span class="brand-kicker">LOCAL FAMILY ARCHIVE</span><strong>Kinship Atlas</strong></span>
       </a>
-      <button id="mapViewButton" class="button button-quiet" type="button" aria-pressed="false" disabled>Map View</button>
-      <button id="reportsButton" class="button button-quiet" type="button" aria-pressed="false" disabled>Reports</button>
-      <button id="mediaLibraryButton" class="button button-quiet media-library-nav-button" type="button" aria-pressed="false" disabled>Media</button>
+      <label class="view-switch" for="viewSwitch">
+        <span class="view-switch-label">View</span>
+        <select id="viewSwitch" disabled>
+          <option value="tree">Tree View</option>
+          <option value="map">Map View</option>
+          <option value="pedigree">Pedigree View</option>
+          <option value="reports">Reports</option>
+          <option value="media">Media</option>
+        </select>
+      </label>
+      <button id="mapViewButton" class="button button-quiet" type="button" aria-pressed="false" disabled hidden>Map View</button>
+      <button id="reportsButton" class="button button-quiet" type="button" aria-pressed="false" disabled hidden>Reports</button>
+      <button id="mediaLibraryButton" class="button button-quiet media-library-nav-button" type="button" aria-pressed="false" disabled hidden>Media</button>
     </div>
     <div class="topbar-meta"><span class="privacy-indicator"><span class="privacy-dot"></span> ON THIS DEVICE</span><span class="topbar-divider"></span><button id="treeLabel" class="tree-label-button" type="button" title="Update defaults: choose the GEDCOM file and media folder that open automatically" disabled>No tree loaded</button></div>
     <div class="topbar-actions">
@@ -54,6 +64,18 @@
           <button id="mediaLibraryMenuButton" class="menu-item" type="button" role="menuitem" disabled>Media library</button>
           <button id="birthCountryMenuButton" class="menu-item" type="button" role="menuitem" disabled title="List people whose birth place does not identify a country, and fix them">People without a birth country</button>
           <button id="duplicateFinderMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Find people who may have been entered more than once">Find duplicate people</button>
+          <button id="duplicateRelationMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Remove people connected more than once to the same parent or spouse">
+            <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M21 3 12 12"/><path d="M12 12 8 16"/><path d="M8 16 3.5 20.5"/><path d="M3.5 20.5c-1.4 1.4-1.4 3 0 3.9 1.4.9 3 .4 3.9-1l1.8-2.7-3-3z"/><path d="M6.2 17.7l3 3"/><path d="M9.2 14.7l3 3"/></svg>
+            Remove duplicate relationships
+          </button>
+          <button id="darkModeButton" class="menu-item" type="button" role="menuitem" title="Switch the site to dark colours">
+            <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20.5 14.2A8.6 8.6 0 0 1 9.8 3.5a8.6 8.6 0 1 0 10.7 10.7z"/></svg>
+            Dark mode
+          </button>
+          <button id="lightModeButton" class="menu-item" type="button" role="menuitem" title="Switch the site back to light colours" hidden>
+            <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M2.5 12h2.4M19.1 12h2.4M5.3 5.3l1.7 1.7M17 17l1.7 1.7M18.7 5.3L17 7M7 17l-1.7 1.7"/></svg>
+            Light mode
+          </button>
           <button id="defaultsButton" class="menu-item" type="button" role="menuitem" title="Choose the GEDCOM file and media folder that open automatically">Update defaults</button>
           <button id="updateAppButton" class="menu-item" type="button" role="menuitem">Check for application updates</button>
           <button id="clearButton" class="menu-item" type="button" role="menuitem" disabled>Start Again</button>
@@ -139,7 +161,17 @@
         </div>
       </div>
       <div id="graphViewport" class="graph-viewport">
-        <div id="mapView" hidden></div>        <div id="treeCanvas" class="tree-canvas">
+        <div id="mapView" hidden></div>
+        <section id="pedigreeView" class="pedigree-view" aria-labelledby="pedigreeTitle" hidden>
+          <div class="pedigree-heading">
+            <div>
+              <div class="eyebrow">PEDIGREE <span class="eyebrow-rule"></span><span id="pedigreeSummary"></span></div>
+              <h2 id="pedigreeTitle">Ancestral lines of <span id="pedigreePersonName"></span></h2>
+            </div>
+          </div>
+          <div id="pedigreeChart" class="pedigree-chart" aria-live="polite"></div>
+        </section>
+        <div id="treeCanvas" class="tree-canvas">
           <div class="welcome-state">
             <div class="welcome-art" aria-hidden="true">
               <span class="orbit orbit-a"></span><span class="orbit orbit-b"></span>
@@ -275,7 +307,7 @@
             </ol>
             <h4>Finding your way around</h4>
             <ul>
-              <li><strong>Top bar:</strong> <strong>Map View</strong>, <strong>Reports</strong> and <strong>Media</strong> switch views. The name of the open GEDCOM file is shown in the middle; click it to change your defaults. The <strong>Saved</strong> / <strong>Save to GEDCOM</strong> indicator shows whether your edits are in the file.</li>
+              <li><strong>Top bar:</strong> use the <strong>View</strong> selector to switch between <strong>Tree View</strong>, <strong>Map View</strong>, <strong>Pedigree View</strong>, <strong>Reports</strong> and <strong>Media</strong>. The name of the open GEDCOM file is shown in the middle; click it to change your defaults. The <strong>Saved</strong> / <strong>Save to GEDCOM</strong> indicator shows whether your edits are in the file.</li>
               <li><strong>Left:</strong> the directory of everyone in the tree, with search and filters.</li>
               <li><strong>Centre:</strong> the relationship map for the selected person.</li>
               <li><strong>Right:</strong> the person record, with actions for editing, printing and media. Recognized countries from the recorded birth and death places appear beside the hero image; the death country is omitted when it matches the birth country. Missing or unrecognized countries are not guessed.</li>
@@ -331,6 +363,14 @@
           </article>
           <article class="help-article" data-help-article="exploring" hidden>
             <h3>Exploring the family tree</h3>
+            <h4>Display views</h4>
+            <p>Choose a view from the <strong>View</strong> selector in the top bar:</p>
+            <ul>
+              <li><strong>Tree View</strong> shows the relationship map around the selected person. The directory and person record stay visible.</li>
+              <li><strong>Map View</strong> plots people using places recorded in the GEDCOM. Click a pin to open that person.</li>
+              <li><strong>Pedigree View</strong> shows the selected person and up to four generations of recorded ancestors. Click an ancestor to follow that line; use the zoom buttons to resize the chart or the printer button to print it on A4.</li>
+              <li><strong>Reports</strong> shows tree statistics and occupation summaries; <strong>Media</strong> opens the library of attached files.</li>
+            </ul>
             <h4>The directory</h4>
             <ul>
               <li>Type in <strong>Find a person</strong> (shortcut <kbd>/</kbd>) to search by name.</li>
@@ -422,6 +462,14 @@
               <li><strong>Primary person</strong> (<strong>Set as primary person</strong> in a record) adds the <strong>Home Person</strong> button to the top bar, shows how others are related to that person, and is the reference for bloodline highlighting and filtering on the World Map.</li>
               <li>The separate starred <strong>Home person</strong> record option has been removed. Previously saved startup-person preferences still apply when opening the default tree; setting a primary person does not change those preferences.</li>
               <li>When a primary person is set, the welcome page offers <strong>Go to Home/Default Person in Tree</strong>.</li>
+            </ul>
+            <h4>Other Settings options</h4>
+            <ul>
+              <li><strong>Open GEDCOM</strong> and <strong>Import new GEDCOM records</strong> open a tree or preview related people to add from another file.</li>
+              <li><strong>Select Media Folder</strong> links a folder for GEDCOM media; <strong>Media library</strong> reviews and manages attached files.</li>
+              <li><strong>People without a birth country</strong> helps find and correct places; <strong>Find duplicate people</strong> lists possible duplicate records to review; <strong>Remove duplicate relationships</strong> lets you select repeated links to the same parent or spouse for removal. Deleting a duplicate link keeps the original connection.</li>
+              <li><strong>Dark mode</strong> and <strong>Light mode</strong> change the app's appearance.</li>
+              <li><strong>Check for application updates</strong> checks for a newer published release. <strong>Start Again</strong> closes the current tree so you can open another one; unsaved edits are discarded. <strong>Exit Kinship Atlas</strong> saves preferences and stops the local helper, asking first if there are unsaved GEDCOM changes.</li>
             </ul>
             <h4>Finishing a session</h4>
             <p><strong>Settings &gt; Exit Kinship Atlas</strong> saves your preferences and stops the local helper. If there are unsaved GEDCOM changes, you are asked before exiting.</p>
@@ -691,6 +739,21 @@
         <button id="closeBirthCountries" class="dialog-button dialog-button-quiet" type="button">Close</button>
       </div>
     </form>
+  </dialog>
+  <dialog id="duplicateRelationDialog" class="app-dialog duplicate-finder-dialog" aria-labelledby="duplicateRelationTitle">
+    <section class="dialog-panel">
+      <h2 id="duplicateRelationTitle">Remove duplicate relationships</h2>
+      <p id="duplicateRelationSummary">Checking every family record for people linked more than once.</p>
+      <label class="duplicate-finder-toolbar-label">
+        <input id="duplicateRelationSelectAll" type="checkbox"> Select all for deletion
+      </label>
+      <div id="duplicateRelationList" class="duplicate-finder-list" aria-live="polite"></div>
+      <div class="dialog-actions">
+        <span id="duplicateRelationSelected" class="duplicate-finder-selected"></span>
+        <button id="deleteDuplicateRelationsButton" class="dialog-button dialog-button-danger" type="button" disabled>Delete selected duplicate links</button>
+        <button id="closeDuplicateRelations" class="dialog-button dialog-button-quiet" type="button">Close</button>
+      </div>
+    </section>
   </dialog>
   <dialog id="duplicateFinderDialog" class="app-dialog duplicate-finder-dialog" aria-labelledby="duplicateFinderTitle">
     <section class="dialog-panel">

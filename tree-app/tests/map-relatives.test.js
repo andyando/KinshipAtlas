@@ -80,13 +80,20 @@ test('bloodline map filter controls pins and unplaced people, and resets without
   let relatives = new Set(['P', 'C']);
   const context = vm.createContext({
     pins: [], unplaced: [], bloodRelativeIds: new Set(), bloodlineOnly: false,
+    // Timeline state read and written by refreshTimeline / visiblePins.
+    timelineYear: null, timelineYears: [], timelineControls: null,
     sideFilters: { maternal: false, paternal: false, descendants: false }, sideFilterToggles: {},
     bloodlineToggle: { parentElement: {} }, relativeLegend: {},
     container: { classList: { toggle() {} } },
     statusChip: { classList: { toggle() {} } },
     options: { getPeople: () => people, getBloodlines: () => ({ all: relatives }) },
     latestPlace: (person) => ['P', 'W'].includes(person.id) ? { lat: 1, lon: 2 } : null,
-    projectX: (value) => value, projectY: (value) => value
+    projectX: (value) => value, projectY: (value) => value,
+    // rebuildPins now stamps each pin with the event year for timeline playback.
+    yearOf: (date) => { const m = String(date || '').match(/\b(\d{3,4})\b/); return m ? Number(m[1]) : null; },
+    refreshTimeline: () => {},
+    // No timeline is active in this test, so every pin is visible.
+    visiblePins: function visiblePins() { return this.pins; }
   });
   vm.runInContext(mapSource.slice(start, end) + '\nrebuildPins();', context);
   assert.equal(context.pins.length, 2);

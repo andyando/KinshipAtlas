@@ -80,6 +80,18 @@ Child-to-grandchild connector lines are hidden when the grandchildren occupy mul
 
 Use the directory’s birth/death country selectors, **Occupation Type** selector, and year-range sliders to filter people. Occupation Type uses the same 27 inferred categories as Reports and matches anyone with at least one occupation entry in the chosen category; it combines with name, surname, country, and year filters. **All occupation types** removes that restriction. Unknown / Miscellaneous matches unmapped nonblank occupation entries, not people without occupation entries. Results are grouped by surname; expand or collapse each surname to browse its people. Country and year options are derived from recognized country names and dates present in the loaded GEDCOM.
 
+### Display views and settings
+
+Use the **View** selector in the top bar to switch among:
+
+- **Tree View:** the interactive relationship map around the selected person, with the directory and person record alongside it.
+- **Map View:** a world map of people with recognized recorded places. Click a pin to open that person; when a primary person is set, use the map filters to focus on their bloodline, either parent's side, or descendants.
+- **Pedigree View:** the selected person and up to four generations of recorded ancestors. Click an ancestor to follow that line; zoom the chart or print it on A4.
+- **Reports:** tree statistics, media coverage, country counts and occupation summaries; reports can be printed.
+- **Media:** the library of files linked in the GEDCOM.
+
+The **Settings** menu also provides **Open GEDCOM** and **Import new GEDCOM records**; **Select Media Folder** and **Media library**; **People without a birth country**; **Find duplicate people** to review possible duplicate records; and **Remove duplicate relationships** to select repeated links to a parent or spouse for removal. Removing a duplicate link keeps the original connection. Use **Dark mode** or **Light mode** to change the appearance, **Update defaults** to choose the tree and media folder opened at startup, and **Check for application updates** to check for a newer release. **Start Again** closes the current tree so you can open another; it does not delete files, but unsaved edits are discarded. **Exit Kinship Atlas** saves preferences and stops the local helper.
+
 ### Editing people and saving
 
 In a person’s details, choose **Edit person details** to update the displayed name, sex, birth/death dates, and birth/death locations, or **Edit GEDCOM fields** to edit every field line in that individual record, including custom tags, by level, tag, and value. Enter dates in GEDCOM format (for example, `12 MAR 1883` or `ABT 1883`), or use the calendar picker for an exact date. **Add field** inserts another GEDCOM field; **Save changes** applies the edit to the current tree and **Cancel** discards it. **Add relative** creates a new person linked as a parent, child, sibling, or partner, with duplicate-name confirmation when needed. Use **Save GEDCOM** to write the edited records to a file; unrelated records and tags are preserved.
@@ -92,7 +104,7 @@ In the life-event editor, **Link media already attached to this person** lets yo
 
 ### Reports and data checks
 
-**Map View** plots people on a world map using the places recorded in the tree; click a pin to open that person. **Reports** summarises the tree, including media coverage and how many people have or do not have a birth country and a death country. The death country count only includes people with a recorded death date, so anyone who may be living is left out. Use the printer button to print the reports.
+**Reports** summarises the tree, including media coverage and how many people have or do not have a birth country and a death country. The death country count only includes people with a recorded death date, so anyone who may be living is left out. Use the printer button to print the reports.
 
 **Reports > Most popular occupations** uses 27 controlled categories and counts each person once per category. These are report-only keyword inferences: original GEDCOM wording is preserved, a standard occupation is derived, and a category is assigned. Hover over a bar to review **original description -> standard occupation**. Specific roles take priority: Bank Clerk is Finance, Merchants Clerk is Clerical, Marine Engineer is Engineering, Printing Director is Printing, and Commercial Traveller is Sales. Text after the first comma is treated as supplementary detail rather than matched as an occupation. Laborer/Labourer spellings are combined. Unmapped nonblank entries go to **Unknown / Miscellaneous**, not assumed to be non-occupations. **Spinster** is grouped under Domestic / Unpaid as requested but remains a recorded status, not proof of an occupation. Multiple categories per person are possible, so chart totals may exceed the number of people. The top ten appear initially; **Show all** expands the list, and printed reports include every populated category.
 

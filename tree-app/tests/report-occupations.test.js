@@ -13,7 +13,8 @@ const barsSource = source.slice(source.indexOf('  function appendReportBars('), 
 function node(tag, className = '', text) {
   return {
     tag, className, textContent: text, style: {}, dataset: {}, children: [],
-    append(...children) { this.children.push(...children); }
+    append(...children) { this.children.push(...children); },
+    prepend(child) { this.children.unshift(child); }
   };
 }
 

@@ -7,6 +7,15 @@
 window.KINSHIP_VERSION = {
   releases: [
     {
+      version: '1.15.0',
+      date: '2026-11-13',
+      changes: [
+        'Added a View selector for Tree, Map, Pedigree, Reports and Media, including an ancestor pedigree chart.',
+        'Added dark and light appearance controls and a tool to review and remove duplicate relationships.',
+        'Updated the in-app Help and README with the available views and Settings options.'
+      ]
+    },
+    {
       version: '1.14.1',
       date: '2026-11-08',
       changes: [

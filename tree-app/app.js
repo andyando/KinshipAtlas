@@ -76,7 +76,7 @@
     ['preussen', 'de-prussia', 'Prussia', 'Flag_of_Prussia_(1918–1933).svg']
   ].sort((a, b) => b[0].length - a[0].length);
   const state = {
-    mapMode: false, mapStats: null, directoryMatches: [], reportsMode: false, mediaLibraryMode: false,
+    mapMode: false, mapStats: null, directoryMatches: [], reportsMode: false, mediaLibraryMode: false, pedigreeMode: false, pedigreeZoom: 1,
     people: new Map(), families: new Map(), sources: new Map(), selectedId: null,
     fileName: '', searchText: '', history: [], historyIndex: -1, zoom: 1, showSiblings: true,
     mediaIndex: null, mediaUrls: new Map(), mediaRelativePaths: new WeakMap(), mediaDirectoryHandle: null,
@@ -585,6 +585,19 @@
     }
     finishRecord();
     if (!people.size) throw new Error('No individual records were found in this file.');
+    // Some files record a child only as "1 CHIL" inside the FAM record and omit
+    // the matching "1 FAMC" on the person (and likewise for spouses and FAMS).
+    // Link those back so parents, spouses and the pedigree view see them.
+    for (const family of families.values()) {
+      for (const childId of family.childIds) {
+        const child = people.get(childId);
+        if (child && !child.parentFamilyIds.includes(family.id)) child.parentFamilyIds.push(family.id);
+      }
+      for (const spouseId of [family.husbandId, family.wifeId]) {
+        const spouse = spouseId && people.get(spouseId);
+        if (spouse && !spouse.spouseFamilyIds.includes(family.id)) spouse.spouseFamilyIds.push(family.id);
+      }
+    }
     return { people, families, sources, gedcomRecords };
   }
 
@@ -1097,6 +1110,32 @@
     ['wedding', 'Wedding'], ['will-probate', 'Will / Probate']
   ];
   const mediaTypeStorageKey = (storageKey) => `kinship-atlas:media-types:v1:${storageKey}`;
+
+  // Shared "Classify" dropdown used by the person record's attached media and
+  // the life-event media list, so both write the same media-type store as the
+  // Media page.
+  function mediaClassifyControl(mediaKey, label) {
+    const wrapper = document.createElement('label');
+    wrapper.className = 'media-classify';
+    wrapper.textContent = 'Classify';
+    const select = document.createElement('select');
+    select.dataset.mediaTypeKey = mediaKey;
+    select.setAttribute('aria-label', `Classify ${label}`);
+    const current = state.mediaTypes.get(mediaKey) || 'unclassified';
+    for (const [value, text] of mediaTypeOptions) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = text;
+      option.selected = value === current;
+      select.append(option);
+    }
+    select.addEventListener('change', () => {
+      state.mediaTypes.set(mediaKey, select.value);
+      if (!saveMediaTypes()) showToast('Classification saved for this tab only; browser storage is unavailable.');
+    });
+    wrapper.append(select);
+    return wrapper;
+  }
 
   function loadMediaTypes(storageKey) {
     const types = new Map();
@@ -1828,9 +1867,11 @@
     elements.mapViewButton.disabled = false;
     elements.reportsButton.disabled = false;
     elements.mediaLibraryButton.disabled = false;
+    document.querySelector('#viewSwitch').disabled = false;
     document.querySelector('#mediaLibraryMenuButton').disabled = false;
     document.querySelector('#birthCountryMenuButton').disabled = false;
     document.querySelector('#duplicateFinderMenuButton').disabled = false;
+    document.querySelector('#duplicateRelationMenuButton').disabled = false;
     elements.printMapButton.disabled = false;
     elements.showSiblings.disabled = false;
     document.querySelector('#openGedcomLabel').hidden = true;
@@ -2058,6 +2099,7 @@
       state.historyIndex = state.history.length - 1;
     }
     render();
+    if (state.pedigreeMode) renderPedigreeView();
     elements.back.disabled = state.historyIndex <= 0;
     elements.forward.disabled = state.historyIndex >= state.history.length - 1;
     elements.viewport.scrollTop = 0;
@@ -3345,6 +3387,8 @@
         unlinkButton.setAttribute('aria-label', 'Unlink image from this person; file will remain in the media folder');
         unlinkButton.title = 'Unlink from person (file remains in folder)';
         item.append(link, primaryButton, unlinkButton);
+        // Classify the file the same way the Media page does.
+        item.append(mediaClassifyControl(path, file.name));
         markJustAdded(item, path);
         item.hidden = mediaItems.length >= 4;
         mediaItems.push(item);
@@ -3365,6 +3409,7 @@
         unlinkButton.setAttribute('aria-label', 'Unlink media from this person; file will remain in the media folder');
         unlinkButton.title = 'Unlink from person (file remains in folder)';
         item.append(link, unlinkButton);
+        item.append(mediaClassifyControl(path, file.name));
         markJustAdded(item, path);
         item.hidden = mediaItems.length >= 4;
         mediaItems.push(item);
@@ -3913,6 +3958,7 @@
       map?.hide();
       if (state.people.size) renderGraph();
     }
+    syncViewSwitch();
   }
 
   function setReportsMode(on) {
@@ -3927,6 +3973,7 @@
     elements.appShell.hidden = on || state.mediaLibraryMode;
     setButtonContent(elements.reportsButton, on ? 'tree' : 'chart', on ? 'Back to tree' : 'Reports');
     elements.reportsButton.setAttribute('aria-pressed', String(on));
+    syncViewSwitch();
     if (on) {
       renderReports();
       elements.reportsView.scrollTop = 0;
@@ -3953,10 +4000,259 @@
     elements.appShell.hidden = on || state.reportsMode;
     elements.reportsView.hidden = on || !state.reportsMode;
     elements.mediaLibraryButton.setAttribute('aria-pressed', String(on));
+    syncViewSwitch();
     if (on) {
       renderMediaLibrary();
       elements.mediaLibraryView.scrollTop = 0;
     }
+  }
+
+  // ---------- Pedigree view ----------
+
+  // Rows of ancestors: generation 0 is the selected person, then their parents,
+  // grandparents and so on. Each slot keeps its own two parents, so siblings in
+  // the same generation each get their own copy of the shared parent.
+  //
+  // Siblings share parents: Julius and Daniel Magnus are both children of the
+  // same couple. An earlier version dropped repeated ancestors so each person
+  // appeared once per generation, but that blanked the second sibling's parent
+  // slots (shown as "Parent not recorded") and broke their connector lines.
+  // Repeating the shared ancestor in the second slot is the standard pedigree
+  // treatment and keeps every child's line intact.
+  function pedigreeGenerations(personId, maxGenerations = 4) {
+    const rows = [[personId]];
+    for (let generation = 1; generation < maxGenerations; generation += 1) {
+      const next = [];
+      for (const id of rows[generation - 1]) {
+        if (!id) { next.push('', ''); continue; }
+        const parents = parentsOf(id).slice(0, 2);
+        while (parents.length < 2) parents.push('');
+        next.push(...parents);
+      }
+      // Stop when a generation adds no recorded ancestor at all, so a tree with
+      // unknown grandparents does not end in rows of empty placeholders.
+      if (!next.some(Boolean)) break;
+      rows.push(next);
+    }
+    return rows;
+  }
+
+  function pedigreeFlagFor(place) {
+    return countryFlagForPlace(place);
+  }
+
+  function pedigreeCard(personId, generation, isFocus) {
+    if (!personId) {
+      const empty = document.createElement('div');
+      empty.className = 'pedigree-card pedigree-card-empty';
+      const unknown = document.createElement('div');
+      unknown.className = 'pedigree-card-dates';
+      unknown.textContent = 'Parent not recorded';
+      empty.append(unknown);
+      return empty;
+    }
+    const card = document.createElement(isFocus ? 'div' : 'button');
+    card.className = `pedigree-card${generation >= 4 ? ' pedigree-card-compact' : ''}${isFocus ? ' is-focus' : ''}`;
+    card.dataset.pedigreePerson = personId;
+    if (!isFocus) {
+      card.type = 'button';
+      card.addEventListener('click', () => setFocus(personId));
+    }
+    const person = state.people.get(personId);
+    if (!person) return card;
+    // Round hero portraits for the selected person, parents, grandparents and
+    // great-grandparents; the outermost generation stays text-only.
+    const portrait = generation <= 3 ? primaryImageFor(person) : null;
+    if (portrait) {
+      const media = document.createElement('div');
+      media.className = 'pedigree-card-media';
+      const image = document.createElement('img');
+      // primaryImageFor returns { path, file }; the object URL comes from the file.
+      image.src = mediaUrl(portrait.file);
+      image.alt = '';
+      image.loading = 'lazy';
+      media.append(image);
+      card.append(media);
+    }
+    const name = document.createElement('div');
+    name.className = 'pedigree-card-name';
+    name.textContent = person.name;
+    card.append(name);
+    const birth = person.events.find((event) => event.type === 'BIRT');
+    const death = person.events.find((event) => event.type === 'DEAT');
+    const years = lifespan(person);
+    // Dates and country flags share one row so the card stays short.
+    const meta = document.createElement('div');
+    meta.className = 'pedigree-card-meta';
+    if (years) {
+      const dates = document.createElement('span');
+      dates.className = 'pedigree-card-dates';
+      dates.textContent = years;
+      meta.append(dates);
+    }
+    const flags = document.createElement('span');
+    flags.className = 'pedigree-card-flags';
+    for (const event of [birth, death]) {
+      const country = pedigreeFlagFor(event?.place);
+      if (!country) continue;
+      const image = document.createElement('img');
+      image.src = `flags/4x3/${country.file}`;
+      image.alt = `${event.type === 'BIRT' ? 'Born' : 'Died'} in ${country.country}`;
+      image.title = `${event.type === 'BIRT' ? 'Born' : 'Died'} in ${country.country}`;
+      flags.append(image);
+    }
+    if (flags.childElementCount) meta.append(flags);
+    if (meta.childElementCount) card.append(meta);
+    return card;
+  }
+
+  const pedigreeGenerationLabels = ['Selected person', 'Parents', 'Grandparents', 'Great-grandparents', 'Second great-grandparents'];
+  const pedigreeMaxGenerations = 5;
+
+  // Parent/child connectors are drawn as orthogonal elbows from each child card
+  // to the midpoint between its two parent cards in the next column. The parent
+  // slots are passed in explicitly (rather than inferred from card positions)
+  // because pedigree collapse can leave a column shorter than 2 x children.
+  // Each generation's elbows sit at a different x offset inside the gap so the
+  // vertical runs of neighbouring groups never coincide.
+  function drawPedigreeLinks(flow, columns, rows) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'pedigree-links');
+    svg.setAttribute('aria-hidden', 'true');
+    flow.prepend(svg);
+    const flowBox = flow.getBoundingClientRect();
+    const boxOf = (el) => {
+      const rect = el.getBoundingClientRect();
+      return { left: rect.left - flowBox.left, right: rect.right - flowBox.left, midY: rect.top - flowBox.top + rect.height / 2 };
+    };
+    const cardAt = (generation, slot) => columns[generation]?.querySelectorAll('.pedigree-card')[slot] || null;
+    for (let generation = 0; generation < columns.length - 1; generation += 1) {
+      const childIds = rows[generation] || [];
+      childIds.forEach((childId, slot) => {
+        if (!childId) return;
+        const childCard = cardAt(generation, slot);
+        if (!childCard) return;
+        // The two parent slots for this child are 2*slot and 2*slot+1.
+        const pair = [cardAt(generation + 1, slot * 2), cardAt(generation + 1, slot * 2 + 1)]
+          .filter((card) => card && card.dataset.pedigreePerson);
+        if (!pair.length) return;
+        const child = boxOf(childCard);
+        const boxes = pair.map(boxOf);
+        const startX = child.right;
+        const endX = Math.min(...boxes.map((box) => box.left));
+        const gap = Math.max(0, endX - startX);
+        // Stagger the vertical run per group so neighbouring groups stay apart:
+        // odd groups turn early in the gap, even groups turn late.
+        const evenGroup = slot % 2 === 0;
+        const elbowX = evenGroup ? startX + gap * 0.32 : startX + gap * 0.68;
+        for (const box of boxes) {
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          path.setAttribute('d', `M ${startX} ${child.midY} H ${elbowX} V ${box.midY} H ${box.left}`);
+          svg.append(path);
+        }
+        if (boxes.length > 1) {
+          // Vertical spine joining both parents back to the shared elbow.
+          const spine = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          const ys = boxes.map((box) => box.midY);
+          spine.setAttribute('d', `M ${elbowX} ${Math.min(...ys)} V ${Math.max(...ys)}`);
+          svg.append(spine);
+        }
+      });
+    }
+  }
+
+  function renderPedigreeView() {
+    const chart = document.querySelector('#pedigreeChart');
+    const person = state.people.get(state.selectedId);
+    const summary = document.querySelector('#pedigreeSummary');
+    document.querySelector('#pedigreePersonName').textContent = person?.name || '';
+    chart.replaceChildren();
+    if (!person) {
+      summary.textContent = 'Select a person in the tree to see their pedigree.';
+      return;
+    }
+    const rows = pedigreeGenerations(person.id, pedigreeMaxGenerations);
+    const recorded = rows.flat().filter(Boolean).length - 1;
+    summary.textContent = `${recorded} ancestor${recorded === 1 ? '' : 's'} over ${rows.length - 1} generation${rows.length === 2 ? '' : 's'} · generations three and older show name and dates only`;
+    const flow = document.createElement('div');
+    flow.className = 'pedigree-flow';
+    const columns = [];
+    for (const [generation, ids] of rows.entries()) {
+      const column = document.createElement('div');
+      column.className = `pedigree-column pedigree-column-gen${generation}`;
+      const label = document.createElement('div');
+      label.className = 'pedigree-column-label';
+      label.textContent = pedigreeGenerationLabels[generation] || `Generation ${generation}`;
+      column.append(label);
+      for (const id of ids) column.append(pedigreeCard(id, generation, generation === 0));
+      flow.append(column);
+      columns.push(column);
+    }
+    chart.append(flow);
+    // Layout must settle before measuring card positions for the connectors.
+    // Connectors are drawn at natural size, then the whole flow is scaled to fit
+    // the centre panel, so the SVG geometry stays in one coordinate space.
+    requestAnimationFrame(() => {
+      drawPedigreeLinks(flow, columns, rows);
+      fitPedigreeFlow(flow, chart);
+    });
+  }
+
+  // Shrinks the flow so all generations fit side by side in the middle panel
+  // rather than scrolling horizontally. The user's zoom multiplies that fit.
+  function fitPedigreeFlow(flow, chart) {
+    if (!flow || !chart) return;
+    const userZoom = state.pedigreeZoom || 1;
+    flow.style.zoom = '1';
+    const available = chart.clientWidth - 40;
+    const natural = flow.offsetWidth;
+    if (available <= 0 || natural <= 0) return;
+    const fit = Math.min(1, available / natural);
+    flow.style.zoom = String(fit * userZoom);
+  }
+
+  function setPedigreeMode(on) {
+    if (on && !state.people.size) return;
+    state.pedigreeMode = on;
+    if (on) {
+      if (state.mediaLibraryMode) setMediaLibraryMode(false);
+      if (state.reportsMode) setReportsMode(false);
+      if (state.mapMode) setMapMode(false);
+    }
+    // The pedigree is drawn inside the relationship-map viewport, so the app
+    // shell (topbar, directory, person record) stays visible around it.
+    const view = document.querySelector('#pedigreeView');
+    view.hidden = !on;
+    elements.appShell.hidden = state.reportsMode || state.mediaLibraryMode;
+    elements.reportsView.hidden = !state.reportsMode;
+    elements.mediaLibraryView.hidden = !state.mediaLibraryMode;
+    document.querySelector('.main-panel').classList.toggle('pedigree-mode', on);
+    if (on) {
+      document.querySelector('#viewEyebrow').textContent = 'PEDIGREE';
+      document.querySelector('.graph-footer-right').textContent = 'CLICK AN ANCESTOR TO FOLLOW THAT LINE';
+      // Hand the zoom controls to the pedigree chart at 100%.
+      state.pedigreeZoom = 1;
+      elements.zoomLabel.textContent = '100%';
+      elements.zoomOut.disabled = false;
+      elements.zoomIn.disabled = false;
+      elements.printMapButton.title = 'Print pedigree chart (A4)';
+      elements.printMapButton.setAttribute('aria-label', 'Print pedigree chart');
+    } else {
+      document.querySelector('#viewEyebrow').textContent = 'RELATIONSHIP MAP';
+      document.querySelector('.graph-footer-right').textContent = 'SELECT A PERSON TO RECENTER';
+      elements.printMapButton.title = 'Print relationship map (A4)';
+      elements.printMapButton.setAttribute('aria-label', 'Print relationship map');
+      setZoom(state.zoom);
+    }
+    syncViewSwitch();
+    if (on) renderPedigreeView();
+  }
+
+  // Keeps the top-bar dropdown matching whichever view is currently active.
+  function syncViewSwitch() {
+    const select = document.querySelector('#viewSwitch');
+    if (!select) return;
+    select.value = state.mediaLibraryMode ? 'media' : state.reportsMode ? 'reports' : state.pedigreeMode ? 'pedigree' : state.mapMode ? 'map' : 'tree';
   }
 
   const reportMonthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
@@ -4132,7 +4428,7 @@
       withMedia: people.filter((person) => person.mediaPaths.length).length,
       mediaFiles: new Set(people.flatMap((person) => person.mediaPaths)).size,
       countries: new Map(), unmatchedPlaces: new Set(), births: [], decades: new Map(),
-      occupations: new Map(), withOccupation: 0,
+      occupations: new Map(), withOccupation: 0, surnames: new Map(),
       birthCountry: { withCountry: 0, unrecognised: 0, noPlace: 0 },
       deathCountry: { withCountry: 0, unrecognised: 0, noPlace: 0, excluded: 0 }
     };
@@ -4147,6 +4443,14 @@
     };
     for (const person of people) {
       for (const event of person.events) addPlace(event.place, [person.id]);
+      // Surname tally for the popular-surnames chart. People with no recorded
+      // surname are counted separately so they do not form a fake top entry.
+      const surname = (person.surname || '').trim();
+      if (surname) {
+        const key = surname.toLocaleLowerCase();
+        if (!stats.surnames.has(key)) stats.surnames.set(key, { label: surname, count: 0 });
+        stats.surnames.get(key).count += 1;
+      }
       for (const [type, tally] of [['BIRT', stats.birthCountry], ['DEAT', stats.deathCountry]]) {
         const event = person.events.find((item) => item.type === type);
         // No death event or no death date: possibly living, so left out of the death country count.
@@ -4264,7 +4568,7 @@
     return button;
   }
 
-  function appendReportBars(panel, rows, category) {
+  function appendReportBars(panel, rows, category, options = {}) {
     const bars = reportElement('div', 'report-bars');
     const top = rows[0][1];
     rows.forEach(([label, value, descriptions], index) => {
@@ -4276,7 +4580,20 @@
       const fill = reportElement('div', 'report-bar-fill');
       fill.style.width = `${(value / top) * 100}%`;
       track.append(fill);
-      row.append(reportElement('span', 'report-bar-label', label), track, reportElement('span', 'report-bar-value', value.toLocaleString()));
+      const labelEl = reportElement('span', 'report-bar-label', label);
+      // Country rows show the flag before the name, using the same flag files
+      // as the person cards; inserted first so the name follows it.
+      if (options.flags) {
+        const country = countryFlagForPlace(label);
+        if (country) {
+          const flag = reportElement('img', 'report-bar-flag');
+          flag.src = `flags/4x3/${country.file}`;
+          flag.alt = '';
+          flag.title = country.country;
+          labelEl.prepend(flag);
+        }
+      }
+      row.append(labelEl, track, reportElement('span', 'report-bar-value', value.toLocaleString()));
       bars.append(row);
     });
     panel.append(bars);
@@ -4392,10 +4709,22 @@
     const countryRows = [...stats.countries.entries()].map(([country, ids]) => [country, ids.size])
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
     if (countryRows.length) {
-      appendReportBars(countryPanel, countryRows, 'countries');
+      appendReportBars(countryPanel, countryRows, 'countries', { flags: true });
       countryPanel.append(reportElement('p', 'report-note', `People are counted once per country where any of their life events took place, so totals can exceed the number of people.${stats.unmatchedPlaces.size ? ` ${stats.unmatchedPlaces.size.toLocaleString()} distinct place ${stats.unmatchedPlaces.size === 1 ? 'name does' : 'names do'} not include a recognised country.` : ''}`));
     } else {
       countryPanel.append(reportElement('p', 'report-empty', 'No recognised countries were found in the recorded places.'));
+    }
+
+    const surnamePanel = reportPanel('Most popular family surnames');
+    const surnameRows = [...stats.surnames.values()].map(({ label, count }) => [label, count])
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    if (surnameRows.length) {
+      appendReportBars(surnamePanel, surnameRows, 'surnames');
+      const withSurname = surnameRows.reduce((sum, [, count]) => sum + count, 0);
+      const withoutSurname = stats.total - withSurname;
+      surnamePanel.append(reportElement('p', 'report-note', `Each person is counted once by their recorded surname. ${surnameRows.length.toLocaleString()} distinct ${surnameRows.length === 1 ? 'surname is' : 'surnames are'} recorded${withoutSurname ? `; ${withoutSurname.toLocaleString()} ${withoutSurname === 1 ? 'person has' : 'people have'} no surname and ${withoutSurname === 1 ? 'is' : 'are'} not included` : ''}.`));
+    } else {
+      surnamePanel.append(reportElement('p', 'report-empty', 'No surnames are recorded in this tree.'));
     }
 
     const occupationPanel = reportPanel('Most popular occupations', true);
@@ -4408,7 +4737,7 @@
       occupationPanel.append(reportElement('p', 'report-empty', 'No occupations are recorded in this tree.'));
     }
 
-    charts.append(sexPanel, mediaPanel, birthCountryPanel, deathCountryPanel, earliestPanel, birthsPanel, countryPanel, occupationPanel);
+    charts.append(sexPanel, mediaPanel, birthCountryPanel, deathCountryPanel, earliestPanel, birthsPanel, countryPanel, surnamePanel, occupationPanel);
     elements.reportsContent.replaceChildren(cards, charts);
   }
 
@@ -4419,15 +4748,36 @@
     elements.printFooter.textContent = `Reports · ${state.fileName} · Printed ${printedOn} from Kinship Atlas · Private family research; may include living people.`;
     document.body.classList.add('print-reports');
     setPrintPageOrientation(null);
+    const restoreTheme = forcePrintLightTheme();
     const cleanup = () => {
       printCleanup = null;
       window.removeEventListener('afterprint', cleanup);
       document.body.classList.remove('print-reports');
       elements.printFooter.textContent = '';
+      restoreTheme();
     };
     printCleanup = cleanup;
     window.addEventListener('afterprint', cleanup);
     window.print();
+  }
+
+  // Printed pages are always light: a dark theme wastes ink and photos, charts
+  // and maps are designed for the light palette. The current theme is restored
+  // as soon as the print dialog closes.
+  function forcePrintLightTheme() {
+    const root = document.documentElement;
+    const previous = root.dataset.theme;
+    if (previous !== 'dark') return () => { };
+    root.dataset.theme = 'light';
+    // Any dark-mode stylesheet rules keyed on [data-theme=dark] stop matching;
+    // also drop the dark native-widget hint so form controls print light.
+    const meta = document.querySelector('meta[name="color-scheme"]');
+    const previousMeta = meta?.getAttribute('content');
+    if (meta) meta.setAttribute('content', 'light');
+    return () => {
+      root.dataset.theme = previous;
+      if (meta && previousMeta) meta.setAttribute('content', previousMeta);
+    };
   }
   // ---------------------------------------------------------------------------
   // 11. Editors and dialogs (person, life events, relationships, deletion)
@@ -4913,6 +5263,9 @@
       item.append(thumb, caption);
       return item;
     };
+    // Classification dropdown, matching the Media page so a file uploaded here
+    // is filed the same way as one classified there.
+    const makeClassify = (mediaKey, label) => mediaClassifyControl(mediaKey, label);
     const makeRemoveButton = (dataKey, index, icon, label) => {
       const button = document.createElement('button');
       button.type = 'button';
@@ -4947,6 +5300,8 @@
       item.append(index < pending.existingMedia.length
         ? makeRemoveButton('deleteEventMedia', index, '🗑', `Remove or delete ${name}`)
         : makeRemoveButton('removeLinkedMedia', index - pending.existingMedia.length, '×', `Don't link ${name}`));
+      // Existing files are classified by their media-folder path.
+      item.append(makeClassify(path, name));
       items.push(item);
     });
     added.forEach((entry, index) => {
@@ -4957,6 +5312,8 @@
       badge.className = 'life-event-media-badge';
       badge.textContent = 'New';
       item.append(badge, makeRemoveButton('removeNewMedia', index, '×', `Don't upload ${entry.file.name}`));
+      // New files are classified by filename until they are saved to the folder.
+      item.append(makeClassify(entry.file.name, entry.file.name));
       items.push(item);
     });
     if (!items.length) {
@@ -5149,6 +5506,9 @@
     syncNewSpouseFields();
   }
 
+  // Spouse list for a new family event. People the person is already married to
+  // (an existing spouse family) are listed first so their marriage can be dated
+  // on the family that already links them, instead of creating a second family.
   function populateSpouseOptions(person) {
     const fields = lifeEventFields();
     fields.spouse.replaceChildren();
@@ -5156,17 +5516,54 @@
     create.value = '';
     create.textContent = '＋ New person…';
     fields.spouse.append(create);
-    const others = [...state.people.values()].filter((entry) => entry.id !== person.id)
+    const existingSpouses = existingSpousesOf(person.id);
+    const existingIds = new Set(existingSpouses.map((entry) => entry.id));
+    if (existingSpouses.length) {
+      const group = document.createElement('optgroup');
+      group.label = 'Existing spouse';
+      for (const spouse of existingSpouses) {
+        const option = document.createElement('option');
+        option.value = spouse.id;
+        const birth = yearFrom(spouse.person.events.find((entry) => entry.type === 'BIRT')?.date);
+        const married = yearFrom(spouse.marriage?.date);
+        option.textContent = `${spouse.person.name}${birth ? ` (b. ${birth})` : ''}${married ? ` · married ${married}` : ''}`;
+        group.append(option);
+      }
+      fields.spouse.append(group);
+    }
+    const others = [...state.people.values()]
+      .filter((entry) => entry.id !== person.id && !existingIds.has(entry.id))
       .sort((a, b) => a.name.localeCompare(b.name));
-    for (const other of others) {
-      const option = document.createElement('option');
-      option.value = other.id;
-      const birth = yearFrom(other.events.find((entry) => entry.type === 'BIRT')?.date);
-      option.textContent = `${other.name}${birth ? ` (b. ${birth})` : ''}`;
-      fields.spouse.append(option);
+    if (others.length) {
+      const group = document.createElement('optgroup');
+      group.label = existingSpouses.length ? 'Another person' : 'People in this tree';
+      for (const other of others) {
+        const option = document.createElement('option');
+        option.value = other.id;
+        const birth = yearFrom(other.events.find((entry) => entry.type === 'BIRT')?.date);
+        option.textContent = `${other.name}${birth ? ` (b. ${birth})` : ''}`;
+        group.append(option);
+      }
+      fields.spouse.append(group);
     }
     fields.spouse.disabled = false;
     fields.spouse.value = '';
+  }
+
+  // Spouses already linked to a person through a family record, with that
+  // family so its existing marriage date can be shown next to the name.
+  function existingSpousesOf(personId) {
+    const result = [];
+    const seen = new Set();
+    for (const family of state.families.values()) {
+      const spouseId = family.husbandId === personId ? family.wifeId : family.wifeId === personId ? family.husbandId : '';
+      if (!spouseId || spouseId === personId || seen.has(spouseId)) continue;
+      const spouse = state.people.get(spouseId);
+      if (!spouse) continue;
+      seen.add(spouseId);
+      result.push({ id: spouseId, person: spouse, familyId: family.id, marriage: family.marriage });
+    }
+    return result.sort((a, b) => a.person.name.localeCompare(b.person.name));
   }
 
   function openLifeEventEditor(person, event) {
@@ -5293,10 +5690,20 @@
           const familyRecord = findRecord('FAM', existingFamily.id);
           if (!familyRecord) return showError('The existing family record could not be found.');
           familyRecord.lines = [...familyRecord.lines, ...marriageLines()];
+          // Keep both spouses pointing at the family they now share a marriage in.
+          for (const spouseXref of [selected.id, spouseId]) {
+            const spouseRecord = findRecord('INDI', spouseXref);
+            if (!spouseRecord) continue;
+            const linked = spouseRecord.lines.some((line) => {
+              const entry = parseGedcomField(line);
+              return entry?.level === 1 && entry.tag === 'FAMS' && splitXref(entry.value) === existingFamily.id;
+            });
+            if (!linked) spouseRecord.lines = [...spouseRecord.lines, `1 FAMS @${existingFamily.id}@`];
+          }
           commitNewSources(citations.newSources);
           refreshAfterGedcomMutation(pending.personId);
           fields.dialog.close();
-          showToast(`${config.label} added to the existing family record.${mediaLinkedText(mediaNames)}${sourcesChangedText(citations)}`);
+          showToast(`${config.label} recorded on the family that already links ${selected.name} and ${personName(spouseId)}.${mediaLinkedText(mediaNames)}${sourcesChangedText(citations)}`);
           return true;
         }
       } else {
@@ -5736,6 +6143,299 @@
     const deleteBtn = document.querySelector('#deleteDuplicatesButton');
     deleteBtn.dataset.confirm = '';
     deleteBtn.textContent = 'Delete selected duplicates';
+    dialog.close();
+  }
+
+  // ---------- Duplicate Relationship Finder ----------
+
+  // Scans FAM records for duplicated links within the same family:
+  //   - a child listed more than once (repeated 1 CHIL lines, or a FAMC back
+  //     reference on the child that repeats the same family),
+  //   - the same person recorded as both HUSB and WIFE (self marriage),
+  //   - a person pointing at the same spouse family with repeated 1 FAMS lines,
+  //   - a child pointing at the same parent family with repeated 1 FAMC lines,
+  //   - a child linked to the same parent through two different family records
+  //     (e.g. FAMC @F21@ and FAMC @F701@ that both name the same father).
+  // Each finding is one removable line or redundant back reference; deleting it
+  // never removes the person's only connection, because at least one identical
+  // link always remains.
+  function findDuplicateRelationships() {
+    const findings = [];
+    const personNameOf = (id) => state.people.get(id)?.name || `@${id}@`;
+    for (const record of state.gedcomRecords) {
+      if (record.tag !== 'FAM') continue;
+      const lines = record.lines;
+      const familyLabel = (id) => {
+        const family = state.families.get(record.xref);
+        if (!family) return `family @${record.xref}@`;
+        const spouseIds = [family.husbandId, family.wifeId].filter(Boolean);
+        return spouseIds.map(personNameOf).join(' & ') || `family @${record.xref}@`;
+      };
+      // Repeated 1 CHIL lines within one family record.
+      const childCounts = new Map();
+      for (let index = 1; index < lines.length; index += 1) {
+        const field = parseGedcomField(lines[index]);
+        if (field?.level === 1 && field.tag === 'CHIL') {
+          const childId = splitXref(field.value);
+          if (!childId) continue;
+          childCounts.set(childId, (childCounts.get(childId) || 0) + 1);
+          if (childCounts.get(childId) > 1) {
+            findings.push({
+              kind: 'child', recordXref: record.xref, lineIndex: index, personId: childId, otherId: record.xref,
+              description: `${personNameOf(childId)} is listed as a child of ${familyLabel()} more than once in family @${record.xref}@.`
+            });
+          }
+        }
+      }
+      const family = state.families.get(record.xref);
+      const husbandId = family?.husbandId || '';
+      const wifeId = family?.wifeId || '';
+      // The same person recorded as both spouses of the family.
+      if (husbandId && husbandId === wifeId) {
+        findings.push({
+          kind: 'self-spouse', recordXref: record.xref, lineIndex: -1, personId: husbandId, otherId: husbandId,
+          description: `${personNameOf(husbandId)} is recorded as both the husband and the wife of family @${record.xref}@.`
+        });
+      }
+      // The same spouse appears in two family records with the identical pair.
+      if (husbandId && wifeId && husbandId !== wifeId) {
+        for (const other of state.gedcomRecords) {
+          if (other === record || other.tag !== 'FAM' || other.xref < record.xref) continue;
+          const otherFamily = state.families.get(other.xref);
+          if (!otherFamily) continue;
+          const samePair = (otherFamily.husbandId === husbandId && otherFamily.wifeId === wifeId) ||
+            (otherFamily.husbandId === wifeId && otherFamily.wifeId === husbandId);
+          if (!samePair) continue;
+          const sameChildren = otherFamily.childIds.length === family.childIds.length &&
+            otherFamily.childIds.every((id) => family.childIds.includes(id)) &&
+            family.childIds.every((id) => otherFamily.childIds.includes(id));
+          if (!sameChildren) continue;
+          findings.push({
+            kind: 'family-copy', recordXref: other.xref, lineIndex: -1, personId: husbandId, otherId: wifeId,
+            description: `Families @${record.xref}@ and @${other.xref}@ record the same couple ${personNameOf(husbandId)} & ${personNameOf(wifeId)} with the same children. Deleting one whole family record keeps the other.`,
+            wholeFamily: other.xref
+          });
+        }
+      }
+    }
+    // Repeated 1 FAMS / 1 FAMC back references on person records.
+    for (const record of state.gedcomRecords) {
+      if (record.tag !== 'INDI') continue;
+      const lines = record.lines;
+      const seen = new Map();
+      for (let index = 1; index < lines.length; index += 1) {
+        const field = parseGedcomField(lines[index]);
+        if (field?.level !== 1 || (field.tag !== 'FAMS' && field.tag !== 'FAMC')) continue;
+        const target = splitXref(field.value);
+        if (!target) continue;
+        const key = `${field.tag}|${target}`;
+        seen.set(key, (seen.get(key) || 0) + 1);
+        if (seen.get(key) > 1) {
+          findings.push({
+            kind: field.tag === 'FAMS' ? 'fams' : 'famc', recordXref: record.xref, lineIndex: index,
+            personId: record.xref, otherId: target,
+            description: `${personNameOf(record.xref)} points at family @${target}@ with a repeated ${field.tag} line.`
+          });
+        }
+      }
+    }
+    // A child reachable from the same parent through two different parent
+    // families is a duplicate parent link. Typically one FAM record is a stub
+    // (father only) and the other the full family, as with Ancestry exports
+    // that repeat "1 CHIL @I44@" under both @F21@ and @F701@ via FAMC.
+    for (const record of state.gedcomRecords) {
+      if (record.tag !== 'INDI') continue;
+      const famcLines = [];
+      record.lines.forEach((line, index) => {
+        const field = parseGedcomField(line);
+        if (field?.level === 1 && field.tag === 'FAMC') {
+          const target = splitXref(field.value);
+          if (target) famcLines.push({ index, familyId: target });
+        }
+      });
+      if (famcLines.length < 2) continue;
+      // Group this person's parent families by each parent they name, so a
+      // father-only stub family collapses onto the fuller family that names
+      // the same father (plus a mother).
+      const byParent = new Map();
+      for (const entry of famcLines) {
+        const family = state.families.get(entry.familyId);
+        if (!family) continue;
+        const parentIds = [family.husbandId, family.wifeId].filter((id) => id && id !== record.xref && state.people.has(id));
+        for (const parentId of parentIds) {
+          if (!byParent.has(parentId)) byParent.set(parentId, []);
+          byParent.get(parentId).push({ ...entry, parentIds });
+        }
+      }
+      // A parent named by two or more of this person's families is duplicated.
+      const reported = new Set();
+      for (const [parentId, group] of byParent) {
+        if (group.length < 2) continue;
+        // Keep the family that names the most parents (the full one); the
+        // extra FAMC lines point at duplicate or stub family records.
+        const ranked = [...group].sort((a, b) => b.parentIds.length - a.parentIds.length);
+        const keeper = ranked[0];
+        for (const extra of ranked.slice(1)) {
+          const key = `${extra.index}`;
+          if (reported.has(key)) continue;
+          reported.add(key);
+          findings.push({
+            kind: 'famc-duplicate-parent', recordXref: record.xref, lineIndex: extra.index,
+            personId: record.xref, otherId: extra.familyId, keepFamilyId: keeper.familyId,
+            description: `${personNameOf(record.xref)} is linked to ${personNameOf(parentId)} twice, through families @${keeper.familyId}@ and @${extra.familyId}@. Deleting the extra FAMC keeps the @${keeper.familyId}@ link.`
+          });
+        }
+      }
+    }
+    return findings;
+  }
+
+  // Removes the duplicated link itself (one repeated line, or one whole
+  // redundant copy family together with its back references) while leaving at
+  // least one identical connection intact.
+  function deleteDuplicateRelationship(findings) {
+    // Group single-line deletions per record and apply them highest-index first
+    // so earlier removals cannot shift later line numbers.
+    const lineDeletions = new Map();
+    const wholeFamilies = new Set();
+    for (const finding of findings) {
+      if (finding.kind === 'family-copy') {
+        const record = state.gedcomRecords.find((entry) => entry.tag === 'FAM' && entry.xref === finding.wholeFamily);
+        if (!record) continue;
+        const family = state.families.get(finding.wholeFamily);
+        const keeper = state.families.get(finding.recordXref);
+        // Only delete the copy when it still holds the same couple so the other
+        // family record continues to carry the relationship for everyone.
+        if (!family || !keeper) continue;
+        if (!((family.husbandId === keeper.husbandId && family.wifeId === keeper.wifeId) ||
+          (family.husbandId === keeper.wifeId && family.wifeId === keeper.husbandId))) continue;
+        wholeFamilies.add(finding.wholeFamily);
+        continue;
+      }
+      const record = state.gedcomRecords.find((entry) => entry.xref === finding.recordXref);
+      if (!record || finding.lineIndex < 0 || finding.lineIndex >= record.lines.length) continue;
+      // A child linked to the same parent through two family records: the kept
+      // FAMC line names a different family, so the identical-line rule below
+      // does not apply. Verify the keeper line still exists before removing.
+      if (finding.kind === 'famc-duplicate-parent') {
+        const keeperFamilyId = finding.keepFamilyId;
+        const keeperStillLinked = record.lines.some((line) => {
+          const entry = parseGedcomField(line);
+          return entry?.level === 1 && entry.tag === 'FAMC' && splitXref(entry.value) === keeperFamilyId;
+        });
+        if (!keeperStillLinked) continue;
+        if (!lineDeletions.has(record)) lineDeletions.set(record, new Set());
+        lineDeletions.get(record).add(finding.lineIndex);
+        continue;
+      }
+      const field = parseGedcomField(record.lines[finding.lineIndex]);
+      const expected = finding.kind === 'child' ? 'CHIL' : finding.kind === 'fams' ? 'FAMS' : finding.kind === 'famc' ? 'FAMC' : '';
+      if (!expected || field?.level !== 1 || field.tag !== expected) continue;
+      // Safety: a repeated link may only be removed while an identical level-1
+      // line remains, so the person keeps that exact connection afterwards.
+      const sameLines = record.lines.filter((line) => {
+        const entry = parseGedcomField(line);
+        return entry?.level === 1 && entry.tag === field.tag && entry.value === field.value;
+      }).length;
+      if (sameLines < 2) continue;
+      if (!lineDeletions.has(record)) lineDeletions.set(record, new Set());
+      lineDeletions.get(record).add(finding.lineIndex);
+    }
+    if (!lineDeletions.size && !wholeFamilies.size) return false;
+    for (const [record, indexes] of lineDeletions) {
+      const lines = [...record.lines];
+      for (const index of [...indexes].sort((a, b) => b - a)) lines.splice(index, 1);
+      record.lines = lines;
+    }
+    if (wholeFamilies.size) {
+      // Drop the redundant family records plus every FAMS/FAMC back reference
+      // pointing at them, so no dangling pointers remain. The surviving twin
+      // family keeps the same couple and children connected.
+      for (let index = state.gedcomRecords.length - 1; index >= 0; index -= 1) {
+        const record = state.gedcomRecords[index];
+        if (record.tag === 'FAM' && wholeFamilies.has(record.xref)) {
+          state.gedcomRecords.splice(index, 1);
+          continue;
+        }
+        if (record.tag !== 'INDI') continue;
+        const matches = (field) => field?.level === 1 && (field.tag === 'FAMS' || field.tag === 'FAMC') && wholeFamilies.has(splitXref(field.value));
+        if (record.lines.some((line) => matches(parseGedcomField(line)))) {
+          record.lines = record.lines.filter((line) => !matches(parseGedcomField(line)));
+        }
+      }
+    }
+    reparseGedcomRecords();
+    refreshAfterGedcomMutation(state.primaryPersonId || [...state.people.keys()][0] || '');
+    return true;
+  }
+
+  // Findings from the most recent renderDuplicateRelations() so checkbox
+  // selection can map back to the exact finding objects at delete time.
+  let latestRelationFindings = [];
+
+  function renderDuplicateRelations() {
+    const list = document.querySelector('#duplicateRelationList');
+    const summary = document.querySelector('#duplicateRelationSummary');
+    const findings = findDuplicateRelationships();
+    latestRelationFindings = findings;
+    list.replaceChildren();
+    document.querySelector('#duplicateRelationSelectAll').checked = false;
+    if (!findings.length) {
+      summary.textContent = 'No duplicate relationships found. Every person is connected to each parent and spouse once.';
+      const empty = document.createElement('div');
+      empty.className = 'duplicate-finder-empty';
+      empty.textContent = 'Nothing to fix here.';
+      list.append(empty);
+      updateDuplicateRelationSelected();
+      return;
+    }
+    summary.textContent = `${findings.length} duplicated link${findings.length === 1 ? '' : 's'} found. Deleting one copy always leaves the original connection in place.`;
+    for (const finding of findings) {
+      const row = document.createElement('div');
+      row.className = 'duplicate-relation-row';
+      const label = document.createElement('label');
+      label.className = 'duplicate-relation-choice';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.dataset.relationDelete = String(findings.indexOf(finding));
+      checkbox.title = 'Mark this duplicate link for deletion';
+      label.append(checkbox, document.createTextNode('Delete this duplicate link'));
+      const text = document.createElement('div');
+      text.className = 'duplicate-relation-detail';
+      text.textContent = finding.description;
+      row.append(label, text);
+      list.append(row);
+    }
+    updateDuplicateRelationSelected();
+  }
+
+  function updateDuplicateRelationSelected() {
+    const selected = document.querySelectorAll('#duplicateRelationList input[data-relation-delete]:checked');
+    const count = selected.length;
+    const label = document.querySelector('#duplicateRelationSelected');
+    const deleteButton = document.querySelector('#deleteDuplicateRelationsButton');
+    label.textContent = count ? `${count} duplicate link${count > 1 ? 's' : ''} selected for deletion` : '';
+    deleteButton.disabled = !count;
+    if (!count) {
+      deleteButton.dataset.confirm = '';
+      deleteButton.textContent = 'Delete selected duplicate links';
+      document.querySelector('#duplicateRelationConfirm')?.remove();
+    }
+  }
+
+  function openDuplicateRelationFinder() {
+    if (!state.people.size) return;
+    const dialog = document.querySelector('#duplicateRelationDialog');
+    renderDuplicateRelations();
+    dialog.showModal();
+  }
+
+  function closeDuplicateRelationFinder() {
+    const dialog = document.querySelector('#duplicateRelationDialog');
+    document.querySelector('#duplicateRelationConfirm')?.remove();
+    const deleteBtn = document.querySelector('#deleteDuplicateRelationsButton');
+    deleteBtn.dataset.confirm = '';
+    deleteBtn.textContent = 'Delete selected duplicate links';
     dialog.close();
   }
 
@@ -7362,6 +8062,8 @@
     elements.mapViewButton.disabled = true;
     elements.reportsButton.disabled = true;
     elements.mediaLibraryButton.disabled = true;
+    const viewSwitch = document.querySelector('#viewSwitch');
+    if (viewSwitch) { viewSwitch.disabled = true; viewSwitch.value = 'tree'; }
     document.querySelector('#mediaLibraryMenuButton').disabled = true;
     document.querySelector('#birthCountryMenuButton').disabled = true;
     document.querySelector('#duplicateFinderMenuButton').disabled = true;
@@ -7413,6 +8115,35 @@
     option.textContent = label;
     mediaTypeFilter.append(option);
   }
+  document.querySelector('#viewSwitch').addEventListener('change', (event) => {
+    const mode = event.target.value;
+    if (mode === 'tree') {
+      if (state.pedigreeMode) setPedigreeMode(false);
+      if (state.mediaLibraryMode) setMediaLibraryMode(false);
+      if (state.reportsMode) setReportsMode(false);
+      if (state.mapMode) setMapMode(false);
+    } else if (mode === 'map') {
+      if (state.pedigreeMode) setPedigreeMode(false);
+      if (state.mediaLibraryMode) setMediaLibraryMode(false);
+      if (state.reportsMode) setReportsMode(false);
+      setMapMode(true);
+    } else if (mode === 'pedigree') {
+      if (state.mapMode) setMapMode(false);
+      if (state.mediaLibraryMode) setMediaLibraryMode(false);
+      if (state.reportsMode) setReportsMode(false);
+      setPedigreeMode(true);
+    } else if (mode === 'reports') {
+      if (state.mapMode) setMapMode(false);
+      if (state.pedigreeMode) setPedigreeMode(false);
+      if (state.mediaLibraryMode) setMediaLibraryMode(false);
+      setReportsMode(true);
+    } else if (mode === 'media') {
+      if (state.mapMode) setMapMode(false);
+      if (state.pedigreeMode) setPedigreeMode(false);
+      if (state.reportsMode) setReportsMode(false);
+      setMediaLibraryMode(true);
+    }
+  });
   elements.mapViewButton.addEventListener('click', () => {
     if (state.mediaLibraryMode) setMediaLibraryMode(false);
     if (state.reportsMode) setReportsMode(false);
@@ -7519,6 +8250,75 @@
     showToast(`Deleted ${idsToDelete.size} duplicate person${idsToDelete.size > 1 ? 's' : ''}.`);
   });
   document.querySelector('#closeDuplicateFinder').addEventListener('click', closeDuplicateFinder);
+  // ---------- Colour theme (light / dark) ----------
+  // The theme is a single data-theme attribute on <html>; styles.css holds the
+  // dark palette, so every component follows it. The choice is remembered in
+  // localStorage and re-applied on every startup.
+  const themeStorageKey = 'kinship-atlas:theme';
+  const themeColorMeta = () => document.querySelector('meta[name="color-scheme"]');
+
+  function applyTheme(theme, { remember = true } = {}) {
+    const dark = theme === 'dark';
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    // Tell the browser so native controls, scrollbars and form widgets match.
+    const meta = themeColorMeta();
+    if (meta) meta.setAttribute('content', dark ? 'dark light' : 'light dark');
+    document.querySelector('#darkModeButton').hidden = dark;
+    document.querySelector('#lightModeButton').hidden = !dark;
+    if (remember) {
+      try { localStorage.setItem(themeStorageKey, dark ? 'dark' : 'light'); } catch { }
+    }
+    // Redraw the pedigree so its connector colours and card surfaces follow the theme.
+    if (state.pedigreeMode) renderPedigreeView();
+  }
+
+  function preferredTheme() {
+    try {
+      const saved = localStorage.getItem(themeStorageKey);
+      if (saved === 'dark' || saved === 'light') return saved;
+    } catch { }
+    return window.matchMedia?.('(prefers-color-scheme: dark)')?.matches ? 'dark' : 'light';
+  }
+
+  document.querySelector('#darkModeButton').addEventListener('click', () => applyTheme('dark'));
+  document.querySelector('#lightModeButton').addEventListener('click', () => applyTheme('light'));
+
+  document.querySelector('#duplicateRelationMenuButton').addEventListener('click', openDuplicateRelationFinder);
+  document.querySelector('#duplicateRelationSelectAll').addEventListener('change', (event) => {
+    const checked = event.target.checked;
+    for (const box of document.querySelectorAll('#duplicateRelationList input[data-relation-delete]')) box.checked = checked;
+    updateDuplicateRelationSelected();
+  });
+  document.querySelector('#duplicateRelationList').addEventListener('change', () => {
+    const boxes = [...document.querySelectorAll('#duplicateRelationList input[data-relation-delete]')];
+    document.querySelector('#duplicateRelationSelectAll').checked = boxes.length > 0 && boxes.every((box) => box.checked);
+    updateDuplicateRelationSelected();
+  });
+  document.querySelector('#deleteDuplicateRelationsButton').addEventListener('click', () => {
+    const deleteButton = document.querySelector('#deleteDuplicateRelationsButton');
+    const dialog = document.querySelector('#duplicateRelationDialog');
+    const chosen = [...document.querySelectorAll('#duplicateRelationList input[data-relation-delete]:checked')]
+      .map((box) => latestRelationFindings[Number(box.dataset.relationDelete)]).filter(Boolean);
+    if (!chosen.length) return;
+    const confirmP = document.createElement('p');
+    confirmP.id = 'duplicateRelationConfirm';
+    confirmP.className = 'duplicate-delete-confirm';
+    confirmP.append(document.createTextNode(
+      `Delete ${chosen.length} duplicate link${chosen.length > 1 ? 's' : ''}? At least one identical connection stays in place for every person involved, and sources, media and life events are untouched. This cannot be undone.`
+    ));
+    dialog.querySelector('.dialog-panel').prepend(confirmP);
+    if (!deleteButton.dataset.confirm) {
+      deleteButton.dataset.confirm = 'pending';
+      deleteButton.textContent = `Confirm delete ${chosen.length} duplicate link${chosen.length > 1 ? 's' : ''}`;
+      return;
+    }
+    deleteButton.dataset.confirm = '';
+    confirmP.remove();
+    const removed = deleteDuplicateRelationship(chosen);
+    closeDuplicateRelationFinder();
+    showToast(removed ? `Deleted ${chosen.length} duplicate link${chosen.length > 1 ? 's' : ''}.` : 'No duplicate links could be removed; the tree may already be fixed.');
+  });
+  document.querySelector('#closeDuplicateRelations').addEventListener('click', closeDuplicateRelationFinder);
   document.querySelector('#geonamesLookup').addEventListener('click', runGeonamesLookup);
   document.querySelector('#geonamesUsername').addEventListener('input', syncGeonamesControls);
   document.querySelector('#geonamesConsent').addEventListener('change', syncGeonamesControls);
@@ -8013,7 +8813,7 @@
   });
   elements.zoomIn.addEventListener('click', () => setZoom(state.zoom + 0.1));
   elements.zoomOut.addEventListener('click', () => setZoom(state.zoom - 0.1));
-  elements.printMapButton.addEventListener('click', () => printSection('map'));
+  elements.printMapButton.addEventListener('click', () => printSection(state.pedigreeMode ? 'pedigree' : 'map'));
 
   // A4 landscape with 12 mm margins leaves about 273 x 186 mm, i.e. roughly 1030 x 700 CSS px.
   const printPageWidth = 1030;
@@ -8106,23 +8906,85 @@
     if (!person || (kind === 'map' && state.mapMode)) return;
     if (printCleanup) printCleanup();
     const printedOn = new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
-    elements.printFooter.textContent = `${kind === 'map' ? 'Relationship map' : 'Person record'} · ${person.name} · ${state.fileName} · Printed ${printedOn} from Kinship Atlas · Private family research; may include living people.`;
-    document.body.classList.add(kind === 'map' ? 'print-map' : 'print-person');
-    setPrintPageOrientation(kind === 'map' ? 'landscape' : null);
-    const restoreMap = kind === 'map' ? preparePrintMap() : null;
+    const heading = kind === 'map' ? 'Relationship map' : kind === 'pedigree' ? 'Pedigree chart' : 'Person record';
+    elements.printFooter.textContent = `${heading} · ${person.name} · ${state.fileName} · Printed ${printedOn} from Kinship Atlas · Private family research; may include living people.`;
+    document.body.classList.add(kind === 'map' ? 'print-map' : kind === 'pedigree' ? 'print-pedigree' : 'print-person');
+    setPrintPageOrientation(kind === 'person' ? null : 'landscape');
+    // Print the light palette even when dark mode is on. Applied before the
+    // print layout is measured so the scaling maths sees light-mode sizes.
+    const restoreTheme = forcePrintLightTheme();
+    const restore = kind === 'map' ? preparePrintMap() : kind === 'pedigree' ? preparePrintPedigree() : null;
     printCleanup = () => {
       printCleanup = null;
       window.removeEventListener('afterprint', printCleanup);
-      document.body.classList.remove('print-map', 'print-person');
+      document.body.classList.remove('print-map', 'print-person', 'print-pedigree');
       setPrintPageOrientation(null);
       elements.printFooter.textContent = '';
-      if (restoreMap) restoreMap();
+      if (restore) restore();
+      restoreTheme();
     };
     window.addEventListener('afterprint', printCleanup);
     window.print();
   }
 
+  // Fits the whole pedigree chart onto one landscape page: the on-screen fit
+  // scaling is dropped and the flow is scaled to the printable width instead.
+  function preparePrintPedigree() {
+    const flow = document.querySelector('.pedigree-flow');
+    const chart = document.querySelector('#pedigreeChart');
+    if (!flow || !chart) return null;
+    const view = document.querySelector('#pedigreeView');
+    const heading = document.querySelector('.pedigree-heading');
+    const mainHeading = document.querySelector('.main-heading');
+    const previous = {
+      flowZoom: flow.style.zoom,
+      chartOverflow: chart.style.overflow,
+      chartHeight: chart.style.height,
+      viewOverflow: view ? view.style.overflow : '',
+      viewHeight: view ? view.style.height : '',
+      headingDisplay: heading ? heading.style.display : '',
+      mainHeadingDisplay: mainHeading ? mainHeading.style.display : ''
+    };
+    // The on-screen headings duplicate the printed page title, so drop them and
+    // give the chart the whole sheet. That is what keeps it to a single page.
+    if (heading) heading.style.display = 'none';
+    if (mainHeading) mainHeading.style.display = 'none';
+    // Measure at natural size, then scale to fit both the printable width and
+    // the height left on the page so the chart never spills onto a second sheet.
+    flow.style.zoom = '1';
+    const naturalWidth = flow.offsetWidth;
+    const naturalHeight = flow.offsetHeight;
+    // A4 landscape at 96dpi is ~1122 x 793 px; margins and the printed footer
+    // leave less than that, so size against the real usable area.
+    const usableWidth = 1030;
+    const usableHeight = 600;
+    const widthScale = naturalWidth > 0 ? usableWidth / naturalWidth : 1;
+    const heightScale = naturalHeight > 0 ? usableHeight / naturalHeight : 1;
+    const scale = Math.min(1, widthScale, heightScale);
+    flow.style.zoom = String(scale);
+    if (view) { view.style.overflow = 'visible'; view.style.height = 'auto'; }
+    chart.style.overflow = 'visible';
+    chart.style.height = 'auto';
+    return () => {
+      flow.style.zoom = previous.flowZoom;
+      chart.style.overflow = previous.chartOverflow;
+      chart.style.height = previous.chartHeight;
+      if (view) { view.style.overflow = previous.viewOverflow; view.style.height = previous.viewHeight; }
+      if (heading) heading.style.display = previous.headingDisplay;
+      if (mainHeading) mainHeading.style.display = previous.mainHeadingDisplay;
+    };
+  }
+
   function setZoom(value) {
+    // In pedigree view the same buttons scale the pedigree chart instead.
+    if (state.pedigreeMode) {
+      state.pedigreeZoom = Math.max(0.4, Math.min(1.6, Math.round(value * 10) / 10));
+      elements.zoomLabel.textContent = `${Math.round(state.pedigreeZoom * 100)}%`;
+      elements.zoomOut.disabled = state.pedigreeZoom <= 0.4;
+      elements.zoomIn.disabled = state.pedigreeZoom >= 1.6;
+      fitPedigreeFlow(document.querySelector('.pedigree-flow'), document.querySelector('#pedigreeChart'));
+      return;
+    }
     state.zoom = Math.max(0.65, Math.min(1.35, Math.round(value * 10) / 10));
     elements.canvas.style.zoom = String(state.zoom);
     elements.zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
@@ -8137,7 +8999,11 @@
     if (svg) drawConnectors(svg, new Set([...elements.canvas.querySelectorAll('.person-card')].map((card) => `${card.dataset.generation}|${card.dataset.personId}`)), state.selectedId, partnersOf(state.selectedId).map((item) => item.id));
   }
 
-  new ResizeObserver(() => requestAnimationFrame(redrawGraphConnectors)).observe(elements.viewport);
+  new ResizeObserver(() => requestAnimationFrame(() => {
+    redrawGraphConnectors();
+    // Keep the pedigree fitted to the centre panel as the window is resized.
+    if (state.pedigreeMode) renderPedigreeView();
+  })).observe(elements.viewport);
   document.addEventListener('keydown', (event) => {
     if (event.key === '/' && !event.target.matches('input, textarea')) {
       event.preventDefault();
@@ -8822,6 +9688,9 @@
   window.addEventListener('pagehide', () => { persistActiveSession(); });
   // Keeps Kinship Atlas.exe's local server alive while this tab is open.
   const mediaHeartbeat = window.setInterval(() => { if (state.mediaHelper) fetch('/api/media-info', { cache: 'no-store' }).catch(() => {}); }, 30000);
+  // Apply the remembered colour theme before the first paint work below.
+  applyTheme(preferredTheme(), { remember: false });
+
   // Syncing once at startup captures selections made before this feature (or while the helper was down).
   probeMediaHelper().then(loadHelperSelections).then(restoreActiveSession).then(applyDefaultOnStartup).then(syncSelectionsToHelper).then(loadHelperMedia);
 })();

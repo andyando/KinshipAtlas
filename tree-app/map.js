@@ -149,6 +149,18 @@
     let svg; let landGroup; let markerGroup; let popup; let statusChip; let popupOwner = null;
     let width = 0; let height = 0; let k = 1; let tx = 0; let ty = 0; let minK = 1;
     let pins = [];
+    // Timeline playback: every placed event keeps its year so the scrubber can
+    // reveal locations decade by decade. null means "all years" (no filtering).
+    let timelineYears = [];
+    let timelineYear = null;
+    let timelinePlaying = false;
+    let timelineTimer = 0;
+    let timelineControls = null;
+    let timelineScrubber = null;
+    let timelineLabel = null;
+    let timelineReset = null;
+    // Play, Forward (2x) and Fast forward (4x), keyed by speed mode.
+    const playButtons = {};
     let bloodRelativeIds = new Set();
     let bloodlines;
     let relativeLegend;
@@ -248,9 +260,71 @@
       const credit = document.createElement('div');
       credit.className = 'map-credit';
       credit.textContent = 'Offline map · Outlines: Natural Earth · Places: GeoNames (CC BY 4.0)';
+
+      // Timeline playback: play/pause plus a year scrubber.
+      timelineControls = document.createElement('div');
+      timelineControls.className = 'map-timeline';
+      timelineControls.hidden = true;
+      // Three speed buttons: play (1x), forward (2x) and fast forward (4x).
+      // Each keeps its glyph and title in data attributes so a single pause
+      // glyph can be shown on whichever one is running.
+      for (const [mode, glyph, title] of [
+        ['play', '▶', 'Play the timeline (1× speed)'],
+        ['forward', '⏩', 'Play at twice the speed (2×)'],
+        ['fastForward', '🔜', 'Play at four times the speed (4×)']
+      ]) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `icon-button map-timeline-play map-timeline-${mode}`;
+        button.dataset.glyph = glyph;
+        button.dataset.title = title;
+        button.textContent = glyph;
+        button.title = title;
+        button.setAttribute('aria-label', title);
+        button.setAttribute('aria-pressed', 'false');
+        button.addEventListener('click', () => toggleTimeline(mode));
+        playButtons[mode] = button;
+      }
+
+      timelineScrubber = document.createElement('input');
+      timelineScrubber.type = 'range';
+      timelineScrubber.className = 'map-timeline-range';
+      timelineScrubber.setAttribute('aria-label', 'Timeline year');
+      timelineScrubber.addEventListener('input', () => {
+        stopTimeline();
+        timelineYear = Number(timelineScrubber.value);
+        timelineReset.classList.remove('is-active');
+        timelineReset.setAttribute('aria-pressed', 'false');
+        updateTimelineLabel();
+        drawMarkers();
+      });
+      timelineLabel = document.createElement('span');
+      timelineLabel.className = 'map-timeline-label';
+      timelineReset = document.createElement('button');
+      timelineReset.type = 'button';
+      timelineReset.className = 'map-timeline-reset';
+      timelineReset.textContent = 'All years';
+      timelineReset.title = 'Show every place again';
+      timelineReset.addEventListener('click', () => {
+        stopTimeline();
+        timelineYear = null;
+        // "All years" parks the handle at the last year so the slider itself
+        // is not claiming an active filter.
+        if (timelineScrubber && timelineYears.length) timelineScrubber.value = String(timelineYears[1]);
+        timelineReset.classList.add('is-active');
+        timelineReset.setAttribute('aria-pressed', 'true');
+        updateTimelineLabel();
+        drawMarkers();
+        rebuildStatusCount();
+      });
+      timelineControls.append(
+        playButtons.play, playButtons.forward, playButtons.fastForward,
+        timelineScrubber, timelineLabel, timelineReset
+      );
+
       popup = document.createElement('div');
       popup.className = 'map-popup'; popup.hidden = true;
-      container.append(controls, statusChip, credit, popup);
+      container.append(controls, statusChip, timelineControls, credit, popup);
 
       if (!geocode) {
         const warning = document.createElement('div');
@@ -348,17 +422,24 @@
       fitBounds(Math.min(...pins.map((p) => p.x)), Math.min(...pins.map((p) => p.y)), Math.max(...pins.map((p) => p.x)), Math.max(...pins.map((p) => p.y)));
     }
 
+    // Each person appears once, at their birth place, so the timeline reveals
+    // them in the year they were born. Falling back to the earliest dated event
+    // keeps people with no birth place on the map without jumping to their death.
     function latestPlace(person) {
       const rank = (event) => {
         const year = yearOf(event.date);
-        const phase = event.type === 'BURI' ? 3 : event.type === 'DEAT' ? 2 : event.type === 'BIRT' ? 0 : 1;
-        const score = year !== null ? year : phase >= 2 ? 1e6 : phase === 0 ? -1e6 : -5e5;
-        return [score, phase, event.ordinal ?? 0];
+        const phase = event.type === 'BIRT' ? 0 : event.type === 'BURI' ? 3 : event.type === 'DEAT' ? 2 : 1;
+        // Birth always wins; otherwise the earliest known year; then undated
+        // events, with burial/death pushed last so they are the final resort.
+        const score = phase === 0 ? -2e6 : year !== null ? year : phase >= 2 ? 1e6 : -5e5;
+        const order = phase === 0 ? -1 : phase;
+        return [score, order, event.ordinal ?? 0];
       };
       const events = (options.placeEventsFor(person) || [])
         .filter((event) => (event.place && event.place.trim()) || (Number.isFinite(event.lat) && Number.isFinite(event.lon)))
         .map((event) => ({ event, key: rank(event) }))
-        .sort((a, b) => b.key[0] - a.key[0] || b.key[1] - a.key[1] || b.key[2] - a.key[2]);
+        // Ascending: birth first, then earliest year, then the rest.
+        .sort((a, b) => a.key[0] - b.key[0] || a.key[1] - b.key[1] || a.key[2] - b.key[2]);
       for (const { event } of events) {
         if (Number.isFinite(event.lat) && Number.isFinite(event.lon)) {
           return { event, lat: event.lat, lon: event.lon, precision: 'exact', label: event.place || 'Recorded coordinates' };
@@ -400,10 +481,136 @@
         }
         const found = latestPlace(person);
         if (!found) { unplaced.push(person); continue; }
-        pins.push({ person, x: projectX(found.lon), y: projectY(found.lat), found });
+        const year = yearOf(found.event?.date);
+        pins.push({ person, x: projectX(found.lon), y: projectY(found.lat), found, year });
       }
-      statusChip.textContent = `${pins.length} placed${unplaced.length ? ` · ${unplaced.length} not placed ▸` : ''}`;
+      refreshTimeline();
+      rebuildStatusCount();
+    }
+
+    // Pins that pass the year filter: someone appears once the chosen year has
+    // reached their birth year. People with no dated place are held back until
+    // the final year, so they never inflate the opening frame.
+    function visiblePins() {
+      if (timelineYear === null) return pins;
+      const lastYear = timelineYears.length ? timelineYears[1] : null;
+      return pins.filter((pin) => {
+        if (pin.year === null) return lastYear === null || timelineYear >= lastYear;
+        return pin.year <= timelineYear;
+      });
+    }
+
+    // The chip reports how many people are on the board right now, which is the
+    // time-filtered count, followed by the total that could not be placed.
+    function rebuildStatusCount() {
+      const shown = visiblePins().length;
+      const hidden = pins.length - shown;
+      const parts = [`${shown} placed`];
+      if (hidden > 0) parts.push(`${hidden} waiting`);
+      if (unplaced.length) parts.push(`${unplaced.length} not placed ▸`);
+      statusChip.textContent = parts.join(' · ');
       statusChip.classList.toggle('map-status-action', unplaced.length > 0);
+    }
+
+    // Rebuild the year range whenever the underlying pins change.
+    function refreshTimeline() {
+      const years = pins.map((pin) => pin.year).filter((year) => year !== null);
+      timelineYears = years.length ? [Math.min(...years), Math.max(...years)] : [];
+      if (timelineYear !== null && timelineYears.length) {
+        timelineYear = Math.max(timelineYears[0], Math.min(timelineYears[1], timelineYear));
+      }
+      if (timelineControls) {
+        const hasRange = timelineYears.length && timelineYears[1] > timelineYears[0];
+        timelineControls.hidden = !hasRange;
+        if (hasRange) {
+          timelineScrubber.min = String(timelineYears[0]);
+          timelineScrubber.max = String(timelineYears[1]);
+          timelineScrubber.step = '1';
+          // Opening the map shows every place: the slider parks at its last
+          // year (so its own position is honest) while the filter stays off.
+          if (timelineYear !== null) {
+            timelineYear = Math.max(timelineYears[0], Math.min(timelineYears[1], timelineYear));
+            timelineScrubber.value = String(timelineYear);
+          } else {
+            timelineScrubber.value = String(timelineYears[1]);
+          }
+        }
+        timelineReset.setAttribute('aria-pressed', String(timelineYear === null));
+        timelineReset.classList.toggle('is-active', timelineYear === null);
+        updateTimelineLabel();
+      }
+    }
+
+    function updateTimelineLabel() {
+      if (!timelineLabel) return;
+      if (!timelineYears.length) { timelineLabel.textContent = 'No dated places'; return; }
+      const shown = visiblePins().length;
+      const span = `${timelineYears[0]}–${timelineYears[1]}`;
+      timelineLabel.textContent = timelineYear === null
+        ? `${shown} of ${pins.length} · ${span}`
+        : `${timelineYear} · ${shown} of ${pins.length}`;
+      // The status chip counts what is actually on the board, so it must follow
+      // the scrubber too rather than only updating on a full rebuild.
+      if (statusChip) rebuildStatusCount();
+    }
+
+    // Playback speeds, in years advanced per tick. Normal is 1 year, forward
+    // doubles it and fast-forward runs at four times the normal rate.
+    const timelineSpeeds = { play: 1, forward: 2, fastForward: 4 };
+    let timelineSpeed = timelineSpeeds.play;
+
+    function stopTimeline() {
+      if (timelineTimer) clearInterval(timelineTimer);
+      timelineTimer = 0;
+      timelinePlaying = false;
+      setPlayButtons('play');
+    }
+
+    // One button shows the pause glyph while playing; the rest stay as icons.
+    function setPlayButtons(active) {
+      for (const [mode, button] of Object.entries(playButtons)) {
+        const isActive = timelinePlaying && mode === active;
+        button.textContent = isActive ? '⏸' : button.dataset.glyph;
+        button.title = isActive
+          ? 'Pause the timeline'
+          : button.dataset.title;
+        button.setAttribute('aria-label', button.title);
+        button.classList.toggle('is-playing', isActive);
+      }
+    }
+
+    function startTimeline(speed) {
+      if (!timelineYears.length) return;
+      if (timelineTimer) clearInterval(timelineTimer);
+      timelineSpeed = speed;
+      // Restart from the first year when playback begins at the very end.
+      if (timelineYear === null || timelineYear >= timelineYears[1]) timelineYear = timelineYears[0] - 1;
+      timelinePlaying = true;
+      const active = Object.keys(timelineSpeeds).find((key) => timelineSpeeds[key] === speed) || 'play';
+      setPlayButtons(active);
+      timelineTimer = setInterval(stepTimeline, 220);
+      stepTimeline();
+    }
+
+    // Steps forward by the current speed; the interval is fixed so a faster
+    // speed advances more years per tick rather than firing more often.
+    function stepTimeline() {
+      if (!timelineYears.length) { stopTimeline(); return; }
+      const base = timelineYear === null ? timelineYears[0] - 1 : timelineYear;
+      const next = Math.min(timelineYears[1], base + timelineSpeed);
+      timelineYear = next;
+      if (timelineScrubber) timelineScrubber.value = String(next);
+      updateTimelineLabel();
+      drawMarkers();
+      if (next >= timelineYears[1]) stopTimeline();
+    }
+
+    // Play/Forward/Fast-forward all start playback; pressing the active speed
+    // again pauses, and pressing a different speed switches rate live.
+    function toggleTimeline(mode) {
+      const speed = timelineSpeeds[mode];
+      if (timelinePlaying && timelineSpeed === speed) { stopTimeline(); return; }
+      startTimeline(speed);
     }
 
     function bloodlineCategory(id) {
@@ -418,7 +625,7 @@
       markerGroup.replaceChildren();
       const selectedId = options.getSelectedId();
       const cells = new Map();
-      for (const pin of pins) {
+      for (const pin of visiblePins()) {
         const sx = pin.x * k + tx; const sy = pin.y * k + ty;
         if (sx < -20 || sy < -20 || sx > width + 20 || sy > height + 20) continue;
         const key = `${Math.floor(sx / CLUSTER_PX)}|${Math.floor(sy / CLUSTER_PX)}`;
@@ -558,9 +765,10 @@
         drawMarkers();
         return { placed: pins.length, unplaced: unplaced.length };
       },
-      hide() { visible = false; if (built) { hidePopup(); } container.hidden = true; },
+      hide() { visible = false; stopTimeline(); if (built) { hidePopup(); } container.hidden = true; },
       refresh() {
         if (!visible) return null;
+        stopTimeline();
         const previousCategory = bloodRelativeIds.size ? bloodlineCategory(popupOwner) : '';
         rebuildPins();
         const category = bloodRelativeIds.size ? bloodlineCategory(popupOwner) : '';
