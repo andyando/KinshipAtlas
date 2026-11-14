@@ -7,6 +7,16 @@
 window.KINSHIP_VERSION = {
   releases: [
     {
+      version: '1.16.0',
+      date: '2026-11-14',
+      changes: [
+        'Replaced Search WikiTree with Search Public Records: one dialog that queries Open Archives, WikiTree, Europeana, Digital Public Library of America, Internet Archive and Find A Grave.',
+        'Added Search All Sources, which runs every provider in parallel and streams results as each finishes.',
+        'Per-service status shows Ready, Searching, Results found, No matching results found, or an error message; links open each original record in a new tab.',
+        'Updated the Help, About privacy notes and README for the new services.'
+      ]
+    },
+    {
       version: '1.15.0',
       date: '2026-11-13',
       changes: [

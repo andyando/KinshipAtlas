@@ -126,9 +126,19 @@ The helper's selections file is read directly into memory rather than copied who
 
 ### External services
 
-For a person with recorded death details, **Search WikiTree** sends available first name, last name, birth year, death year, and birth and death countries to WikiTree. Review those details and check the consent box first. When Kinship Atlas is opened as a local file, it submits the search to WikiTree in a new tab to avoid browser restrictions on API requests from local files; a fallback link remains available if the new tab is blocked. When the WikiTree API is available, matches appear in the dialog with links to profiles. This is an external disclosure, so review the details before searching.
+For a person with recorded death details, **Search Public Records** searches external collections for that person. Search one service or all of them at once from the same dialog:
 
-Country flags and map data are stored locally; the app makes no remote requests to render them. Apart from the opt-in WikiTree and GeoNames lookups, nothing leaves your device.
+- **Open Archives** (`api.openarch.nl`) — Dutch civil registration and church books; record URLs come from the API when available.
+- **WikiTree** (`api.wikitree.com`) — every request sends `appId=KinshipAtlas`; responses are fetched via JSONP because the API does not allow cross-site fetches.
+- **Europeana** (`api.europeana.eu`) — the API key (`wskey`) is held server-side by the Kinship Atlas backend (`launcher/KinshipAtlas.cs`) and injected into relayed requests; the frontend never contains it.
+- **Digital Public Library of America** (`api.dp.la/v2/items`) — the API key is held server-side in the Kinship Atlas backend; clickable links use the `isShownAt` field, not media URLs.
+- Requests are attempted directly from the browser first; if a provider blocks browser access via CORS the same request is relayed through the Kinship Atlas backend at `/api/public-records/{provider}`. No public proxy services (AllOrigins, cors-anywhere, corsproxy.io, etc.) are used.
+- **Internet Archive** (`archive.org/advancedsearch.php`) — no API key; record links use `archive.org/details/{identifier}`.
+- **Find A Grave** — no public API, so this service generates a search page URL (`findagrave.com/memorial/search?firstname=…&lastname=…`) for you to open; Kinship Atlas never scrapes results.
+
+Provider endpoints and keys are declared once in `tree-app/public-records.js` (`PROVIDER_CONFIG`). Each provider is a self-contained module with a single search entry point that returns a normalised list of `{ service, title, description, url, sourceId }` records, so adding a service means adding one object and one fetch function. Searches run in parallel with a 15-second timeout per request; failures are reported per service and never block another provider. Results stream into the dialog as each provider finishes. This is an external disclosure: your search is sent from your browser directly to those services.
+
+Country flags and map data are stored locally; the app makes no remote requests to render them. Apart from the Search Public Records lookups and the optional GeoNames lookup, nothing leaves your device.
 
 ## Development
 

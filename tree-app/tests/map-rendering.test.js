@@ -12,6 +12,8 @@ class Element {
     this.attributes = {};
     this.listeners = {};
     this.style = {};
+    // Timeline buttons keep their glyph/title in data attributes.
+    this.dataset = {};
     this.className = '';
     this.textContent = '';
     this.classList = {

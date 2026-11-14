@@ -136,11 +136,6 @@
     relativeParentRole: document.querySelector('#relativeParentRole'),
     relativeParentRoleField: document.querySelector('#relativeParentRole').closest('.new-gedcom-field'),
     researchDialog: document.querySelector('#researchDialog'),
-    wikiTreeQueryPreview: document.querySelector('#wikiTreeQueryPreview'),
-    wikiTreeSearchStatus: document.querySelector('#wikiTreeSearchStatus'),
-    wikiTreeResults: document.querySelector('#wikiTreeResults'),
-    researchConsent: document.querySelector('#researchConsent'),
-    confirmWikiTreeSearch: document.querySelector('#confirmWikiTreeSearch'),
     newGedcomDialog: document.querySelector('#newGedcomDialog'),
     createGedcomForm: document.querySelector('#createGedcomForm'),
     clear: document.querySelector('#clearButton'), mapViewButton: document.querySelector('#mapViewButton'),
@@ -849,113 +844,147 @@
   function isRecordedDeceased(person) {
     return Boolean(person?.events.some((event) => event.type === 'DEAT' && (event.date || event.place || event.value)));
   }
-
   // ---------------------------------------------------------------------------
-  // 7. WikiTree research integration
+  // 7. Search Public Records (multi-provider external lookups)
   // ---------------------------------------------------------------------------
 
-  function buildWikiTreeQuery(person) {
-    const birth = person.events.find((event) => event.type === 'BIRT');
-    const death = person.events.find((event) => event.type === 'DEAT');
-    const surname = (person.surname || '').trim();
-    const fullName = (person.name || '').trim();
-    const firstName = fullName.toLocaleLowerCase().endsWith(` ${surname.toLocaleLowerCase()}`)
-      ? fullName.slice(0, -(surname.length + 1)).trim()
-      : fullName;
-    return {
-      firstName: firstName.slice(0, 120),
-      lastName: surname.slice(0, 120),
-      birthYear: yearFrom(birth?.date),
-      deathYear: yearFrom(death?.date),
-      birthCountry: countryFlagForPlace(birth?.place)?.country || ''
-    };
+  // Providers themselves live in public-records.js; this layer owns only the UI.
+  function publicRecordPersonDates(person) {
+    const birth = yearFrom(person.events.find((event) => event.type === 'BIRT')?.date);
+    const death = yearFrom(person.events.find((event) => event.type === 'DEAT')?.date);
+    return birth || death ? `${birth || '?'}\u2013${death || '?'}` : '';
   }
 
-  function renderWikiTreeQueryPreview(query) {
-    const fields = [
-      ['First name', query.firstName],
-      ['Last name', query.lastName],
-      ['Year born', query.birthYear],
-      ['Year died', query.deathYear],
-      ['Country born', query.birthCountry]
-    ];
-    elements.wikiTreeQueryPreview.replaceChildren();
-    for (const [label, value] of fields) {
-      const term = document.createElement('dt');
-      term.textContent = label;
-      const description = document.createElement('dd');
-      description.textContent = value || 'Not recorded';
-      if (!value) description.classList.add('is-missing');
-      elements.wikiTreeQueryPreview.append(term, description);
+  function setProviderStatus(card, status, message = '') {
+    const statusEl = card.querySelector('.public-record-status');
+    const list = card.querySelector('.public-record-results');
+    statusEl.classList.remove('is-ready', 'is-searching', 'is-results', 'is-empty', 'is-error');
+    statusEl.classList.add(`is-${status}`);
+    if (status === 'searching') {
+      statusEl.replaceChildren();
+      const spinner = document.createElement('span');
+      spinner.className = 'public-record-spinner';
+      spinner.setAttribute('aria-hidden', 'true');
+      statusEl.append(spinner, document.createTextNode(' Searching…'));
+    } else if (status === 'results') statusEl.textContent = message || 'Results found';
+    else if (status === 'empty') statusEl.textContent = 'No matching results found.';
+    else if (status === 'error') statusEl.textContent = `Unable to retrieve results from this service.${message ? ` ${message}` : ''}`;
+    else statusEl.textContent = 'Ready';
+    list.replaceChildren();
+  }
+
+  function renderPublicRecordResults(card, results) {
+    const list = card.querySelector('.public-record-results');
+    for (const result of results) {
+      const item = document.createElement('div');
+      item.className = 'public-record-item';
+      const title = document.createElement('div');
+      title.className = 'public-record-item-title';
+      title.textContent = result.title;
+      const provider = document.createElement('div');
+      provider.className = 'public-record-item-provider';
+      provider.textContent = result.service;
+      const description = document.createElement('div');
+      description.className = 'public-record-item-description';
+      if (result.description) description.textContent = result.description;
+      const link = document.createElement('a');
+      link.className = 'public-record-item-link';
+      const check = window.KinshipPublicRecords.validateExternalUrl(result.url);
+      if (check.isValid) {
+        link.href = check.normalizedUrl;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = 'View Source';
+        link.setAttribute('aria-label', `View source on ${result.service}: ${result.title}`);
+      } else {
+        // No valid source URL (e.g. isShownAt missing): plain text instead of a
+        // link that would silently resolve to the page itself.
+        const span = document.createElement('span');
+        span.className = 'public-record-item-link';
+        span.textContent = 'Source record URL unavailable';
+        item.append(title, provider, description, span);
+        list.append(item);
+        continue;
+      }
+      item.append(title, provider, description, link);
+      list.append(item);
     }
   }
 
-  function setWikiTreeSearchStatus(message) {
-    elements.wikiTreeSearchStatus.textContent = message;
-    elements.wikiTreeSearchStatus.hidden = !message;
-  }
-
-  function submitWikiTreeSearch(query) {
-    const form = document.createElement('form');
-    form.method = 'post';
-    form.action = 'https://www.wikitree.com/wiki/Special:SearchPerson';
-    form.target = '_blank';
-    form.rel = 'noopener noreferrer';
-    form.referrerPolicy = 'no-referrer';
-    form.hidden = true;
-
-    const fields = [
-      ['wpSearch', '1'],
-      ['wpSearchButton', 'Search'],
-      ['date_spread', '2'],
-      ['date_include', 'neither'],
-      ['last_name_match', 'all'],
-      ['skip_variants', '0'],
-      ['wpFirst', query.firstName],
-      ['wpLast', query.lastName],
-      ['wpBirthDate', query.birthYear],
-      ['wpDeathDate', query.deathYear],
-      ['birth_location', query.birthCountry]
-    ];
-    for (const [name, value] of fields) {
-      if (!value) continue;
-      const input = document.createElement('input');
-      input.type = 'hidden';
-      input.name = name;
-      input.value = value;
-      form.append(input);
+  function buildPublicRecordCards() {
+    const providers = window.KinshipPublicRecords.PROVIDERS;
+    const host = document.querySelector('#publicRecordsProviders');
+    host.replaceChildren();
+    for (const provider of providers) {
+      const card = document.createElement('div');
+      card.className = 'public-record-card';
+      card.dataset.providerId = provider.id;
+      const head = document.createElement('div');
+      head.className = 'public-record-head';
+      const name = document.createElement('div');
+      name.className = 'public-record-name';
+      name.textContent = provider.name;
+      const note = document.createElement('div');
+      note.className = 'public-record-note';
+      note.textContent = provider.note;
+      const searchButton = makeButton('Search', 'research-button public-record-search');
+      searchButton.dataset.providerSearch = provider.id;
+      searchButton.title = `Search ${provider.name} for this person`;
+      head.append(name, note, searchButton);
+      const status = document.createElement('div');
+      status.className = 'public-record-status is-ready';
+      status.setAttribute('role', 'status');
+      status.textContent = 'Ready';
+      const list = document.createElement('div');
+      list.className = 'public-record-results';
+      card.append(head, status, list);
+      host.append(card);
     }
-
-    document.body.append(form);
-    form.submit();
-    window.setTimeout(() => form.remove(), 0);
   }
 
-  function renderWikiTreeFallback(query) {
-    const link = document.createElement('a');
-    link.className = 'wikitree-site-link';
-    link.href = 'https://www.wikitree.com/wiki/Special:SearchPerson';
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    link.textContent = 'Open this search directly on WikiTree';
-    link.addEventListener('click', (event) => {
-      event.preventDefault();
-      submitWikiTreeSearch(query);
-    });
-    elements.wikiTreeResults.append(link);
-  }
-
-  function searchWikiTree() {
+  // One provider at a time; the modal streams results as each finishes.
+  async function searchOneProvider(providerId) {
+    const provider = window.KinshipPublicRecords.PROVIDERS.find((entry) => entry.id === providerId);
+    const card = document.querySelector(`.public-record-card[data-provider-id="${providerId}"]`);
+    if (!provider || !card) return;
     const person = state.people.get(state.pendingResearchPersonId);
-    if (!elements.researchConsent.checked || !isRecordedDeceased(person)) return;
-    const query = buildWikiTreeQuery(person);
-    // WikiTree's API blocks in-page requests from other sites (CORS), so open its search page in a new tab instead.
-    submitWikiTreeSearch(query);
-    elements.wikiTreeResults.replaceChildren();
-    elements.wikiTreeResults.hidden = false;
-    renderWikiTreeFallback(query);
-    setWikiTreeSearchStatus('Opened the WikiTree search in a new tab. If it did not open, use the link below.');
+    if (!person) return;
+    setProviderStatus(card, 'searching');
+    const outcome = await window.KinshipPublicRecords.runProvider(provider, person);
+    if (outcome.status === 'results') {
+      setProviderStatus(card, 'results', `${outcome.results.length} result${outcome.results.length === 1 ? '' : 's'} found`);
+      renderPublicRecordResults(card, outcome.results);
+    } else if (outcome.status === 'empty') {
+      setProviderStatus(card, 'empty');
+    } else {
+      setProviderStatus(card, 'error', outcome.errorMessage);
+    }
   }
+
+  function searchAllProviders() {
+    for (const provider of window.KinshipPublicRecords.PROVIDERS) searchOneProvider(provider.id);
+  }
+
+  // Retained name: the search helpers still reference a normalised snapshot.
+  function buildWikiTreeQuery(person) {
+    return window.KinshipPublicRecords.normalisePerson(person);
+  }
+
+  // Opens the modal for a person: renders the provider cards fresh, resets all
+  // statuses to Ready and shows the person's name and lifespan in the header.
+  function openPublicRecordsDialog(person) {
+    if (!person) return;
+    state.pendingResearchPersonId = person.id;
+    const nameEl = document.querySelector('#publicRecordsPersonName');
+    const datesEl = document.querySelector('#publicRecordsPersonDates');
+    if (nameEl) nameEl.textContent = person.name;
+    if (datesEl) datesEl.textContent = publicRecordPersonDates(person);
+    buildPublicRecordCards();
+    const dialog = elements.researchDialog;
+    if (dialog.open) return;
+    dialog.showModal();
+  }
+
 
   function countryFlagForPlace(place) {
     const normalized = ` ${String(place || '').toLocaleLowerCase().replace(/\u00df/g, 'ss').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim()} `;
@@ -3249,8 +3278,10 @@
     saveRecordButton.disabled = state.gedcomSaving;
     personActions.append(saveRecordButton);
     if (isRecordedDeceased(person)) {
-      const researchButton = iconButton('search', 'Search WikiTree');
-      researchButton.dataset.wikitreeSearch = person.id;
+      const researchButton = iconButton('search', 'Search Public Records');
+      researchButton.dataset.publicRecordsSearch = person.id;
+      researchButton.title = 'Search public record services for this person';
+      researchButton.setAttribute('aria-label', 'Search Public Records');
       personActions.append(researchButton);
     }
     const deletePersonButton = iconButton('trash', 'Delete person', 'research-button person-delete-button');
@@ -8483,19 +8514,11 @@
       elements.mediaUploadInput.click();
       return;
     }
-    const researchButton = event.target.closest('button[data-wikitree-search]');
+    const researchButton = event.target.closest('button[data-public-records-search]');
     if (researchButton) {
-      const person = state.people.get(researchButton.dataset.wikitreeSearch);
-      if (!isRecordedDeceased(person)) return;
-      state.pendingResearchPersonId = person.id;
-      renderWikiTreeQueryPreview(buildWikiTreeQuery(person));
-      elements.wikiTreeSearchStatus.hidden = true;
-      elements.wikiTreeSearchStatus.textContent = '';
-      elements.wikiTreeResults.replaceChildren();
-      elements.wikiTreeResults.hidden = true;
-      elements.researchConsent.checked = false;
-      elements.confirmWikiTreeSearch.disabled = true;
-      elements.researchDialog.showModal();
+      const person = state.people.get(researchButton.dataset.publicRecordsSearch);
+      if (!person) return;
+      openPublicRecordsDialog(person);
       return;
     }
     const primaryButton = event.target.closest('button[data-primary-media]');
@@ -8796,12 +8819,23 @@
   document.querySelector('#relationshipDialog').addEventListener('close', () => {
     state.pendingRelationship = null;
   });
-  elements.researchConsent.addEventListener('change', () => {
-    elements.confirmWikiTreeSearch.disabled = !elements.researchConsent.checked;
-  });
-  elements.confirmWikiTreeSearch.addEventListener('click', searchWikiTree);
   elements.researchDialog.addEventListener('close', () => {
     state.pendingResearchPersonId = null;
+  });
+  // ESC is native to <dialog>; also wire the explicit close button and focus
+  // the Search All button each time the dialog opens.
+  document.querySelector('.public-records-close')?.addEventListener('click', () => {
+    elements.researchDialog.close();
+  });
+  document.querySelector('#searchAllPublicRecords')?.addEventListener('click', () => {
+    searchAllProviders();
+  });
+  document.querySelector('#publicRecordsProviders')?.addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-provider-search]');
+    if (button) searchOneProvider(button.dataset.providerSearch);
+  });
+  elements.researchDialog.addEventListener('open', () => {
+    document.querySelector('#searchAllPublicRecords')?.focus();
   });
   elements.back.addEventListener('click', () => {
     if (state.historyIndex > 0) { state.historyIndex -= 1; state.selectedId = state.history[state.historyIndex]; render(); }

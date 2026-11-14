@@ -13,6 +13,7 @@
   <script src="release-check.js" defer></script>
   <script src="data/world-data.js" defer></script>
   <script src="map.js" defer></script>
+  <script src="public-records.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -275,6 +276,7 @@
       <div class="about-content">
         <p id="aboutVersion" class="about-version"></p>
         <p>A local family archive for exploring GEDCOM relationships, places, and media. Your tree and media stay on this device.</p>
+        <p><strong>Search Public Records</strong> lets you search external genealogy, archival, library, museum and public-record collections directly from a person's profile — Open Archives, WikiTree, Europeana, Digital Public Library of America, Internet Archive and Find A Grave. Search every source at once, or one service at a time; each match links to the original record so it can be verified and cited.</p>
         <h3 class="about-history-title">Version history</h3>
         <div id="aboutHistory" class="about-history"></div>
       </div>
@@ -289,6 +291,7 @@
           <button type="button" data-help-nav="gedcom">Opening &amp; importing GEDCOM files</button>
           <button type="button" data-help-nav="exploring">Exploring the family tree</button>
           <button type="button" data-help-nav="editing">Editing people &amp; saving</button>
+          <button type="button" data-help-nav="public-records">Search Public Records</button>
           <button type="button" data-help-nav="media">Photos, documents &amp; media</button>
           <button type="button" data-help-nav="maps-reports">Map View, Reports &amp; data checks</button>
           <button type="button" data-help-nav="defaults">Defaults &amp; home person</button>
@@ -313,7 +316,7 @@
               <li><strong>Right:</strong> the person record, with actions for editing, printing and media. Recognized countries from the recorded birth and death places appear beside the hero image; the death country is omitted when it matches the birth country. Missing or unrecognized countries are not guessed.</li>
             </ul>
             <h4>Privacy</h4>
-            <p>Nothing leaves this device unless you choose a feature that says so and tick its consent box: <strong>Search WikiTree</strong> (in a person record) and <strong>Suggest countries with GeoNames</strong> (in the birth country list). Each one shows exactly what it will send first.</p>
+            <p>Nothing leaves this device unless you choose a feature that says so: <strong>Search Public Records</strong> (in a person record) sends the person's name and years to the public record services you pick, and <strong>Suggest countries with GeoNames</strong> (in the birth country list) asks GeoNames for country suggestions. Search Public Records runs your query directly in your browser against each service and does not pass your tree through Kinship Atlas servers.</p>
           </article>
           <article class="help-article" data-help-article="gedcom" hidden>
             <h3>Opening &amp; importing GEDCOM files</h3>
@@ -399,7 +402,7 @@
               <li><strong>✎ next to a relative:</strong> edit the relationship (for example, parent role or marriage details) or delete it.</li>
               <li><strong>Set as primary person:</strong> adds the <strong>Home Person</strong> button and shows how others are related to this person.</li>
               <li><strong>Print record:</strong> prints the record on A4, without attached media.</li>
-              <li><strong>Search WikiTree:</strong> shown for people with a recorded death. It sends the details listed in the dialog to WikiTree only after you tick the consent box.</li>
+              <li><strong>Search Public Records:</strong> opens a panel that searches Open Archives, WikiTree, Europeana, Digital Public Library of America, Internet Archive and Find A Grave for this person. Search one service or all of them at once; each result links to the original record.</li>
               <li><strong>Delete person:</strong> removes the person and all links to them from the GEDCOM.</li>
             </ul>
             <h4>Dates</h4>
@@ -410,6 +413,28 @@
               <li>If the browser needs your permission, or a place to save, the top bar shows <strong>Save to GEDCOM</strong>. Click it to finish saving. It changes to <strong>Saved</strong> when the file is up to date.</li>
               <li>Unsaved changes are kept in this browser tab, and you are warned before closing a tab that has them.</li>
               <li>When <strong>Kinship Atlas.exe</strong> saves the GEDCOM in its Primary GEDCOM folder, the previous version is kept in <strong>Primary GEDCOM\Backups</strong>.</li>
+            </ul>
+          </article>
+          <article class="help-article" data-help-article="public-records" hidden>
+            <h3>Search Public Records</h3>
+            <p>Click <strong>Search Public Records</strong> in a person record to open a panel that queries external collections for that person. The dialog shows the person's full name and birth and death years; every service searches for those details.</p>
+            <h4>Supported services</h4>
+            <ul>
+              <li><strong>Open Archives</strong> — Dutch civil registration and church books.</li>
+              <li><strong>WikiTree</strong> — community-sourced shared family tree.</li>
+              <li><strong>Europeana</strong> — European cultural heritage collections.</li>
+              <li><strong>Digital Public Library of America</strong> — US archives, libraries and museums.</li>
+              <li><strong>Internet Archive</strong> — books, periodicals and archived records.</li>
+              <li><strong>Find A Grave</strong> — headstone and burial records.</li>
+            </ul>
+            <h4>How to search</h4>
+            <ul>
+              <li><strong>Search All Sources</strong> runs every service at once. Each service updates independently as it finishes, so a fast response is never held up by a slow one.</li>
+              <li>To search a single service, use its own <strong>Search</strong> button. You can run several individually without re-opening the dialog.</li>
+              <li>Status is shown per service: <strong>Ready</strong>, <strong>Searching…</strong> with a spinner, <strong>Results found</strong> with a count, <strong>No matching results found.</strong> when a service answered successfully but had nothing, and an error message when the service could not be reached.</li>
+              <li>Each match shows the record title, the service it came from, a short description and a <strong>View Source</strong> link that opens the original record in a new browser tab without leaving Kinship Atlas.</li>
+              <li>Find A Grave has no public search API, so its card always shows one entry that opens that service's own search page with the name and years already filled in.</li>
+              <li>An empty result is not an error: it only means that service has nothing matching this person. Failures do happen from time to time when a service is busy or unreachable; try that service again later.</li>
             </ul>
           </article>
           <article class="help-article" data-help-article="media" hidden>
@@ -541,18 +566,24 @@
       </div>
     </section>
   </dialog>
-  <dialog id="researchDialog" class="app-dialog" aria-labelledby="researchDialogTitle">
-    <section class="dialog-panel research-dialog-panel">
-      <h2 id="researchDialogTitle">Search WikiTree</h2>
-      <p class="privacy-warning">This search sends the recorded first name, last name, birth year, death year, and birth country below to WikiTree. It is available only for people with a recorded death event.</p>
-      <dl id="wikiTreeQueryPreview" class="wikitree-query"></dl>
-      <p id="wikiTreeSearchStatus" class="wikitree-status" role="status" aria-live="polite" hidden></p>
-      <div id="wikiTreeResults" class="wikitree-results" hidden></div>
-      <label class="research-consent"><input id="researchConsent" type="checkbox"> I understand these details will be sent to WikiTree.</label>
-      <div class="dialog-actions">
-        <button id="confirmWikiTreeSearch" class="dialog-button dialog-button-primary" type="button" disabled>Search WikiTree</button>
-        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="researchDialog">Close</button>
+  <dialog id="researchDialog" class="app-dialog public-records-dialog" aria-labelledby="researchDialogTitle" aria-describedby="researchDialogSubtitle">
+    <section class="dialog-panel public-records-panel">
+      <header class="public-records-head">
+        <div>
+          <h2 id="researchDialogTitle">Search Public Records</h2>
+          <p id="researchDialogSubtitle" class="public-records-subtitle">Search genealogy, archive, museum, and historical collections</p>
+        </div>
+        <button type="button" class="icon-button public-records-close" data-close-dialog="researchDialog" aria-label="Close Search Public Records">✕</button>
+      </header>
+      <div class="public-records-person">
+        <div id="publicRecordsPersonName" class="public-records-name"></div>
+        <div id="publicRecordsPersonDates" class="public-records-dates"></div>
       </div>
+      <div class="public-records-actions">
+        <button id="searchAllPublicRecords" class="dialog-button dialog-button-primary" type="button">Search All Sources</button>
+        <span class="public-records-actions-hint">Each service searches independently and in parallel.</span>
+      </div>
+      <div id="publicRecordsProviders" class="public-records-providers"></div>
     </section>
   </dialog>
   <dialog id="newGedcomDialog" class="app-dialog" aria-labelledby="newGedcomTitle">

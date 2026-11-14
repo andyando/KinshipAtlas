@@ -288,8 +288,29 @@ button { color: inherit; }
 .person-action-row { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
 .person-action-row .research-button { margin-top: 0; }
 .detail-section { padding: 17px 19px 16px; border-bottom: 1px solid #e7ece8; }
-.detail-section-title { display: flex; align-items: center; gap: 8px; margin: 0 0 11px; color: #71817a; font-size: 9px; font-weight: 800; letter-spacing: 1.15px; text-transform: uppercase; }
+/* The heading is now a toggle button: chevron, label, then a rule to the edge. */
+.detail-section-title {
+  display: flex; align-items: center; gap: 7px;
+  width: 100%; margin: 0 0 11px; padding: 2px 0;
+  border: 0; background: none; cursor: pointer; text-align: left;
+  color: #71817a; font-size: 9px; font-weight: 800;
+  letter-spacing: 1.15px; text-transform: uppercase;
+}
+.detail-section-title:hover { color: var(--green); }
+.detail-section-title:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; border-radius: 3px; }
 .detail-section-title::after { height: 1px; flex: 1; content: ""; background: #e4ebe6; }
+.detail-section-label { white-space: nowrap; }
+/* Chevron points right when collapsed and down when expanded. */
+.detail-section-chevron {
+  width: 11px; height: 11px; flex: 0 0 auto;
+  fill: none; stroke: currentColor; stroke-width: 2.4;
+  stroke-linecap: round; stroke-linejoin: round;
+  transition: transform .15s ease;
+  transform: rotate(90deg);
+}
+.detail-section.is-collapsed .detail-section-chevron { transform: rotate(0deg); }
+.detail-section.is-collapsed .detail-section-title { margin-bottom: 0; }
+.detail-section-body[hidden] { display: none; }
 .event-list { display: grid; gap: 8px; }
 .event-item { display: grid; grid-template-columns: 24px 8px minmax(0,1fr); gap: 8px; }
 .event-icon {
@@ -340,9 +361,26 @@ button { color: inherit; }
 .media-image-item > .media-reveal-button { position: absolute; top: 5px; left: 5px; }
 .media-reveal-button:hover { border-color: var(--green); background: #f2faf6; }
 .media-reveal-button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
-.media-file-item { min-width: 0; display: flex; align-items: flex-start; gap: 5px; }
-.media-file-item .media-file-link { flex: 1; }
-.media-file-link { min-width: 0; padding: 7px; overflow-wrap: anywhere; border: 1px solid #dce6df; border-radius: 3px; color: #426357; background: #f5f9f6; font-size: 10px; }
+/* PDF tiles stack: filename on its own row, then the classify control. A flex
+   row left the name with only a few pixels beside the dropdown and the delete
+   button, so long filenames wrapped one character per line. */
+.media-file-item {
+  min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: 'link unlink' 'classify classify';
+  align-items: start; gap: 4px 5px;
+}
+.media-file-item .media-file-link { grid-area: link; flex: none; }
+.media-file-item .media-remove-button { grid-area: unlink; justify-self: end; }
+.media-file-item .media-classify { grid-area: classify; min-width: 0; }
+.media-file-link {
+  min-width: 0; padding: 7px;
+  /* Break long filenames at sensible points rather than mid-word, and only
+     fall back to anywhere-breaking when a single token cannot fit. */
+  overflow-wrap: anywhere; word-break: break-word;
+  border: 1px solid #dce6df; border-radius: 3px; color: #426357;
+  background: #f5f9f6; font-size: 10px;
+  line-height: 1.35; text-align: left;
+}
 .relation-group { margin: 0 0 12px; }
 .relation-group:last-child { margin-bottom: 0; }
 .relation-label { margin-bottom: 5px; color: #91a099; font-size: 9px; font-weight: 800; letter-spacing: .8px; text-transform: uppercase; }
@@ -440,7 +478,7 @@ button { color: inherit; }
 .dialog-button-primary:hover:not(:disabled) { border-color: #245f54; background: #245f54; }
 .dialog-button-quiet { color: #64746d; background: #fff; }
 .dialog-button:disabled { opacity: .48; cursor: not-allowed; }
-#researchDialog { width: min(680px, calc(100vw - 28px)); }
+#researchDialog { width: min(720px, calc(100vw - 28px)); max-height: min(90vh, 820px); }
 .privacy-warning { padding: 9px 10px; border-left: 3px solid var(--coral); background: #fff7f2; }
 .wikitree-query { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 4px 10px; margin: 12px 0 0; padding: 10px; border: 1px solid #d8e2dc; border-radius: 4px; background: #f8faf8; }
 .wikitree-query dt { color: #53695f; font-size: 10px; font-weight: 800; letter-spacing: .4px; text-transform: uppercase; }
@@ -1541,6 +1579,7 @@ a.life-event-media-thumb:hover, a.life-event-media-thumb:focus-visible { border-
 /* Section separators and small helper links in the record. */
 :root[data-theme="dark"] .detail-section { border-bottom-color: var(--line); }
 :root[data-theme="dark"] .detail-section-title { color: #a9bdb4; }
+:root[data-theme="dark"] .detail-section-title:hover { color: var(--green); }
 :root[data-theme="dark"] .detail-section-title::after { background: var(--line); }
 :root[data-theme="dark"] .details-empty p { color: #9db3aa; }
 :root[data-theme="dark"] .kinship-step { background: #22332e; color: #cfe3da; border-color: var(--line-strong); }
@@ -1636,3 +1675,85 @@ a.life-event-media-thumb:hover, a.life-event-media-thumb:focus-visible { border-
 :root[data-theme="dark"] .map-timeline-play:hover:not(:disabled) { background: #2a4039; border-color: var(--green); }
 :root[data-theme="dark"] .map-timeline-play.is-playing { color: #0d1413; background: var(--green); }
 :root[data-theme="dark"] .map-timeline-reset.is-active { color: #0d1413; background: var(--green); }
+
+/* ===========================================================================
+   Search Public Records dialog
+   One card per service, each with its own status line and result list.
+   The dialog itself owns the ONLY scrollbar: the inner panel never scrolls.
+   =========================================================================== */
+.public-records-dialog { width: min(720px, calc(100vw - 28px)); max-width: none; }
+.public-records-panel {
+  width: auto; max-width: 100%; max-height: none;
+  min-width: 0;
+  display: flex; flex-direction: column; gap: 14px;
+  overflow: visible;
+}
+.public-records-panel *,
+.public-records-panel { box-sizing: border-box; min-width: 0; }
+.public-records-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+}
+.public-records-head h2 { margin: 0 0 3px; }
+.public-records-subtitle { margin: 0; color: #71817e; font-size: 12px; }
+.public-records-close { flex: 0 0 auto; }
+.public-records-person {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  padding: 8px 12px; border-radius: 5px;
+  background: var(--green-pale);
+}
+.public-records-name { font-weight: 700; font-size: 14px; color: var(--ink); }
+.public-records-dates { font-size: 12px; color: var(--ink-soft); }
+.public-records-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.public-records-actions-hint { font-size: 11px; color: var(--muted); }
+.public-records-providers {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px; min-width: 0;
+}
+.public-record-card { min-width: 0; }
+.public-record-card {
+  display: flex; flex-direction: column; gap: 7px;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--white);
+}
+.public-record-head { display: flex; flex-direction: column; gap: 2px; }
+.public-record-name { font-weight: 700; font-size: 13px; color: var(--ink); }
+.public-record-note { font-size: 11px; color: var(--muted); }
+.public-record-search { align-self: flex-start; margin-top: 5px; }
+.public-record-status {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 700; color: var(--ink-soft);
+  min-height: 16px;
+}
+.public-record-status.is-searching { color: var(--green); }
+.public-record-status.is-results { color: var(--green); }
+.public-record-status.is-empty { color: var(--ink-soft); }
+.public-record-status.is-error { color: var(--coral); }
+.public-record-spinner {
+  width: 11px; height: 11px; flex: 0 0 auto;
+  border: 2px solid var(--line); border-top-color: var(--green);
+  border-radius: 50%;
+  animation: public-record-spin .8s linear infinite;
+}
+@keyframes public-record-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .public-record-spinner { animation-duration: 2.4s; }
+}
+.public-record-results { display: grid; gap: 6px; }
+.public-record-item {
+  padding: 7px 9px; border: 1px solid var(--line); border-radius: 4px;
+  background: var(--paper); font-size: 11px;
+  display: grid; gap: 1px;
+}
+.public-record-item-title { font-weight: 700; font-size: 12px; color: var(--ink); overflow-wrap: anywhere; }
+.public-record-item-provider { color: var(--muted); }
+.public-record-item-description { color: var(--ink-soft); overflow-wrap: anywhere; }
+.public-record-item-link { color: var(--green); font-weight: 700; text-decoration: underline; }
+.public-record-item-link:hover { color: var(--coral); }
+
+/* Dark mode. */
+:root[data-theme="dark"] .public-records-person { background: #22332e; }
+:root[data-theme="dark"] .public-record-card { background: #1b2725; border-color: var(--line-strong); }
+:root[data-theme="dark"] .public-record-item { background: #16211f; border-color: var(--line); }
+:root[data-theme="dark"] .public-record-item-title { color: #eaf3ee; }
+:root[data-theme="dark"] .public-record-item-provider,
+:root[data-theme="dark"] .public-record-item-description { color: #a9bdb4; }

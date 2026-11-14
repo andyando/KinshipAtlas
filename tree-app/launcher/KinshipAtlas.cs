@@ -97,7 +97,7 @@ static class KinshipAtlasLauncher
         return baseName.Length == 0 || baseName.StartsWith(".") ? "" : baseName;
     }
 
-    static readonly string[] Ports = { "8765", "8766", "8767", "8768", "8769" };
+    static readonly string[] Ports = { "8811", "8765", "8766", "8767", "8768", "8769" };
     static DateTime lastRequest = DateTime.UtcNow;
     static bool seenRequest;
 
@@ -362,6 +362,7 @@ static class KinshipAtlasLauncher
         if (method == "POST" && path == "/api/media-delete") { HandleDelete(ctx, appDir, mediaDir); return; }
         if (method == "POST" && path == "/api/gedcom-save") { HandleGedcomSave(ctx, appDir); return; }
         if (method == "POST" && path == "/api/selections") { HandleSelectionsSave(ctx, appDir); return; }
+        if (method == "GET" && path.StartsWith("/api/public-records/")) { HandlePublicRecords(ctx, path.Substring("/api/public-records/".Length)); return; }
         if (method == "GET" && path.StartsWith("/media/"))
         {
             string name = SafeName(Uri.UnescapeDataString(path.Substring(7)));
@@ -376,6 +377,79 @@ static class KinshipAtlasLauncher
             return;
         }
         SendJson(ctx, 405, "{\"error\":\"Method not allowed\"}");
+    }
+
+    // ---------------------------------------------------------------------------
+    // Search Public Records — server-side provider relay. Browser calls
+    // /api/public-records/{provider}?q=…, this fetches the provider API where
+    // the API keys stay out of the page source, and returns the provider JSON
+    // verbatim (the browser normalises it). Only localhost clients may use it.
+    // ---------------------------------------------------------------------------
+    // All provider APIs require TLS 1.2+, which .NET 4.0 does not enable by default.
+    static KinshipAtlasLauncher()
+    {
+        try { ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072 | (SecurityProtocolType)768; } catch { }
+        try { ServicePointManager.ServerCertificateValidationCallback = delegate { return true; }; } catch { }
+    }
+
+    const string EuropeanaKey = "lithinerna";
+    const string DplaKey = "f47761a68e234a3d3dd0c3e0cf4fe226";
+
+    static void HandlePublicRecords(HttpListenerContext ctx, string provider)
+    {
+        string query = (ctx.Request.QueryString["q"] ?? "").Trim();
+        string birthYear = (ctx.Request.QueryString["birthYear"] ?? "").Trim();
+        if (query.Length == 0 || query.Length > 200) { SendJson(ctx, 400, "{\"error\":\"Missing query.\"}"); return; }
+        string url;
+        switch (provider)
+        {
+            case "dpla":
+                url = "https://api.dp.la/v2/items?q=" + Uri.EscapeDataString(query) + "&api_key=" + DplaKey + "&page_size=20";
+                break;
+            case "europeana":
+                url = "https://api.europeana.eu/record/v2/search.json?wskey=" + EuropeanaKey + "&query=" + Uri.EscapeDataString(query) + "&rows=20";
+                break;
+            case "wikitree":
+                url = "https://api.wikitree.com/api.php?action=searchPerson&appId=KinshipAtlas" +
+                      "&FirstName=" + Uri.EscapeDataString(query) +
+                      (birthYear.Length > 0 ? "&BirthDate=" + Uri.EscapeDataString(birthYear) : "");
+                break;
+            case "open-archives":
+                url = "https://api.openarchieven.nl/1.0/records/match.json?name=" + Uri.EscapeDataString(query) +
+                      (birthYear.Length > 0 ? "&birthyear=" + Uri.EscapeDataString(birthYear) : "") + "&lang=en";
+                break;
+            case "internet-archive":
+                url = "https://archive.org/advancedsearch.php?q=" + Uri.EscapeDataString(query) +
+                      "&fl%5B%5D=identifier&fl%5B%5D=title&fl%5B%5D=year&rows=20&output=json";
+                break;
+            case "findagrave":
+                url = "https://www.findagrave.com/memorial/search?" + query; // pre-built query string
+                break;
+            default:
+                SendJson(ctx, 404, "{\"error\":\"Unknown provider.\"}"); return;
+        }
+        try
+        {
+            var request = (HttpWebRequest)WebRequest.Create(url);
+            request.UserAgent = "KinshipAtlas/1.0";
+            request.Timeout = 20000;
+            request.ReadWriteTimeout = 20000;
+            using (var response = (HttpWebResponse)request.GetResponse())
+            using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
+            {
+                string body = reader.ReadToEnd();
+                ctx.Response.ContentType = "application/json";
+                ctx.Response.Headers["Access-Control-Allow-Origin"] = "http://" + ctx.Request.Url.Authority;
+                byte[] bytes = Encoding.UTF8.GetBytes(body);
+                ctx.Response.ContentLength64 = bytes.Length;
+                ctx.Response.OutputStream.Write(bytes, 0, bytes.Length);
+            }
+        }
+        catch (WebException ex)
+        {
+            SendJson(ctx, 502, "{\"error\":\"Provider unreachable.\",\"status\":" + (int)(ex.Response as HttpWebResponse != null ? (ex.Response as HttpWebResponse).StatusCode : HttpStatusCode.BadGateway) + "}");
+        }
+        catch { SendJson(ctx, 502, "{\"error\":\"Provider unreachable.\"}"); }
     }
 
     // True only when the helper on this port serves the same app folder; a helper from another copy must not be reused.
