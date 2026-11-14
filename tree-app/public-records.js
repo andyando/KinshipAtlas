@@ -179,6 +179,37 @@
     }).filter((item) => item.url);
   }
 
+  /* --------------------- Shared name-match filtering ---------------------- */
+  // Every text-based provider keeps only results whose text (title, creator,
+  // description, or provider-side name fields) contains BOTH the given name
+  // and the surname — in "First Surname" or "Surname, First" order. This stops
+  // loose keyword matches (e.g. DPLA botany specimens, single-field WikiTree
+  // hits) from masquerading as person records.
+  const BOTANY_TERMS = /\b(botan|botany|plants?|flora|herbarium|specimen|botanical|fungi|moss|lichen|algae)\b/i;
+
+  function nameMatchText(item) {
+    if (typeof item === 'string') return item;
+    if (Array.isArray(item)) return item.filter(Boolean).join(' ');
+    return item || '';
+  }
+
+  function matchesPersonName(text, person) {
+    const haystack = nameMatchText(text).toLowerCase();
+    if (!haystack) return false;
+    const given = (person.givenName || '').toLowerCase().trim();
+    const surname = (person.surname || '').toLowerCase().trim();
+    if (!given || !surname) return Boolean(given || surname) && haystack.includes(given || surname);
+    const firstGiven = given.split(/\s+/)[0];
+    const direct = haystack.includes(`${given} ${surname}`);
+    const reversed = haystack.includes(`${surname}, ${given}`) || haystack.includes(`${surname} ${given}`);
+    const loose = haystack.includes(firstGiven) && haystack.includes(surname);
+    return direct || reversed || loose;
+  }
+
+  function isBotanyResult(item) {
+    return BOTANY_TERMS.test(nameMatchText(item));
+  }
+
   /* ------------------------------ WikiTree ------------------------------- */
   // api.wikitree.com sends no CORS headers, and the on-site Special:SearchPerson
   // page ignores GET parameters (verified against the live site: the form is a
@@ -202,13 +233,8 @@
       );
     } catch (error) {
       console.info('[Search Public Records] WikiTree API unavailable:', error.message);
-      return [{
-        service: 'WikiTree',
-        title: 'Open WikiTree search',
-        description: 'Direct search links are not supported by WikiTree. Click to open WikiTree search.',
-        url: searchEndpoint,
-        sourceId: ''
-      }];
+      // No results: the card shows its empty state instead of a fake result.
+      return [];
     }
     const list = data?.matches || data?.['0']?.matches || [];
     const mapped = (Array.isArray(list) ? list : []).map((entry) => {
@@ -221,17 +247,32 @@
           entry.DeathDate && !/^0/.test(entry.DeathDate) ? `Died ${entry.DeathDate}` : ''
         ].filter(Boolean).join(', '),
         url: check.isValid ? check.normalizedUrl : '',
-        sourceId: String(entry.Id ?? '')
+        sourceId: String(entry.Id ?? ''),
+        _entry: entry
       };
+    }).filter((item) => {
+      // WikiTree's searchPerson can return hits on only one name field. Require
+      // an exact match on BOTH the given name AND the surname (either field
+      // order) before the profile is shown to the user.
+      const entry = item._entry;
+      delete item._entry;
+      const entryGiven = String(entry.FirstName || entry.RealName || '').toLowerCase().trim();
+      const entrySurname = String(entry.LastNameAtBirth || entry.LastNameCurrent || entry.Name || '')
+        .toLowerCase().split(/\s+/)[0] || '';
+      const personGiven = (person.givenName || '').toLowerCase().trim();
+      const personFirstGiven = personGiven.split(/\s+/)[0];
+      const personSurname = (person.surname || '').toLowerCase().trim();
+      const exactFields = personFirstGiven && personSurname
+        && (entryGiven === personGiven || entryGiven.split(/\s+/)[0] === personFirstGiven)
+        && entrySurname === personSurname;
+      if (exactFields) return true;
+      // Fall back to a text check across all profile fields for providers that
+      // return only combined name strings.
+      return matchesPersonName([entry.RealName, entry.BirthName, entry.FirstName,
+        entry.LastNameAtBirth, entry.LastNameCurrent].join(' '), person);
     }).filter((item) => item.url);
     if (mapped.length) return mapped;
-    return [{
-      service: 'WikiTree',
-      title: 'Open WikiTree search',
-      description: 'No API matches found. Click to open WikiTree search.',
-      url: searchEndpoint,
-      sourceId: ''
-    }];
+    return [];
   }
 
   /* ------------------------------ Europeana ------------------------------ */
@@ -245,11 +286,14 @@
         () => `${BACKEND_BASE}/europeana?q=${encodeURIComponent(query)}`
       );
       for (const item of data?.items || []) {
+        const title = Array.isArray(item.title) ? item.title.join(' · ') : item.title || 'Europeana record';
         const check = validateExternalUrl((item.guid || item.id || '').split('?')[0]);
         if (!check.isValid) continue;
+        // Keep only records whose text matches on both given name and surname.
+        if (!matchesPersonName([title, item.edmPlaceLabel?.def, item.dataProvider].filter(Boolean).join(' '), person)) continue;
         results.push({
           service: 'Europeana',
-          title: Array.isArray(item.title) ? item.title.join(' · ') : item.title || 'Europeana record',
+          title,
           description: [item.edmPlaceLabel?.def, item.year].filter(Boolean).join(', '),
           url: check.normalizedUrl,
           sourceId: item.id?.split('/').pop()
@@ -304,16 +348,25 @@
       console.info('[Search Public Records] DPLA isShownAt detected:', shownAt);
       const check = validateExternalUrl(shownAt);
       console.info('[Search Public Records] DPLA recordUrl normalised:', check.isValid ? check.normalizedUrl : check.error);
+      const title = doc.sourceResource?.title?.[0] || doc.title?.[0] || 'DPLA record';
+      const description = doc.sourceResource?.description?.[0] || doc.sourceResource?.creator?.join?.(', ') || '';
+      // DPLA keyword queries pull in unrelated material (botany specimens,
+      // flora, herbarium sheets). Drop those and anything not matching on
+      // given name + surname.
+      const matchText = [title, description, doc.sourceResource?.subject?.join?.(' ')]
+        .filter(Boolean).join(' ');
+      if (isBotanyResult(matchText)) return null;
+      if (!matchesPersonName(matchText, person)) return null;
       return {
         service: 'Digital Public Library of America',
-        title: doc.sourceResource?.title?.[0] || doc.title?.[0] || 'DPLA record',
-        description: doc.sourceResource?.description?.[0] || doc.sourceResource?.creator?.join?.(', ') || '',
+        title,
+        description,
         url: check.isValid ? check.normalizedUrl : '',
         urlInvalid: !check.isValid,
         sourceId: doc.id,
         dplaId: doc.id
       };
-    });
+    }).filter(Boolean);
   }
 
   /* --------------------------- Internet Archive --------------------------- */
@@ -330,14 +383,17 @@
     const docs = data?.response?.docs || [];
     return docs.map((doc) => {
       const check = validateExternalUrl(`https://archive.org/details/${doc.identifier}`);
-      return {
+      const item = {
         service: 'Internet Archive',
         title: doc.title || doc.identifier,
         description: doc.year ? String(doc.year) : '',
         url: check.isValid ? check.normalizedUrl : '',
         sourceId: doc.identifier
       };
-    }).filter((item) => item.url);
+      // Exact-phrase titles still need to contain both name parts.
+      if (!matchesPersonName([item.title, item.description].join(' '), person)) return null;
+      return item;
+    }).filter((item) => item && item.url);
   }
 
   /* ----------------------------- Find A Grave ----------------------------- */
@@ -373,6 +429,9 @@
     const label = count === null
       ? 'Search Find A Grave memorials'
       : `${count.toLocaleString()} matching memorial${count === 1 ? '' : 's'} found`;
+    // No memorials matched (or the count could not be read): show the empty
+    // state instead of presenting the search link as a "1 result found" item.
+    if (count === 0 || count === null) return [];
     return [{
       service: 'Find A Grave',
       title: label,

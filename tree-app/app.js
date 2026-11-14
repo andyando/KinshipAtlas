@@ -849,6 +849,24 @@
   // ---------------------------------------------------------------------------
 
   // Providers themselves live in public-records.js; this layer owns only the UI.
+  const PUBLIC_RECORD_PROVIDER_NAMES = {
+    openArchives: 'Open Archives',
+    wikitree: 'WikiTree',
+    europeana: 'Europeana',
+    dpla: 'DPLA',
+    internetArchive: 'Internet Archive',
+    findAGrave: 'Find a Grave'
+  };
+  // Manual-search fallbacks shown in each provider card's empty state.
+  const PUBLIC_RECORD_HOME_LINKS = {
+    openArchives: 'https://www.openarchieven.nl/',
+    wikitree: 'https://www.wikitree.com/wiki/Special:SearchPerson',
+    europeana: 'https://www.europeana.eu/en',
+    dpla: 'https://dp.la/',
+    internetArchive: 'https://archive.org/',
+    findAGrave: 'https://www.findagrave.com/memorial/search'
+  };
+
   function publicRecordPersonDates(person) {
     const birth = yearFrom(person.events.find((event) => event.type === 'BIRT')?.date);
     const death = yearFrom(person.events.find((event) => event.type === 'DEAT')?.date);
@@ -867,7 +885,20 @@
       spinner.setAttribute('aria-hidden', 'true');
       statusEl.append(spinner, document.createTextNode(' Searching…'));
     } else if (status === 'results') statusEl.textContent = message || 'Results found';
-    else if (status === 'empty') statusEl.textContent = 'No matching results found.';
+    else if (status === 'empty') {
+      statusEl.replaceChildren();
+      statusEl.append(document.createTextNode('No results found — refine your search below. '));
+      const providerId = card.dataset.providerId;
+      const fallbackUrl = PUBLIC_RECORD_HOME_LINKS[providerId];
+      if (fallbackUrl) {
+        const link = document.createElement('a');
+        link.href = fallbackUrl;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = `Search ${PUBLIC_RECORD_PROVIDER_NAMES[providerId] || providerId} manually`;
+        statusEl.append(link);
+      }
+    }
     else if (status === 'error') statusEl.textContent = `Unable to retrieve results from this service.${message ? ` ${message}` : ''}`;
     else statusEl.textContent = 'Ready';
     list.replaceChildren();
