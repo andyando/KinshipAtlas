@@ -3096,6 +3096,150 @@
     overlay.showModal();
   }
 
+  // --- Hero image reframing -------------------------------------------------
+  // Stores how the card image sits inside its circular frame, per person, in
+  // browser storage so the framing survives across sessions until changed.
+  function heroFrameStorageKey(personId) {
+    return `kinship-atlas:hero-frame:${personId}`;
+  }
+
+  function loadHeroFrameState(personId, fileName) {
+    try {
+      const raw = localStorage.getItem(heroFrameStorageKey(personId));
+      if (!raw) return null;
+      const saved = JSON.parse(raw);
+      if (saved && saved.file === fileName && typeof saved.scale === 'number') return saved;
+    } catch (error) {
+      console.warn('Saved hero framing could not be read.', error);
+    }
+    return null;
+  }
+
+  function saveHeroFrameState(personId, framing) {
+    try {
+      localStorage.setItem(heroFrameStorageKey(personId), JSON.stringify(framing));
+    } catch (error) {
+      console.warn('Hero framing could not be saved.', error);
+    }
+  }
+
+  function applyHeroFrameTransform(img, framing) {
+    if (!img || !framing) return;
+    img.style.borderRadius = '0';
+    img.style.transformOrigin = 'center';
+    img.style.transform = `translate(${(framing.x || 0) * 100}%, ${(framing.y || 0) * 100}%) scale(${framing.scale || 1})`;
+  }
+
+  // Bigger editor: shows the photo enlarged inside a square stage with a
+  // dashed circular overlay showing the crop. Drag to pan, wheel or buttons
+  // to zoom. "Apply & close" persists; Cancel discards the adjustments.
+  function openHeroReframeEditor(person) {
+    const cardImage = primaryImageFor(person);
+    if (!cardImage) return;
+    const saved = loadHeroFrameState(person.id, cardImage.file);
+    const working = saved ? { ...saved } : { file: cardImage.file, x: 0, y: 0, scale: 1 };
+
+    const dialog = document.createElement('dialog');
+    dialog.className = 'hero-frame-editor';
+    dialog.innerHTML = `
+      <header>
+        <h2>Reframe photo — ${person.name}</h2>
+        <button type="button" class="dialog-close" aria-label="Close">&times;</button>
+      </header>
+      <p class="hero-frame-hint">Drag the photo to move it, and zoom until it sits well inside the circle. The dashed circle shows how it will be cropped.</p>
+      <div class="hero-frame-stage">
+        <img class="hero-frame-photo" alt="${person.name} — reframing preview">
+        <div class="hero-frame-circle" aria-hidden="true"></div>
+      </div>
+      <div class="hero-frame-controls">
+        <button type="button" class="hero-frame-zoom" data-zoom="out" aria-label="Zoom out">−</button>
+        <span class="hero-frame-zoom-value">100%</span>
+        <button type="button" class="hero-frame-zoom" data-zoom="in" aria-label="Zoom in">+</button>
+        <button type="button" class="hero-frame-reset">Reset</button>
+      </div>
+      <footer>
+        <button type="button" class="button button-secondary hero-frame-cancel">Cancel</button>
+        <button type="button" class="button hero-frame-apply">Apply &amp; close</button>
+      </footer>`;
+
+    const stage = dialog.querySelector('.hero-frame-stage');
+    const img = dialog.querySelector('.hero-frame-photo');
+    const zoomValue = dialog.querySelector('.hero-frame-zoom-value');
+    img.src = mediaUrl(cardImage.file);
+
+    const clampPan = () => {
+      const limit = Math.max(0, (working.scale - 1) / 2);
+      working.x = Math.min(limit, Math.max(-limit, working.x));
+      working.y = Math.min(limit, Math.max(-limit, working.y));
+    };
+    const render = () => {
+      clampPan();
+      applyHeroFrameTransform(img, working);
+      zoomValue.textContent = `${Math.round(working.scale * 100)}%`;
+    };
+    render();
+
+    let dragging = null;
+    img.addEventListener('pointerdown', (event) => {
+      dragging = { x: event.clientX, y: event.clientY, startX: working.x, startY: working.y };
+      img.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    });
+    img.addEventListener('pointermove', (event) => {
+      if (!dragging) return;
+      const size = stage.getBoundingClientRect().width || 1;
+      working.x = dragging.startX + (event.clientX - dragging.x) / size;
+      working.y = dragging.startY + (event.clientY - dragging.y) / size;
+      render();
+    });
+    img.addEventListener('pointerup', () => { dragging = null; });
+    img.addEventListener('pointercancel', () => { dragging = null; });
+
+    const zoomStep = (direction) => {
+      working.scale = Math.min(3, Math.max(1, working.scale + direction * 0.2));
+      render();
+    };
+    dialog.querySelector('[data-zoom="in"]').addEventListener('click', () => zoomStep(1));
+    dialog.querySelector('[data-zoom="out"]').addEventListener('click', () => zoomStep(-1));
+    stage.addEventListener('wheel', (event) => {
+      event.preventDefault();
+      zoomStep(event.deltaY < 0 ? 1 : -1);
+    }, { passive: false });
+    dialog.querySelector('.hero-frame-reset').addEventListener('click', () => {
+      working.x = 0; working.y = 0; working.scale = 1;
+      render();
+    });
+
+    const close = () => { dialog.close(); dialog.remove(); };
+    dialog.querySelector('.hero-frame-cancel').addEventListener('click', close);
+    dialog.querySelector('.dialog-close').addEventListener('click', close);
+    dialog.addEventListener('click', (event) => { if (event.target === dialog) close(); });
+    dialog.querySelector('.hero-frame-apply').addEventListener('click', () => {
+      clampPan();
+      saveHeroFrameState(person.id, { file: cardImage.file, x: working.x, y: working.y, scale: working.scale });
+      close();
+      renderDetails();
+      showToast('Photo framing saved.');
+    });
+
+    document.body.append(dialog);
+    dialog.showModal();
+  }
+
+  function makeHeroReframeButton(person) {
+    const reframe = document.createElement('button');
+    reframe.type = 'button';
+    reframe.className = 'detail-monogram-reframe';
+    reframe.title = 'Reframe photo (move, zoom and pan inside the circle)';
+    reframe.setAttribute('aria-label', 'Reframe the card photo inside its circular frame');
+    reframe.textContent = '⛶';
+    reframe.addEventListener('click', (event) => {
+      event.stopPropagation();
+      openHeroReframeEditor(person);
+    });
+    return reframe;
+  }
+
   function openHeroImageChooser(personId) {
     const person = state.people.get(personId);
     if (!person) return;
@@ -3220,6 +3364,16 @@
       photo.className = 'detail-monogram-photo';
       photo.src = mediaUrl(cardImage.file);
       photo.alt = `${person.name} card image`;
+      const framing = loadHeroFrameState(person.id, cardImage.file);
+      if (framing && (framing.x || framing.y || framing.scale !== 1)) {
+        monogram.classList.add('hero-frame-applied');
+        applyHeroFrameTransform(photo, framing);
+      }
+      photo.title = 'Click to reframe this photo';
+      photo.addEventListener('click', (event) => {
+        event.stopPropagation();
+        openHeroReframeEditor(person);
+      });
       const changeImage = document.createElement('button');
       changeImage.type = 'button';
       changeImage.className = 'detail-monogram-edit';
@@ -3228,6 +3382,7 @@
       changeImage.setAttribute('aria-label', 'Choose a different card image from attached media');
       setButtonContent(changeImage, 'edit', '');
       monogram.append(photo, changeImage);
+      monogram.append(makeHeroReframeButton(person));
       monogram.append(makeHeroExpandButton(person));
     } else {
       monogram.textContent = initials(person.name);
