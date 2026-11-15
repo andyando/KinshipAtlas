@@ -28,21 +28,21 @@ const BANNERS = [
 ];
 
 const MODULES = [
-  { file: '00-header.js',        from: 1,    to: 26,    name: 'File header and organisation notes' },
-  { file: '01-state.js',         from: 27,   to: 100,   name: 'Constants and application state' },
-  { file: '02-dom.js',           from: 101,  to: 171,   name: 'Cached DOM elements' },
+  { file: '00-header.js', from: 1, to: 26, name: 'File header and organisation notes' },
+  { file: '01-state.js', from: 27, to: 100, name: 'Constants and application state' },
+  { file: '02-dom.js', from: 101, to: 171, name: 'Cached DOM elements' },
   { file: '03-gedcom-primitives.js', from: 172, to: 311, name: 'GEDCOM primitives (parsing, serialising, record helpers)' },
-  { file: '04-session.js',       from: 312,  to: 393,   name: 'Session persistence (IndexedDB)' },
-  { file: '05-gedcom-parse.js',  from: 394,  to: 598,   name: 'GEDCOM parsing' },
-  { file: '06-kinship.js',       from: 599,  to: 846,   name: 'Kinship graph and relationship terms' },
-  { file: '07-public-records.js',from: 847,  to: 1051,  name: 'Search Public Records (multi-provider external lookups)' },
-  { file: '08-media.js',         from: 1052, to: 1227,  name: 'Media handling (index, storage, resolution)' },
-  { file: '09-selections.js',    from: 1228, to: 1884,  name: 'Selections and per-tree storage keys' },
-  { file: '10-rendering.js',     from: 1885, to: 4998,  name: 'Rendering (tree, roster, details, media library, reports)' },
-  { file: '11-editors.js',       from: 4999, to: 6127,  name: 'Editors and dialogs (person, life events, relationships, deletion)' },
-  { file: '12-directory.js',     from: 6128, to: 6986,  name: 'Directory, duplicate finder and birth-country suggestions' },
-  { file: '13-import.js',        from: 6987, to: 9044,  name: 'GEDCOM import, merging and saving' },
-  { file: '14-map-print.js',     from: 9045, to: lines.length, name: 'Map, print, defaults, about/help and startup wiring' },
+  { file: '04-session.js', from: 312, to: 393, name: 'Session persistence (IndexedDB)' },
+  { file: '05-gedcom-parse.js', from: 394, to: 598, name: 'GEDCOM parsing' },
+  { file: '06-kinship.js', from: 599, to: 846, name: 'Kinship graph and relationship terms' },
+  { file: '07-public-records.js', from: 847, to: 1051, name: 'Search Public Records (multi-provider external lookups)' },
+  { file: '08-media.js', from: 1052, to: 1227, name: 'Media handling (index, storage, resolution)' },
+  { file: '09-selections.js', from: 1228, to: 1884, name: 'Selections and per-tree storage keys' },
+  { file: '10-rendering.js', from: 1885, to: 4998, name: 'Rendering (tree, roster, details, media library, reports)' },
+  { file: '11-editors.js', from: 4999, to: 6127, name: 'Editors and dialogs (person, life events, relationships, deletion)' },
+  { file: '12-directory.js', from: 6128, to: 6986, name: 'Directory, duplicate finder and birth-country suggestions' },
+  { file: '13-import.js', from: 6987, to: 9044, name: 'GEDCOM import, merging and saving' },
+  { file: '14-map-print.js', from: 9045, to: lines.length, name: 'Map, print, defaults, about/help and startup wiring' },
 ];
 
 const outDir = path.join(__dirname, 'src', 'modules');
