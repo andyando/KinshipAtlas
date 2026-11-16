@@ -5,7 +5,7 @@
 
 Contains copies of:
 - `app.js`, `styles.css`, `index.html`, `map.js`, `public-records.js`, `version.js`
-- `run-tests.ps1`, `tests/`
+- `tests/run-tests.ps1`, `tests/`
 - Launcher build files (`KinshipAtlas.cs`, `build-launcher.ps1`, `make-icon.ps1`, `kinship-atlas.ico`)
 
 Inventory and integrity instructions: see `backups/2026-11-15-1234/MANIFEST.md`.
@@ -14,7 +14,7 @@ Rule: this backup directory is never overwritten — any new backup pass creates
 ## Files that the refactor may modify
 - `tree-app/app.js` (functions moved out)
 - `tree-app/index.html` (new `<script>` tags for extracted modules)
-- New files under `tree-app/modules/`
+- New files under `tree-app/src/modules/`
 
 ## Restoration procedure
 If any regression is detected after an extraction step:
@@ -26,12 +26,12 @@ If any regression is detected after an extraction step:
    Copy-Item 'g:\Git\Kinship_Experimental\backups\2026-11-15-1234\index.html' 'g:\Git\Kinship_Experimental\tree-app\index.html' -Force
    # repeat for any other modified file
    ```
-   Optional: delete `tree-app\modules\` to return fully to pre-refactor state.
+   Optional: delete `tree-app\src\modules\` to return fully to pre-refactor state.
 3. Verify checksums match backup hashes (`Get-FileHash`).
 4. Re-run validation (below).
 
 ## Validation procedure after rollback
-1. `powershell -NoProfile -ExecutionPolicy Bypass -File tree-app\run-tests.ps1`
+1. `powershell -NoProfile -ExecutionPolicy Bypass -File tree-app\tests\run-tests.ps1`
    — expect: 130 passing, 0 failing (baseline recorded 2026-11-15).
 2. Browser smoke test: load the app via the launcher (`Kinship Atlas.exe`, port 8765)
    or any static server, load the GEDCOM, select a person, switch views

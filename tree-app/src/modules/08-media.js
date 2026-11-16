@@ -113,9 +113,10 @@
   const mediaTypeOptions = [
     ['birth', 'Birth'], ['building-house', 'Building / house'], ['census', 'Census'],
     ['certificate', 'Certificate'], ['death', 'Death'], ['directory', 'Directory'],
-    ['document', 'Document'], ['family-photo', 'Family photo'], ['letter', 'Letter'],
-    ['map-plan', 'Map / plan'], ['military-records', 'Military records'], ['newspaper', 'Newspaper'],
-    ['other', 'Other'], ['portrait', 'Portrait'], ['unclassified', 'Unclassified'],
+    ['document', 'Document'], ['electoral-roll', 'Electoral roll'], ['family-photo', 'Family photo'],
+    ['letter', 'Letter'], ['map-plan', 'Map / plan'], ['military-records', 'Military records'],
+    ['newspaper', 'Newspaper'], ['other', 'Other'], ['petition', 'Petition'], ['portrait', 'Portrait'],
+    ['unclassified', 'Unclassified'],
     ['wedding', 'Wedding'], ['will-probate', 'Will / Probate']
   ];
   const mediaTypeStorageKey = (storageKey) => `kinship-atlas:media-types:v1:${storageKey}`;
@@ -168,7 +169,7 @@
   // beside the app so they survive moving or copying the app folder and switching browsers.
   const selectionKeyPrefixes = [
     'kinship-atlas:primary-media:v1:', 'kinship-atlas:primary-person:v1:',
-    'kinship-atlas:media-types:v1:'
+    'kinship-atlas:media-types:v1:', 'kinship-atlas:hero-frame:'
   ];
   let helperSelections = null;
   const loadedSelectionKeys = new Set();

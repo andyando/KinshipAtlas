@@ -1299,7 +1299,7 @@
     document.querySelector('#birthCountryMenuButton').disabled = true;
     document.querySelector('#duplicateFinderMenuButton').disabled = true;
     releaseMediaUrls(); state.mediaIndex = null; state.mediaFolderPicked = false;
-    state.mediaRelativePaths = new WeakMap(); state.mediaDirectoryHandle = null; state.pendingUploadPersonId = null;
+    state.mediaRelativePaths = new WeakMap(); state.mediaDirectoryHandle = null; state.pendingUploadPersonId = null; state.pendingPortraitReplacement = null;
     syncMediaButton();
     state.primaryMediaKey = ''; state.primaryMedia.clear(); state.mediaTypes.clear();
     state.additionalMedia.clear();
@@ -1710,7 +1710,9 @@
     }
     const addButton = event.target.closest('button[data-add-media-for]');
     if (addButton) {
+      state.pendingPortraitReplacement = null;
       state.pendingUploadPersonId = addButton.dataset.addMediaFor;
+      elements.mediaUploadInput.accept = 'image/*,.pdf,application/pdf';
       elements.mediaUploadInput.click();
       return;
     }
@@ -1745,6 +1747,12 @@
   });
   elements.mediaUploadInput.addEventListener('change', (event) => {
     saveUploadedMedia([...(event.target.files || [])]);
+    elements.mediaUploadInput.accept = 'image/*,.pdf,application/pdf';
+  });
+  elements.mediaUploadInput.addEventListener('cancel', () => {
+    state.pendingUploadPersonId = null;
+    state.pendingPortraitReplacement = null;
+    elements.mediaUploadInput.accept = 'image/*,.pdf,application/pdf';
   });
   elements.primaryHomeButton.addEventListener('click', () => {
     showPrimaryPersonRelationshipMap();

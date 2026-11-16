@@ -1,7 +1,7 @@
-// QA probe: does Daniel Magnus / Samuel Magnus get a photo, and does the hero reframe UI exist?
-export default async function run(page) {
+// Manual QA probe for the hero-photo workflow; requires the local QA server and sample GEDCOM.
+export default async function run(page, baseUrl = process.env.KINSHIP_QA_URL || 'http://127.0.0.1:8811') {
   await page.setViewportSize({ width: 1500, height: 950 });
-  await page.goto('http://127.0.0.1:8811/index.html?v=' + Date.now(), { waitUntil: 'domcontentloaded' });
+  await page.goto(`${baseUrl.replace(/\/$/, '')}/index.html?v=${Date.now()}`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(2000);
   await page.evaluate(() => document.querySelector('#mediaFolderDialog')?.close());
   // Give the media-folder lookup a moment to register availability.
@@ -61,9 +61,9 @@ export default async function run(page) {
     if (!stage) return { missing: true };
     const rect = stage.getBoundingClientRect();
     const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
-    stage.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: cx, clientY: cy }));
-    window.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: cx + 40, clientY: cy + 20 }));
-    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    stage.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerId: 1, clientX: cx, clientY: cy }));
+    stage.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, button: 0, pointerId: 1, clientX: cx + 40, clientY: cy + 20 }));
+    stage.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerId: 1, clientX: cx + 40, clientY: cy + 20 }));
     stage.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -120 }));
     const img = stage.querySelector('img');
     return { transform: img ? img.style.transform : null };
@@ -72,8 +72,7 @@ export default async function run(page) {
 
   // Save.
   await page.evaluate(() => {
-    [...document.querySelectorAll('.hero-frame-editor button')]
-      .find((b) => /save/i.test(b.textContent || ''))?.click();
+    document.querySelector('.hero-frame-apply')?.click();
   });
   await page.waitForTimeout(600);
 

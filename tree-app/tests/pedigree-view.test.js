@@ -32,12 +32,12 @@ function buildHarness(people, families) {
     return result;
   };
   const context = vm.createContext({ state, parentsOf, countryFlagForPlace: () => null });
-  vm.runInContext(`${source.slice(start, end)}\nthis.api = { pedigreeGenerations };`, context);
+  vm.runInContext(`${source.slice(start, end)}\nthis.api = { pedigreeGenerations, drawPedigreeLinks };`, context);
   return context.api;
 }
 
-const personEntry = (id, extra = {}) => [id, { id, name: `Person ${id}`, events: [], parentFamilyIds: [], ...extra }];
-const familyEntry = (id, extra = {}) => [id, { id, husbandId: '', wifeId: '', childIds: [], ...extra }];
+const personEntry = (id, extra = {}) => [id, { id, name: `Person ${id}`, events: [], parentFamilyIds: [], spouseFamilyIds: [], ...extra }];
+const familyEntry = (id, extra = {}) => [id, { id, husbandId: '', wifeId: '', childIds: [], marriage: null, ...extra }];
 
 test('a person with no parents yields a single generation row', () => {
   const api = buildHarness([personEntry('A', { parentFamilyIds: ["F1"] })], []);
@@ -117,4 +117,38 @@ test('an empty slot in a generation still contributes two empty parent slots', (
   );
   const rows = api.pedigreeGenerations('A', 4);
   assert.equal(JSON.stringify(rows), JSON.stringify([['A'], ['P', '']]));
+});
+
+test('pedigree connectors include a marriage line for a married selected couple', () => {
+  const calls = [];
+  const svg = { setAttribute() {}, append(node) { calls.push(node); } };
+  const flow = {
+    prepend() {},
+    getBoundingClientRect: () => ({ left: 0, top: 0 }),
+    querySelectorAll: () => []
+  };
+  const makeCard = (left, top, right = left + 80, bottom = top + 36) => ({
+    dataset: { pedigreePerson: 'true' },
+    getBoundingClientRect: () => ({ left, top, right, bottom, width: right - left, height: bottom - top })
+  });
+  const focus = makeCard(0, 0);
+  const spouse = makeCard(120, 0);
+  const parent1 = makeCard(220, 0);
+  const parent2 = makeCard(320, 0);
+  const columns = [
+    { querySelectorAll: () => [focus, spouse] },
+    { querySelectorAll: () => [parent1, parent2] }
+  ];
+  const family = { id: 'F1', husbandId: 'A', wifeId: 'B', childIds: ['C'], marriage: { type: 'MARR' } };
+  const people = new Map([
+    ['A', { id: 'A', spouseFamilyIds: ['F1'] }], ['B', { id: 'B', spouseFamilyIds: ['F1'] }],
+    ['C', { id: 'C', spouseFamilyIds: [], parentFamilyIds: ['F1'] }]
+  ]);
+  const context = vm.createContext({
+    document: { createElementNS: () => ({ setAttribute(name, value) { this[name] = value; }, append(node) { calls.push(node); } }) },
+    getComputedStyle: () => ({ zoom: '1' }), state: { people, families: new Map([['F1', family]]) }
+  });
+  vm.runInContext(`${source.slice(start, end)}\nglobalThis.draw = drawPedigreeLinks;`, context);
+  context.draw(flow, columns, [['A', 'B'], ['C']]);
+  assert.ok(calls.some((path) => path.class === 'pedigree-marriage-link' && /H 120/.test(path.d)));
 });

@@ -1,4 +1,5 @@
-Set-Location 'g:\Git\Kinship_Experimental\tree-app'
+$appDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+Push-Location $appDir
 $totalPass = 0; $totalFail = 0
 Get-ChildItem tests\*.test.js | ForEach-Object {
   $out = (& node --test $_.FullName) | Out-String
@@ -8,3 +9,4 @@ Get-ChildItem tests\*.test.js | ForEach-Object {
   $script:totalPass += [Math]::Max($p,0); $script:totalFail += [Math]::Max($fl,0)
 }
 Write-Host "TOTAL pass=$totalPass fail=$totalFail"
+Pop-Location

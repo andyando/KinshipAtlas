@@ -1,4 +1,6 @@
-$t = Get-Content 'C:\Users\agand\AppData\Local\Temp\funcs.txt' | Select-Object -Skip 2 | ForEach-Object {
+$functionReport = Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path 'tools\artifacts\funcs.txt'
+if (-not (Test-Path -LiteralPath $functionReport)) { throw "Function report not found: $functionReport. Generate it from tools/analysis/analyze.ps1 first." }
+$t = Get-Content -LiteralPath $functionReport | Select-Object -Skip 2 | ForEach-Object {
   $p = $_ -split "`t"
   [pscustomobject]@{ N = $p[0]; L = [int]$p[1]; C = [int]$p[2] }
 }

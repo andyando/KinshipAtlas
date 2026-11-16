@@ -334,18 +334,25 @@
   }
 
   async function saveUploadedMedia(files) {
-    const person = state.people.get(state.pendingUploadPersonId);
+    const portraitPersonId = state.pendingPortraitReplacement;
+    const replacePortrait = Boolean(portraitPersonId);
+    const person = state.people.get(portraitPersonId || state.pendingUploadPersonId);
     const directoryHandle = state.mediaDirectoryHandle;
     const mode = mediaSaveMode();
     state.pendingUploadPersonId = null;
+    state.pendingPortraitReplacement = null;
     elements.mediaUploadInput.value = '';
-    if (!person || mode === 'none' || mode === 'unsupported') return;
+    if (!person) return;
+    if (mode === 'none' || mode === 'unsupported') {
+      showToast('Choose a writable media folder or run the local helper before uploading media.');
+      return;
+    }
 
     let savedCount = 0;
     let failedCount = 0;
     const addedPaths = new Set();
-    for (const file of files) {
-      if (!isSupportedMediaFile(file)) {
+    for (const file of (replacePortrait ? files.slice(0, 1) : files)) {
+      if (replacePortrait ? !isImageFile(file) : !isSupportedMediaFile(file)) {
         failedCount += 1;
         continue;
       }
@@ -356,6 +363,10 @@
         const paths = state.additionalMedia.get(person.id) || [];
         if (!paths.includes(fileName)) paths.push(fileName);
         state.additionalMedia.set(person.id, paths);
+        if (replacePortrait) {
+          state.primaryMedia.set(person.id, fileName);
+          state.mediaTypes.set(fileName, 'portrait');
+        }
         savedCount += 1;
       } catch {
         failedCount += 1;
@@ -369,15 +380,23 @@
         justAddedMedia = { personId: person.id, paths: addedPaths };
       }
       render();
+      if (replacePortrait) {
+        const selectedHeroImage = elements.details.querySelector('.detail-monogram-photo');
+        if (selectedHeroImage) selectedHeroImage.title = 'Click to view this photo larger';
+      }
       justAddedMedia = null;
       elements.details.querySelector('.is-just-added')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       const linked = saveAdditionalMedia();
+      const primarySaved = replacePortrait ? savePrimaryMedia() : true;
+      const typesSaved = replacePortrait ? saveMediaTypes() : true;
       await persistActiveSession();
-      const linkStatus = linked ? 'Person links saved in this browser.' : 'Links will last only for this tab because browser storage is unavailable.';
+      const linkStatus = linked && primarySaved && typesSaved ? 'Person links and portrait selection saved in this browser.' : 'Some media preferences will last only for this tab because browser storage is unavailable.';
       const destination = mode === 'folder'
         ? 'saved to the selected folder'
         : `saved to the helper's media folder (${state.mediaHelper.folder})`;
-      showToast(`${savedCount} media item${savedCount === 1 ? '' : 's'} ${destination}. ${linkStatus}${failedCount ? ` ${failedCount} item${failedCount === 1 ? '' : 's'} could not be saved.` : ''}`);
+      showToast(replacePortrait
+        ? `${savedCount} replacement portrait saved and set as the hero image. It was attached to ${person.name} and classified as Portrait. ${destination}. ${linkStatus}${failedCount ? ` ${failedCount} item${failedCount === 1 ? '' : 's'} could not be saved.` : ''}`
+        : `${savedCount} media item${savedCount === 1 ? '' : 's'} ${destination}. ${linkStatus}${failedCount ? ` ${failedCount} item${failedCount === 1 ? '' : 's'} could not be saved.` : ''}`);
     } else if (failedCount) {
       render();
       showToast(`${failedCount} item${failedCount === 1 ? '' : 's'} could not be saved. Choose an image or PDF and try again.`);

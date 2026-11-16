@@ -55,7 +55,7 @@
     fileName: '', searchText: '', history: [], historyIndex: -1, zoom: 1, showSiblings: true,
     mediaIndex: null, mediaUrls: new Map(), mediaRelativePaths: new WeakMap(), mediaDirectoryHandle: null,
     rememberedMediaDirectoryHandle: null, mediaFolderPicked: false, mediaHelper: null,
-    pendingUploadPersonId: null, pendingResearchPersonId: null,
+    pendingUploadPersonId: null, pendingPortraitReplacement: null, pendingResearchPersonId: null,
     pendingPersonSummaryId: null,
     pendingLifeEvent: null,
     primaryMediaKey: '', primaryMedia: new Map(), additionalMedia: new Map(), mediaTypes: new Map(), primaryPersonId: '',

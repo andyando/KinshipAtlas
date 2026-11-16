@@ -207,3 +207,14 @@ test('clearing a primary person is persisted as an explicit cleared value', asyn
   await h.context.syncSelectionsToHelper();
   assert.equal(h.posts.at(-1).selections[key], null);
 });
+
+test('hero framing preferences load from and save to helper selections', async () => {
+  const key = 'kinship-atlas:hero-frame:I1';
+  const framing = { file: 'portrait.jpg', x: 0.12, y: -0.08, scale: 1.6 };
+  const h = harness({ saved: { [key]: framing } });
+  await h.context.loadHelperSelections();
+  assert.deepEqual(h.context.readSelection(key), framing);
+  h.context.storeSelection(key, { ...framing, scale: 1.8 });
+  await h.context.syncSelectionsToHelper();
+  assert.equal(h.posts.at(-1).selections[key].scale, 1.8);
+});

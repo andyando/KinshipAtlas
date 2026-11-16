@@ -497,17 +497,17 @@
   }
 
   function drawConnectors(svg, nodeKeys, selectedId, partners) {
-    const canvasRect = elements.canvas.getBoundingClientRect();
-    const width = Math.max(elements.canvas.scrollWidth, canvasRect.width);
-    const height = Math.max(elements.canvas.scrollHeight, canvasRect.height);
+    const canvas = elements.canvas;
+    const canvasRect = canvas.getBoundingClientRect();
+    const zoom = Number.parseFloat(getComputedStyle(canvas).zoom) || 1;
+    const width = Math.max(canvas.scrollWidth, canvas.clientWidth);
+    const height = Math.max(canvas.scrollHeight, canvas.clientHeight);
     svg.setAttribute('width', String(width));
     svg.setAttribute('height', String(height));
     svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
     svg.replaceChildren();
 
-    const grandchildCards = [...elements.canvas.querySelectorAll('.person-card[data-generation="2"]')];
-    const firstGrandchildTop = grandchildCards[0]?.getBoundingClientRect().top;
-    const grandchildrenWrap = grandchildCards.some((card) => Math.abs(card.getBoundingClientRect().top - firstGrandchildTop) > 1);
+
 
     function cardFor(generation, id) {
       return elements.canvas.querySelector(`.person-card[data-generation="${generation}"][data-person-id="${CSS.escape(id)}"]`);
@@ -516,30 +516,48 @@
       if (!card) return null;
       const rect = card.getBoundingClientRect();
       return {
-        x: rect.left - canvasRect.left + rect.width / 2,
-        y: side === 'top' ? rect.top - canvasRect.top : rect.bottom - canvasRect.top
+        x: (rect.left - canvasRect.left + rect.width / 2) / zoom,
+        y: (side === 'top' ? rect.top - canvasRect.top : rect.bottom - canvasRect.top) / zoom
       };
     }
-    function addPath(from, to, spouse = false) {
-      if (!from || !to) return;
+    function appendPath(d, className) {
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      if (spouse) {
-        const left = from.x < to.x ? from : to;
-        const right = from.x < to.x ? to : from;
-        const y = Math.max(12, Math.min(left.y, right.y) - 18);
-        path.setAttribute('d', `M ${left.x} ${left.y} C ${left.x} ${y}, ${right.x} ${y}, ${right.x} ${right.y}`);
-        path.setAttribute('class', 'spouse-link');
-      } else {
-        const middle = (from.y + to.y) / 2;
-        path.setAttribute('d', `M ${from.x} ${from.y} C ${from.x} ${middle}, ${to.x} ${middle}, ${to.x} ${to.y}`);
-        path.setAttribute('class', 'parent-link');
-      }
+      path.setAttribute('d', d);
+      path.setAttribute('class', className);
       svg.append(path);
+    }
+    function rectPoint(card) {
+      if (!card) return null;
+      const rect = card.getBoundingClientRect();
+      return {
+        left: (rect.left - canvasRect.left) / zoom,
+        right: (rect.right - canvasRect.left) / zoom,
+        top: (rect.top - canvasRect.top) / zoom,
+        bottom: (rect.bottom - canvasRect.top) / zoom,
+        x: (rect.left - canvasRect.left + rect.width / 2) / zoom,
+        y: (rect.top - canvasRect.top + rect.height / 2) / zoom
+      };
+    }
+    function drawMarriage(first, second) {
+      if (!first || !second) return;
+      if (Math.abs(first.y - second.y) < 2) {
+        const left = first.x < second.x ? first : second;
+        const right = first.x < second.x ? second : first;
+        appendPath(`M ${left.right} ${left.y} H ${right.left}`, 'marriage-link');
+      } else if (Math.abs(first.x - second.x) < 2) {
+        const upper = first.y < second.y ? first : second;
+        const lower = first.y < second.y ? second : first;
+        appendPath(`M ${upper.x} ${upper.bottom} V ${lower.top}`, 'marriage-link');
+      } else {
+        const left = first.x < second.x ? first : second;
+        const right = first.x < second.x ? second : first;
+        const junctionX = (left.right + right.left) / 2;
+        appendPath(`M ${left.right} ${left.y} H ${junctionX} V ${right.y} H ${right.left}`, 'marriage-link');
+      }
     }
 
     for (const [familyId, family] of state.families) {
       for (const generation of [-3, -2, -1, 0, 1]) {
-        if (generation === 1 && grandchildrenWrap) continue;
         const parentPoints = [family.husbandId, family.wifeId].filter(Boolean)
           .filter((parentId) => nodeKeys.has(`${generation}|${parentId}`))
           .map((parentId) => point(cardFor(generation, parentId), 'bottom'))
@@ -554,12 +572,21 @@
         };
         for (const childId of family.childIds) {
           if (!nodeKeys.has(`${generation + 1}|${childId}`)) continue;
-          addPath(origin, point(cardFor(generation + 1, childId), 'top'));
+          const child = point(cardFor(generation + 1, childId), 'top');
+          if (child) {
+            const middle = (origin.y + child.y) / 2;
+            appendPath(`M ${origin.x} ${origin.y} C ${origin.x} ${middle}, ${child.x} ${middle}, ${child.x} ${child.y}`, 'parent-link');
+          }
+        }
+        if (family.marriage) {
+          const husband = family.husbandId && nodeKeys.has(`${generation}|${family.husbandId}`)
+            ? rectPoint(cardFor(generation, family.husbandId)) : null;
+          const wife = family.wifeId && nodeKeys.has(`${generation}|${family.wifeId}`)
+            ? rectPoint(cardFor(generation, family.wifeId)) : null;
+          if (husband && wife) drawMarriage(husband, wife);
         }
       }
     }
-    const focusCard = cardFor(0, selectedId);
-    for (const partnerId of partners) addPath(point(focusCard, 'bottom'), point(cardFor(0, partnerId), 'bottom'), true);
   }
 
   function renderRoster() {
@@ -1170,25 +1197,9 @@
     showToast('Select ☆ on an image to make it the card image.');
   }
 
-  // Full-screen preview of the card image: expands to 5x the portrait size in a
-  // modal overlay with a shrink button (and Escape/backdrop close) to return.
-  function makeHeroExpandButton(person) {
-    const expand = document.createElement('button');
-    expand.type = 'button';
-    expand.className = 'detail-monogram-expand';
-    expand.title = 'Expand image';
-    expand.setAttribute('aria-label', 'Expand the card image to full screen');
-    const icon = document.createElement('span');
-    icon.className = 'expand-glyph';
-    icon.textContent = '⤢';
-    expand.append(icon);
-    expand.addEventListener('click', (event) => {
-      event.stopPropagation();
-      showExpandedHeroImage(person);
-    });
-    return expand;
-  }
 
+
+  // Full-screen preview of the card image, opened by clicking the portrait.
   function showExpandedHeroImage(person) {
     const cardImage = primaryImageFor(person);
     if (!cardImage) return;
@@ -1198,6 +1209,8 @@
     img.className = 'hero-expand-image';
     img.src = mediaUrl(cardImage.file);
     img.alt = `${person.name} — enlarged card image`;
+    img.style.maxWidth = '92vw';
+    img.style.maxHeight = 'min(700px, 88vh)';
     const shrink = document.createElement('button');
     shrink.type = 'button';
     shrink.className = 'hero-expand-shrink';
@@ -1214,36 +1227,50 @@
 
   // --- Hero image reframing -------------------------------------------------
   // Stores how the card image sits inside its circular frame, per person, in
-  // browser storage so the framing survives across sessions until changed.
+  // browser storage and the helper-backed selections file.
   function heroFrameStorageKey(personId) {
     return `kinship-atlas:hero-frame:${personId}`;
   }
 
   function loadHeroFrameState(personId, fileName) {
-    try {
-      const raw = localStorage.getItem(heroFrameStorageKey(personId));
-      if (!raw) return null;
-      const saved = JSON.parse(raw);
-      if (saved && saved.file === fileName && typeof saved.scale === 'number') return saved;
-    } catch (error) {
-      console.warn('Saved hero framing could not be read.', error);
-    }
+    const saved = readSelection(heroFrameStorageKey(personId));
+    if (saved && saved.file === fileName && typeof saved.scale === 'number') return saved;
     return null;
   }
 
   function saveHeroFrameState(personId, framing) {
-    try {
-      localStorage.setItem(heroFrameStorageKey(personId), JSON.stringify(framing));
-    } catch (error) {
-      console.warn('Hero framing could not be saved.', error);
-    }
+    return storeSelection(heroFrameStorageKey(personId), framing);
   }
 
-  function applyHeroFrameTransform(img, framing) {
-    if (!img || !framing) return;
-    img.style.borderRadius = '0';
-    img.style.transformOrigin = 'center';
-    img.style.transform = `translate(${(framing.x || 0) * 100}%, ${(framing.y || 0) * 100}%) scale(${framing.scale || 1})`;
+  function createHeroFrameRenderer(framing) {
+    const cropSize = 0.84;
+    const clamp = () => {
+      framing.scale = Math.min(3, Math.max(1, Number(framing.scale) || 1));
+      const maxOffset = Math.max(0, (framing.scale - cropSize) / 2);
+      framing.x = Math.min(maxOffset, Math.max(-maxOffset, Number(framing.x) || 0));
+      framing.y = Math.min(maxOffset, Math.max(-maxOffset, Number(framing.y) || 0));
+    };
+    const paint = (img, scale, translateScale) => {
+      if (!img) return;
+      img.style.transformOrigin = 'center';
+      img.style.transform = `translate(${framing.x * translateScale * 100}%, ${framing.y * translateScale * 100}%) scale(${framing.scale * scale})`;
+    };
+    clamp();
+    return {
+      paintHero(img) { paint(img, 1 / cropSize, 1 / cropSize); },
+      paintHelper(img) { paint(img, 1, 1); },
+      setOffset(dx, dy) {
+        framing.x += dx;
+        framing.y += dy;
+        clamp();
+      },
+      zoomBy(direction) {
+        framing.scale = Math.min(3, Math.max(1, framing.scale + direction * 0.2));
+        clamp();
+      },
+      reset() { framing.x = 0; framing.y = 0; framing.scale = 1; },
+      get state() { return { ...framing }; }
+    };
   }
 
   // Bigger editor: shows the photo enlarged inside a square stage with a
@@ -1262,12 +1289,14 @@
         <h2>Reframe photo — ${person.name}</h2>
         <button type="button" class="dialog-close" aria-label="Close">&times;</button>
       </header>
-      <p class="hero-frame-hint">Drag the photo to move it, and zoom until it sits well inside the circle. The dashed circle shows how it will be cropped.</p>
+      <p class="hero-frame-hint">Drag the photo or use the controls to choose what appears inside the circular hero frame. The dashed circle shows the exact crop.</p>
       <div class="hero-frame-stage">
         <img class="hero-frame-photo" alt="${person.name} — reframing preview">
         <div class="hero-frame-circle" aria-hidden="true"></div>
       </div>
       <div class="hero-frame-controls">
+        <button type="button" class="hero-frame-replace">Replace portrait</button>
+        <span class="hero-frame-controls-spacer"></span>
         <button type="button" class="hero-frame-zoom" data-zoom="out" aria-label="Zoom out">−</button>
         <span class="hero-frame-zoom-value">100%</span>
         <button type="button" class="hero-frame-zoom" data-zoom="in" aria-label="Zoom in">+</button>
@@ -1281,38 +1310,47 @@
     const stage = dialog.querySelector('.hero-frame-stage');
     const img = dialog.querySelector('.hero-frame-photo');
     const zoomValue = dialog.querySelector('.hero-frame-zoom-value');
+    const replaceButton = dialog.querySelector('.hero-frame-replace');
+    const frameRenderer = createHeroFrameRenderer(working);
     img.src = mediaUrl(cardImage.file);
 
-    const clampPan = () => {
-      const limit = Math.max(0, (working.scale - 1) / 2);
-      working.x = Math.min(limit, Math.max(-limit, working.x));
-      working.y = Math.min(limit, Math.max(-limit, working.y));
-    };
+    const close = () => { dialog.close(); dialog.remove(); };
+    replaceButton.disabled = mediaSaveMode() === 'none' || mediaSaveMode() === 'unsupported';
+    replaceButton.title = replaceButton.disabled ? 'Select a writable media folder or use the local helper before replacing a portrait' : 'Upload and attach a new portrait image';
+    replaceButton.addEventListener('click', () => {
+      state.pendingPortraitReplacement = person.id;
+      state.pendingUploadPersonId = null;
+      close();
+      elements.mediaUploadInput.accept = 'image/*';
+      elements.mediaUploadInput.click();
+    });
+
     const render = () => {
-      clampPan();
-      applyHeroFrameTransform(img, working);
+      frameRenderer.paintHelper(img);
       zoomValue.textContent = `${Math.round(working.scale * 100)}%`;
     };
     render();
 
     let dragging = null;
-    img.addEventListener('pointerdown', (event) => {
-      dragging = { x: event.clientX, y: event.clientY, startX: working.x, startY: working.y };
-      img.setPointerCapture(event.pointerId);
+    stage.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      dragging = { x: event.clientX, y: event.clientY, offsetX: working.x, offsetY: working.y };
+      stage.setPointerCapture(event.pointerId);
       event.preventDefault();
     });
-    img.addEventListener('pointermove', (event) => {
+    stage.addEventListener('pointermove', (event) => {
       if (!dragging) return;
-      const size = stage.getBoundingClientRect().width || 1;
-      working.x = dragging.startX + (event.clientX - dragging.x) / size;
-      working.y = dragging.startY + (event.clientY - dragging.y) / size;
+      const rect = stage.getBoundingClientRect();
+      const desiredX = dragging.offsetX + (event.clientX - dragging.x) / (rect.width || 1);
+      const desiredY = dragging.offsetY + (event.clientY - dragging.y) / (rect.height || 1);
+      frameRenderer.setOffset(desiredX - working.x, desiredY - working.y);
       render();
     });
-    img.addEventListener('pointerup', () => { dragging = null; });
-    img.addEventListener('pointercancel', () => { dragging = null; });
+    stage.addEventListener('pointerup', () => { dragging = null; });
+    stage.addEventListener('pointercancel', () => { dragging = null; });
 
     const zoomStep = (direction) => {
-      working.scale = Math.min(3, Math.max(1, working.scale + direction * 0.2));
+      frameRenderer.zoomBy(direction);
       render();
     };
     dialog.querySelector('[data-zoom="in"]').addEventListener('click', () => zoomStep(1));
@@ -1322,20 +1360,20 @@
       zoomStep(event.deltaY < 0 ? 1 : -1);
     }, { passive: false });
     dialog.querySelector('.hero-frame-reset').addEventListener('click', () => {
-      working.x = 0; working.y = 0; working.scale = 1;
+      frameRenderer.reset();
       render();
     });
 
-    const close = () => { dialog.close(); dialog.remove(); };
     dialog.querySelector('.hero-frame-cancel').addEventListener('click', close);
     dialog.querySelector('.dialog-close').addEventListener('click', close);
     dialog.addEventListener('click', (event) => { if (event.target === dialog) close(); });
-    dialog.querySelector('.hero-frame-apply').addEventListener('click', () => {
-      clampPan();
-      saveHeroFrameState(person.id, { file: cardImage.file, x: working.x, y: working.y, scale: working.scale });
+    dialog.querySelector('.hero-frame-apply').addEventListener('click', async () => {
+      const stored = saveHeroFrameState(person.id, { ...frameRenderer.state, file: cardImage.file });
       close();
       renderDetails();
-      showToast('Photo framing saved.');
+      const synced = await syncSelectionsToHelper();
+      if (stored && synced) showToast('Photo framing saved.');
+      else showToast('Photo framing could not be saved. Check browser storage and kinship-selections.json.');
     });
 
     document.body.append(dialog);
@@ -1476,19 +1514,19 @@
     const cardImage = primaryImageFor(person);
     if (cardImage) {
       monogram.classList.add('has-photo');
+      const crop = document.createElement('div');
+      crop.className = 'detail-monogram-crop';
       const photo = document.createElement('img');
       photo.className = 'detail-monogram-photo';
       photo.src = mediaUrl(cardImage.file);
       photo.alt = `${person.name} card image`;
-      const framing = loadHeroFrameState(person.id, cardImage.file);
-      if (framing && (framing.x || framing.y || framing.scale !== 1)) {
-        monogram.classList.add('hero-frame-applied');
-        applyHeroFrameTransform(photo, framing);
-      }
-      photo.title = 'Click to reframe this photo';
+      const framing = loadHeroFrameState(person.id, cardImage.file) || { file: cardImage.file, x: 0, y: 0, scale: 1 };
+      monogram.classList.add('hero-frame-applied');
+      createHeroFrameRenderer(framing).paintHero(photo);
+      photo.title = 'Click to view this photo larger';
       photo.addEventListener('click', (event) => {
         event.stopPropagation();
-        openHeroReframeEditor(person);
+        showExpandedHeroImage(person);
       });
       const changeImage = document.createElement('button');
       changeImage.type = 'button';
@@ -1497,9 +1535,9 @@
       changeImage.title = 'Choose a different card image';
       changeImage.setAttribute('aria-label', 'Choose a different card image from attached media');
       setButtonContent(changeImage, 'edit', '');
-      monogram.append(photo, changeImage);
+      crop.append(photo);
+      monogram.append(crop, changeImage);
       monogram.append(makeHeroReframeButton(person));
-      monogram.append(makeHeroExpandButton(person));
     } else {
       monogram.textContent = initials(person.name);
       monogram.classList.add('detail-monogram-placeholder');
@@ -2454,12 +2492,49 @@
     svg.setAttribute('aria-hidden', 'true');
     flow.prepend(svg);
     const flowBox = flow.getBoundingClientRect();
+    const zoom = Number.parseFloat(getComputedStyle(flow).zoom) || 1;
     const boxOf = (el) => {
       const rect = el.getBoundingClientRect();
-      return { left: rect.left - flowBox.left, right: rect.right - flowBox.left, midY: rect.top - flowBox.top + rect.height / 2 };
+      return {
+        left: (rect.left - flowBox.left) / zoom,
+        right: (rect.right - flowBox.left) / zoom,
+        top: (rect.top - flowBox.top) / zoom,
+        bottom: (rect.bottom - flowBox.top) / zoom,
+        midX: (rect.left - flowBox.left + rect.width / 2) / zoom,
+        midY: (rect.top - flowBox.top + rect.height / 2) / zoom
+      };
     };
     const cardAt = (generation, slot) => columns[generation]?.querySelectorAll('.pedigree-card')[slot] || null;
-    for (let generation = 0; generation < columns.length - 1; generation += 1) {
+    for (let generation = 0; generation < columns.length; generation += 1) {
+      const ids = rows[generation] || [];
+      for (let slot = 0; slot < ids.length; slot += 1) {
+        const personId = ids[slot];
+        if (!personId) continue;
+        const person = state.people.get(personId);
+        for (const familyId of person?.spouseFamilyIds || []) {
+          const family = state.families.get(familyId);
+          if (!family?.marriage || !family.husbandId || !family.wifeId) continue;
+          const spouseId = family.husbandId === personId ? family.wifeId : family.husbandId;
+          const spouseSlot = ids.indexOf(spouseId);
+          if (spouseSlot < 0 || spouseSlot <= slot) continue;
+          const first = boxOf(cardAt(generation, slot));
+          const second = boxOf(cardAt(generation, spouseSlot));
+          if (!first || !second) continue;
+          const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          line.setAttribute('class', 'pedigree-marriage-link');
+          if (Math.abs(first.midY - second.midY) < 2) {
+            const left = first.midX < second.midX ? first : second;
+            const right = first.midX < second.midX ? second : first;
+            line.setAttribute('d', `M ${left.right} ${left.midY} H ${right.left}`);
+          } else {
+            const left = first.midX < second.midX ? first : second;
+            const right = first.midX < second.midX ? second : first;
+            const junctionX = (left.right + right.left) / 2;
+            line.setAttribute('d', `M ${left.right} ${left.midY} H ${junctionX} V ${right.midY} H ${right.left}`);
+          }
+          svg.append(line);
+        }
+      }
       const childIds = rows[generation] || [];
       childIds.forEach((childId, slot) => {
         if (!childId) return;

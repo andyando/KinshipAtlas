@@ -1,8 +1,10 @@
 'use strict';
 // Replace section 7 (WikiTree) with the unified Search Public Records layer.
 // Works line-wise so nothing outside the marked range can be touched.
-const fs = require('fs');
-const lines = fs.readFileSync('app.js', 'utf8').replace(/\r\n/g, '\n').split('\n');
+const fs = require('node:fs');
+const path = require('node:path');
+const appPath = path.resolve(__dirname, '..', '..', 'app.js');
+const lines = fs.readFileSync(appPath, 'utf8').replace(/\r\n/g, '\n').split('\n');
 
 const bannerIdx = lines.findIndex((l) => l.trim() === '// 7. WikiTree research integration');
 if (bannerIdx < 0) { console.error('banner line missing'); process.exit(1); }
@@ -133,5 +135,5 @@ const replacement = [
 const before = lines.slice(0, start);
 const after = lines.slice(endLine);
 const result = [...before, ...replacement, '', ...after];
-fs.writeFileSync('app.js', result.join('\n'));
+fs.writeFileSync(appPath, result.join('\n'));
 console.log(`replaced lines ${start + 1}-${endLine} (${endLine - start} old lines)`);

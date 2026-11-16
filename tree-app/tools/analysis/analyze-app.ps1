@@ -1,6 +1,8 @@
 # Phase 2 helper — responsibility snapshot of app.js (sections & counts)
 # Read-only: prints section banner lines and function counts. Modifies nothing.
-Set-Location 'g:\Git\Kinship_Experimental\tree-app'
+$appDir = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+Push-Location $appDir
+try {
 
 $src = Get-Content app.js -Raw
 $lines = (Get-Content app.js).Count
@@ -28,3 +30,4 @@ for ($i = 0; $i -lt $decls.Count; $i++) {
   $size = $end - $start
   if ($size -ge 60) { "{0,5} lines  {1}  (starts line {2})" -f $size, $decls[$i].Matches[0].Groups[2].Value, $start }
 }
+} finally { Pop-Location }

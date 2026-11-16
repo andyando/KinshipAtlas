@@ -26,7 +26,7 @@ function harness({ children = false, greatGrandparents = true, siblings = false,
     append(value) { paths.push(value); }
   };
   const canvas = {
-    scrollWidth: 1000, scrollHeight: 1000,
+    scrollWidth: 1000, scrollHeight: 1000, clientWidth: 1000, clientHeight: 1000,
     replaceChildren() { rows.length = 0; cards.clear(); groups.clear(); },
     prepend() {},
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 1000, height: 1000 }),
@@ -43,7 +43,8 @@ function harness({ children = false, greatGrandparents = true, siblings = false,
     state: {
       selectedId: 'focus', people, showSiblings: siblings,
       families: new Map([...offspring].map(([parent, childIds]) => [parent, {
-        husbandId: parent, wifeId: couple && parent === 'great' ? 'wife' : '', childIds
+        husbandId: parent, wifeId: couple && parent === 'great' ? 'wife' : '', childIds,
+        marriage: parent === 'focus' ? { type: 'MARR' } : null
       }]))
     },
     elements: { canvas, generationLabel: {}, graphSummary: {} },
@@ -58,7 +59,7 @@ function harness({ children = false, greatGrandparents = true, siblings = false,
         getBoundingClientRect: () => ({ left: 10, top: 0, bottom: 210, width: 240 })
       });
       for (const person of people) cards.set(`${generation}|${person.id}`, {
-        getBoundingClientRect: () => ({ left: 0, top: (generation + 3) * 120, bottom: (generation + 3) * 120 + 90, width: 240 })
+        getBoundingClientRect: () => ({ left: person.left || 0, right: (person.left || 0) + 240, top: (generation + 3) * 120, bottom: (generation + 3) * 120 + 90, width: 240, height: 90 })
       });
     },
     document: {
@@ -67,6 +68,7 @@ function harness({ children = false, greatGrandparents = true, siblings = false,
         return { attributes: {}, setAttribute(key, value) { this.attributes[key] = value; } };
       }
     },
+    getComputedStyle: () => ({ zoom: '1' }),
     CSS: { escape: (id) => id },
     requestAnimationFrame: (callback) => callback()
   });

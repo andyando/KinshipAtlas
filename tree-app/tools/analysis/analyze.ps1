@@ -1,4 +1,6 @@
-Set-Location 'g:\Git\Kinship_Experimental\tree-app'
+$appDir = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+Push-Location $appDir
+try {
 $lines = (Get-Content app.js).Count
 Write-Host "TOTAL LINES: $lines"
 $funcs = Get-Content app.js | Select-String '^(?:\s{2})?function (\w+)\s*\(' | ForEach-Object {
@@ -11,3 +13,4 @@ for ($i = 0; $i -lt $funcs.Count; $i++) {
   $end = if ($i -lt $funcs.Count - 1) { $funcs[$i + 1].Line - 1 } else { $lines }
   Write-Host ("{0}`t{1}`t{2}" -f $funcs[$i].Name, $funcs[$i].Line, ($end - $funcs[$i].Line + 1))
 }
+} finally { Pop-Location }

@@ -4,7 +4,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const SRC = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+const appDir = path.resolve(__dirname, '..', '..');
+const SRC = fs.readFileSync(path.join(appDir, 'app.js'), 'utf8');
 const EOL = /\r\n/.test(SRC) ? '\r\n' : '\n';
 const lines = SRC.split(EOL);
 
@@ -45,8 +46,8 @@ const MODULES = [
   { file: '14-map-print.js', from: 9045, to: lines.length, name: 'Map, print, defaults, about/help and startup wiring' },
 ];
 
-const outDir = path.join(__dirname, 'src', 'modules');
-fs.rmSync(path.join(__dirname, 'src'), { recursive: true, force: true });
+const outDir = path.join(appDir, 'src', 'modules');
+fs.rmSync(path.join(appDir, 'src'), { recursive: true, force: true });
 fs.mkdirSync(outDir, { recursive: true });
 
 let cursor = 1;
@@ -62,7 +63,7 @@ for (const m of MODULES) {
 }
 if (cursor !== lines.length + 1) throw new Error(`Unused tail: last used line ${cursor - 1}, total ${lines.length}`);
 
-fs.writeFileSync(path.join(__dirname, 'src', 'modules.json'),
+fs.writeFileSync(path.join(appDir, 'src', 'modules.json'),
   JSON.stringify({ eol: EOL === '\r\n' ? 'crlf' : 'lf', totalLines: lines.length, modules: manifests }, null, 2));
 
 // Immediate verification: reassemble in memory and diff bytes.

@@ -1,4 +1,6 @@
-Set-Location 'g:\Git\Kinship_Experimental\tree-app'
+$appDir = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+Push-Location $appDir
+try {
 $lines = (Get-Content app.js).Count
 $decls = Select-String -Path app.js -Pattern '^\s*(async\s+)?function\s+([A-Za-z_$]+)'
 "TOTAL LINES: $lines"
@@ -13,3 +15,4 @@ for ($i = 0; $i -lt $decls.Count; $i++) {
   $size = $end - $start
   if ($size -ge 100) { "{0,5} lines  {1} (line {2})" -f $size, $decls[$i].Matches[0].Groups[2].Value, $start }
 }
+} finally { Pop-Location }
