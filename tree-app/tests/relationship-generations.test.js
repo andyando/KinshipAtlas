@@ -10,11 +10,15 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const graphSource = source.slice(source.indexOf('  function renderGraph()'), source.indexOf('  function renderRoster()'));
 const levelsSource = source.slice(source.indexOf('  function generationLevels('), source.indexOf('  function yearFrom('));
 
-function harness({ children = false, greatGrandparents = true, siblings = false, couple = false, partners = [] } = {}) {
-  const people = new Map(['focus', 'parent', 'grandparent', 'great', 'wife', 'child', 'sibling', ...partners].map((id) => [id, { id, parentFamilyIds: [] }]));
+function harness({ children = false, childIds = null, grandchildren = {}, greatGrandparents = true, siblings = false, couple = false, partners = [] } = {}) {
+  const focusChildren = childIds || (children ? ['child'] : []);
+  const grandchildIds = Object.values(grandchildren).flat();
+  const people = new Map([...new Set(['focus', 'parent', 'grandparent', 'great', 'wife', 'child', 'sibling', ...partners, ...focusChildren, ...grandchildIds])].map((id) => [id, { id, parentFamilyIds: [] }]));
+  const offspring = new Map([['parent', siblings ? ['focus', 'sibling'] : ['focus']], ['grandparent', ['parent']], ['great', ['grandparent']], ['focus', focusChildren]]);
+  for (const id of focusChildren) offspring.set(id, grandchildren[id] || []);
+  for (const id of grandchildIds) if (!offspring.has(id)) offspring.set(id, []);
   people.get('grandparent').parentFamilyIds = ['great'];
   const parents = new Map([['focus', ['parent']], ['parent', ['grandparent']], ['grandparent', greatGrandparents ? (couple ? ['great', 'wife'] : ['great']) : []]]);
-  const offspring = new Map([['parent', ['focus', 'sibling']], ['grandparent', ['parent']], ['great', ['grandparent']], ['focus', children ? ['child'] : []]]);
   const rows = [];
   const cards = new Map();
   const groups = new Map();
@@ -73,7 +77,7 @@ function harness({ children = false, greatGrandparents = true, siblings = false,
     requestAnimationFrame: (callback) => callback()
   });
   vm.runInContext(levelsSource + graphSource, context);
-  return { context, rows, paths };
+  return { context, rows, paths, offspring, people };
 }
 
 test('a person without children shows great-grandparents and all ancestor connectors', () => {
@@ -144,12 +148,68 @@ test('great-grandparent couples stack the wife first and use a single connector 
   const groups = h.rows[0].familyGroups;
   assert.equal(groups.length, 1);
   assert.deepEqual(Array.from(groups[0].people, (person) => person.id), ['wife', 'great']);
-  assert.equal(h.paths.length, 3);
+  assert.equal(h.paths.length, 4);
+  assert.equal(h.paths.filter((path) => path.attributes.class === 'marriage-link').length, 1);
   assert.equal(h.paths.filter((path) => /^M 130 210 C /.test(path.attributes.d)).length, 1);
+  assert.equal(h.paths.filter((path) => path.attributes.class === 'parent-link').length, 3);
 });
 
 test('a lone recorded great-grandparent forms a single-card group', () => {
   const h = harness();
   h.context.renderGraph();
   assert.deepEqual(Array.from(h.rows[0].familyGroups[0].people, (person) => person.id), ['great']);
+});
+
+for (const generation of [-3, -2, -1, 0, 1, 2]) {
+  test(`spouse connectors do not require a marriage event in generation ${generation}`, () => {
+    const h = harness({ partners: ['spouse'] });
+    h.context.state.families = new Map([['couple', { husbandId: 'focus', wifeId: 'spouse', childIds: [], marriage: null }]]);
+    h.context.appendGeneration(null, '', generation, [{ id: 'focus', left: 0 }, { id: 'spouse', left: 260 }]);
+    const svg = {
+      setAttribute() {}, replaceChildren() { h.paths.length = 0; },
+      append(value) { h.paths.push(value); }
+    };
+    h.context.drawConnectors(svg, new Set([`${generation}|focus`, `${generation}|spouse`]), 'focus', []);
+    assert.equal(h.paths.length, 1);
+    assert.equal(h.paths[0].attributes.class, 'marriage-link');
+    assert.match(h.paths[0].attributes.d, /^M 240 .* H 260$/);
+  });
+}
+
+test('Show siblings starts off by default', () => {
+  const h = harness();
+  assert.equal(h.context.state.showSiblings, false);
+  h.context.renderGraph();
+  assert.deepEqual(Array.from(h.rows.find((row) => row.generation === 0).ids), ['focus']);
+});
+
+test('grandchildren are grouped beneath their closest parent in the displayed child order', () => {
+  const h = harness({
+    childIds: ['childC', 'childA', 'childB'],
+    grandchildren: { childA: ['a1', 'a2'], childB: ['b1', 'b2'], childC: ['c1', 'c2'] }
+  });
+  h.context.renderGraph();
+  const displayedChildren = Array.from(h.rows.find((row) => row.generation === 1).ids);
+  const displayedGrandchildren = Array.from(h.rows.find((row) => row.generation === 2).ids);
+  assert.deepEqual(displayedChildren, ['childC', 'childA', 'childB']);
+  assert.deepEqual(displayedGrandchildren, displayedChildren.flatMap((id) => h.offspring.get(id)));
+});
+
+test('each displayed child-to-grandchildren family gets its own color, shared by that family’s lines', () => {
+  const h = harness({
+    childIds: ['childA', 'childB'],
+    grandchildren: { childA: ['a1', 'a2'], childB: ['b1', 'b2'] }
+  });
+  h.context.renderGraph();
+  const grandchildLinks = h.paths.filter((path) => path.attributes.class === 'parent-link' && path.attributes['data-parent-generation'] === '1');
+  const colorsByFamily = new Map();
+  for (const path of grandchildLinks) {
+    const familyId = path.attributes['data-family-id'];
+    const color = path.attributes.style;
+    if (!colorsByFamily.has(familyId)) colorsByFamily.set(familyId, new Set());
+    colorsByFamily.get(familyId).add(color);
+  }
+  assert.equal(colorsByFamily.size, 2);
+  assert.equal(new Set([...colorsByFamily.values()].map((colors) => [...colors][0])).size, 2);
+  assert.ok([...colorsByFamily.values()].every((colors) => colors.size === 1));
 });

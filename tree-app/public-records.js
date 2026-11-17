@@ -60,7 +60,8 @@
       surname: (person?.surname || '').trim(),
       givenName: (person?.givenName || '').trim(),
       birthYear: year(birth?.date),
-      deathYear: year(death?.date)
+      deathYear: year(death?.date),
+      deathPlace: (death?.place || '').trim()
     };
   }
 
@@ -193,17 +194,35 @@
     return item || '';
   }
 
+  function matchesExactPersonName(text, person) {
+    const normalize = (value) => nameMatchText(value).toLocaleLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, ' ').trim().split(/\s+/).join(' ');
+    const title = normalize(text);
+    const given = (person.givenName || '').trim().split(/\s+/).filter(Boolean);
+    const surname = (person.surname || '').trim();
+    if (!title || !given.length || !surname) return false;
+    const variants = [
+      `${given[0]} ${surname}`,
+      `${surname} ${given[0]}`,
+      `${given.join(' ')} ${surname}`
+    ].map(normalize);
+    return variants.includes(title);
+  }
+
   function matchesPersonName(text, person) {
-    const haystack = nameMatchText(text).toLowerCase();
+    const haystack = nameMatchText(text).toLocaleLowerCase();
     if (!haystack) return false;
-    const given = (person.givenName || '').toLowerCase().trim();
-    const surname = (person.surname || '').toLowerCase().trim();
-    if (!given || !surname) return Boolean(given || surname) && haystack.includes(given || surname);
-    const firstGiven = given.split(/\s+/)[0];
-    const direct = haystack.includes(`${given} ${surname}`);
-    const reversed = haystack.includes(`${surname}, ${given}`) || haystack.includes(`${surname} ${given}`);
-    const loose = haystack.includes(firstGiven) && haystack.includes(surname);
-    return direct || reversed || loose;
+    const given = (person.givenName || '').trim().split(/\s+/).filter(Boolean);
+    const surname = (person.surname || '').trim();
+    if (!given.length || !surname) return false;
+    const firstAndLast = `${given[0]} ${surname}`.toLocaleLowerCase();
+    const surnameCommaFirst = `${surname}, ${given[0]}`.toLocaleLowerCase();
+    const fullGivenAndLast = `${given.join(' ')} ${surname}`.toLocaleLowerCase();
+    const escaped = [firstAndLast, surnameCommaFirst, fullGivenAndLast]
+      .filter((value, index, values) => values.indexOf(value) === index)
+      .map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const boundaries = escaped.map((value) => new RegExp(`(?:^|[^\\p{L}\\p{N}])${value}(?=$|[^\\p{L}\\p{N}])`, 'u'));
+    return boundaries.some((pattern) => pattern.test(haystack));
   }
 
   function isBotanyResult(item) {
@@ -278,19 +297,31 @@
   /* ------------------------------ Europeana ------------------------------ */
   async function searchEuropeana(person) {
     const { endpoint } = PROVIDER_CONFIG.europeana;
+    if (!person.givenName || !person.surname) return [];
     const results = [];
-    for (const query of buildQueries(person).slice(0, 2)) {
-      const url = `${endpoint}?query=${encodeURIComponent(query)}&rows=20`;
+    const firstName = person.givenName.trim().split(/\s+/).filter(Boolean)[0] || '';
+    const exactNames = [
+      firstName && person.surname ? `${firstName} ${person.surname}` : '',
+      firstName && person.surname ? `${person.surname}, ${firstName}` : '',
+      person.givenName && person.surname ? `${person.givenName} ${person.surname}` : ''
+    ].filter((query, index, queries) => query && queries.indexOf(query) === index);
+    const seenRecords = new Set();
+    for (const query of exactNames) {
+      const url = `${endpoint}?query=${encodeURIComponent(`\"${query}\"`)}&rows=20`;
       const data = await fetchProviderJson(
         'europeana', url,
-        () => `${BACKEND_BASE}/europeana?q=${encodeURIComponent(query)}`
+        () => `${BACKEND_BASE}/europeana?q=${encodeURIComponent(`\"${query}\"`)}`
       );
       for (const item of data?.items || []) {
         const title = Array.isArray(item.title) ? item.title.join(' · ') : item.title || 'Europeana record';
         const check = validateExternalUrl((item.guid || item.id || '').split('?')[0]);
         if (!check.isValid) continue;
-        // Keep only records whose text matches on both given name and surname.
-        if (!matchesPersonName([title, item.edmPlaceLabel?.def, item.dataProvider].filter(Boolean).join(' '), person)) continue;
+        // Match supported person-name phrases in title text only. Place/provider
+        // metadata may contain a common name fragment and caused false positives.
+        if (!matchesExactPersonName(title, person)) continue;
+        const recordKey = item.id || check.normalizedUrl;
+        if (seenRecords.has(recordKey)) continue;
+        seenRecords.add(recordKey);
         results.push({
           service: 'Europeana',
           title,
@@ -397,45 +428,40 @@
   }
 
   /* ----------------------------- Find A Grave ----------------------------- */
-  // No public API. The backend fetches the memorial search HTML and extracts
-  // the result count so the card reports how many memorials matched, and the
-  // item links to the same search for the user to open.
+  // Find A Grave has no public search API. Build a direct search URL with
+  // separate first- and last-name fields; never submit a middle name or fulltext.
   function findAGraveSearchUrl(person) {
     const { searchEndpoint } = PROVIDER_CONFIG.findAGrave;
     const first = person.givenName.split(/\s+/)[0] || '';
-    const params = new URLSearchParams();
-    if (first) params.set('firstname', first);
-    if (person.surname) params.set('lastname', person.surname);
-    if (person.birthYear) {
-      params.set('birthyear', String(person.birthYear));
-      params.set('birthyearadj', 'exact');
-    }
+    const params = new URLSearchParams({
+      fulltext: '',
+      firstname: first,
+      middlename: '',
+      lastname: person.surname || '',
+      nameSearchSplit: 'true',
+      birthyear: person.birthYear ? String(person.birthYear) : '',
+      birthyearfilter: '',
+      deathyear: person.deathYear ? String(person.deathYear) : '',
+      deathyearfilter: '',
+      location: person.deathPlace || '',
+      locationId: '',
+      bio: '',
+      linkedToName: '',
+      plot: '',
+      memorialid: '',
+      mcid: '',
+      datefilter: '',
+      orderby: 'r'
+    });
     return `${searchEndpoint}?${params.toString()}`;
   }
 
   async function searchFindAGrave(person) {
     const url = findAGraveSearchUrl(person);
-    const params = url.split('?')[1] || '';
-    let count = null;
-    try {
-      const response = await fetch(`${BACKEND_BASE}/findagrave?q=${encodeURIComponent(params)}`);
-      if (response.ok) {
-        const data = await response.json();
-        count = typeof data.count === 'number' ? data.count : null;
-      }
-    } catch (error) {
-      console.info('[Search Public Records] Find A Grave count unavailable:', error.message);
-    }
-    const label = count === null
-      ? 'Search Find A Grave memorials'
-      : `${count.toLocaleString()} matching memorial${count === 1 ? '' : 's'} found`;
-    // No memorials matched (or the count could not be read): show the empty
-    // state instead of presenting the search link as a "1 result found" item.
-    if (count === 0 || count === null) return [];
     return [{
       service: 'Find A Grave',
-      title: label,
-      description: `${person.fullName} · ${person.birthYear ?? '?'}–${person.deathYear ?? '?'}`,
+      title: 'Open Find A Grave search',
+      description: `${person.givenName.split(/\s+/)[0] || ''} ${person.surname} · ${person.birthYear ?? '?'}–${person.deathYear ?? '?'}`.trim(),
       url,
       sourceId: ''
     }];

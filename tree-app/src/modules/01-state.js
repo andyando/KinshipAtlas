@@ -52,7 +52,7 @@
   const state = {
     mapMode: false, mapStats: null, directoryMatches: [], reportsMode: false, mediaLibraryMode: false, pedigreeMode: false, pedigreeZoom: 1,
     people: new Map(), families: new Map(), sources: new Map(), selectedId: null,
-    fileName: '', searchText: '', history: [], historyIndex: -1, zoom: 1, showSiblings: true,
+    fileName: '', searchText: '', history: [], historyIndex: -1, zoom: 1, showSiblings: false,
     mediaIndex: null, mediaUrls: new Map(), mediaRelativePaths: new WeakMap(), mediaDirectoryHandle: null,
     rememberedMediaDirectoryHandle: null, mediaFolderPicked: false, mediaHelper: null,
     pendingUploadPersonId: null, pendingPortraitReplacement: null, pendingResearchPersonId: null,

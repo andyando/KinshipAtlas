@@ -66,17 +66,18 @@ test('query variations cover exact, short, initials and date forms', () => {
   assert.ok(queries.includes('1799 1879'), 'year pair');
 });
 
-test('person snapshot carries name and years', () => {
+test('person snapshot carries name, dates, and death place', () => {
   const snapshot = api.normalisePerson({
     name: 'Manuel Samuel Magnus', surname: 'Magnus', givenName: 'Manuel Samuel',
     events: [
       { type: 'BIRT', date: 'ABT 1799' },
-      { type: 'DEAT', date: '1879' }
+      { type: 'DEAT', date: '1879', place: 'Berlin, Germany' }
     ]
   });
   assert.equal(snapshot.fullName, 'Manuel Samuel Magnus');
   assert.equal(snapshot.birthYear, 1799);
   assert.equal(snapshot.deathYear, 1879);
+  assert.equal(snapshot.deathPlace, 'Berlin, Germany');
 });
 
 test('validateExternalUrl rejects malformed and local URLs', () => {
@@ -96,14 +97,25 @@ test('no public proxy services anywhere in frontend sources', () => {
   }
 });
 
-test('findAGrave builds a memorial search URL without scraping', () => {
-  const url = api.findAGraveSearchUrl({
-    fullName: 'Manuel Samuel Magnus', surname: 'Magnus', givenName: 'Manuel Samuel',
-    birthYear: 1799, deathYear: 1879
-  });
-  assert.ok(url.startsWith('https://www.findagrave.com/memorial/search?'), 'endpoint');
-  assert.ok(url.includes('firstname=Manuel'), 'first name');
-  assert.ok(url.includes('lastname=Magnus'), 'surname');
+test('Find A Grave search uses first given name, surname, both years, and burial place without middle names', () => {
+  const url = new URL(api.findAGraveSearchUrl({
+    fullName: 'Julius Alexander Magnus', surname: 'Magnus', givenName: 'Julius Alexander',
+    birthYear: 1828, deathYear: 1904, deathPlace: 'Berlin, Germany'
+  }));
+  assert.equal(url.origin + url.pathname, 'https://www.findagrave.com/memorial/search', 'endpoint');
+  assert.equal(url.searchParams.get('firstname'), 'Julius');
+  assert.equal(url.searchParams.get('middlename'), '', 'middle-name field remains empty');
+  assert.equal(url.searchParams.get('lastname'), 'Magnus');
+  assert.equal(url.searchParams.get('birthyear'), '1828');
+  assert.equal(url.searchParams.get('deathyear'), '1904');
+  assert.equal(url.searchParams.get('location'), 'Berlin, Germany');
+  assert.equal(url.searchParams.get('locationId'), '');
+  assert.equal(url.searchParams.get('nameSearchSplit'), 'true');
+  assert.equal(url.searchParams.get('birthyearfilter'), '');
+  assert.equal(url.searchParams.get('deathyearfilter'), '');
+  assert.equal(url.searchParams.get('orderby'), 'r');
+  assert.equal(url.searchParams.get('fulltext'), '');
+  assert.ok(!url.searchParams.toString().includes('Alexander'), 'middle name is never passed');
 });
 
 test('failures normalise to per-service messages, not stack traces', async () => {
@@ -139,4 +151,54 @@ test('documentation updated', () => {
   assert.ok(readme.includes('Find A Grave'), 'README lists Find A Grave');
   assert.ok(html.includes('data-help-article="public-records"'), 'help section exists');
   assert.ok(html.includes('data-help-nav="public-records"'), 'help nav entry exists');
+});
+
+test('Find A Grave search result link stays available without relying on an HTML count endpoint', async () => {
+  const provider = api.PROVIDERS.find((entry) => entry.id === 'findAGrave');
+  const originalFetch = sandbox.fetch;
+  sandbox.fetch = () => { throw new Error('the Find A Grave search should not depend on helper count parsing'); };
+  try {
+    const outcome = await api.runProvider(provider, {
+      id: 'J', name: 'Julius Alexander Magnus', surname: 'Magnus', givenName: 'Julius Alexander',
+      events: [{ type: 'DEAT', date: '1904', place: 'Berlin, Germany' }]
+    });
+    assert.equal(outcome.status, 'results');
+    assert.equal(outcome.results.length, 1);
+    assert.equal(new URL(outcome.results[0].url).searchParams.get('firstname'), 'Julius');
+    assert.equal(new URL(outcome.results[0].url).searchParams.get('middlename'), '');
+    assert.equal(new URL(outcome.results[0].url).searchParams.get('lastname'), 'Magnus');
+    assert.equal(new URL(outcome.results[0].url).searchParams.get('deathyear'), '1904');
+    assert.equal(new URL(outcome.results[0].url).searchParams.get('location'), 'Berlin, Germany');
+  } finally {
+    sandbox.fetch = originalFetch;
+  }
+});
+
+test('Europeana accepts only exact supported person-name phrases and searches each phrase', async () => {
+  const requested = [];
+  const originalFetch = sandbox.fetch;
+  sandbox.fetch = async (url) => {
+    requested.push(new URL(url).searchParams.get('query'));
+    const index = requested.length;
+    const titles = index === 1
+      ? ['Alexander Magnus; Julius Caesar', 'Magnus, Julius', 'Julius in Magnus archive', 'Julius Magnus Extra']
+      : index === 2 ? ['Magnus, Julius'] : ['Julius Alexander Magnus', 'Julius Alexander Magnus biography'];
+    const items = titles.map((title, itemIndex) => {
+      const key = title === 'Magnus, Julius' ? 'same-magnus-julius' : `test-${index}-${itemIndex}`;
+      return { title, id: `/record/${key}`, guid: `https://www.europeana.eu/record/${key}` };
+    });
+    return { ok: true, json: async () => ({ items }) };
+  };
+  try {
+    const provider = api.PROVIDERS.find((entry) => entry.id === 'europeana');
+    const outcome = await api.runProvider(provider, {
+      name: 'Julius Alexander Magnus', givenName: 'Julius Alexander', surname: 'Magnus',
+      events: [{ type: 'BIRT', date: '1828' }, { type: 'DEAT', date: '1904' }]
+    });
+    assert.deepEqual(requested, ['"Julius Magnus"', '"Magnus, Julius"', '"Julius Alexander Magnus"']);
+    assert.equal(outcome.results.length, 2, 'duplicate matching record across queries is only shown once');
+    assert.equal(Array.from(outcome.results, (item) => item.title).join('|'), 'Magnus, Julius|Julius Alexander Magnus');
+  } finally {
+    sandbox.fetch = originalFetch;
+  }
 });

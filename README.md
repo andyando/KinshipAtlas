@@ -72,7 +72,7 @@ Use the directory search or click a person/relationship to recenter the map; rec
 
 Set a primary person in their details to enable **Home Person**, which always returns to that person in Relationship View, including from Map View, Reports, or the Media library. Relationship cards wrap full names on a separate row so photos and country flags do not truncate them.
 
-Enable **Show siblings** above the Relationship map to include the selected person's recorded siblings alongside them and their partners. Sibling cards are labelled and can be clicked to recenter the map; the children and grandchildren remain those of the selected person. The option starts on and applies as you browse people until you turn it off; **Start Again** turns it back on.
+Enable **Show siblings** above the Relationship map to include the selected person's recorded siblings alongside them and their partners. Sibling cards are labelled and can be clicked to recenter the map; the children and grandchildren remain those of the selected person. The option starts off and applies as you browse people until you turn it on; **Start Again** turns it back off.
 
 When the selected person has no recorded children, the Relationship map includes their recorded great-grandparents as an additional ancestor row. Each couple is stacked with the recorded wife above the husband and one connector from the pair to each grandparent child; a lone recorded parent is shown without an empty placeholder. People with children keep the usual grandparents-to-grandchildren layout.
 
@@ -134,7 +134,7 @@ For a person with recorded death details, **Search Public Records** searches ext
 - **Digital Public Library of America** (`api.dp.la/v2/items`) — the API key is held server-side in the Kinship Atlas backend; clickable links use the `isShownAt` field, not media URLs.
 - Requests are attempted directly from the browser first; if a provider blocks browser access via CORS the same request is relayed through the Kinship Atlas backend at `/api/public-records/{provider}`. No public proxy services (AllOrigins, cors-anywhere, corsproxy.io, etc.) are used.
 - **Internet Archive** (`archive.org/advancedsearch.php`) — no API key; record links use `archive.org/details/{identifier}`.
-- **Find A Grave** — no public API, so this service generates a search page URL (`findagrave.com/memorial/search?firstname=…&lastname=…`) for you to open; Kinship Atlas never scrapes results.
+- **Find A Grave** — opens a search page using the first given name, surname, and available birth/death years and death place. Middle names are omitted; Kinship Atlas does not scrape results.
 
 Provider endpoints and keys are declared once in `tree-app/public-records.js` (`PROVIDER_CONFIG`). Each provider is a self-contained module with a single search entry point that returns a normalised list of `{ service, title, description, url, sourceId }` records, so adding a service means adding one object and one fetch function. Searches run in parallel with a 15-second timeout per request; failures are reported per service and never block another provider. Results stream into the dialog as each provider finishes. This is an external disclosure: your search is sent from your browser directly to those services.
 

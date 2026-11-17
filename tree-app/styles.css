@@ -162,9 +162,11 @@ button { color: inherit; }
 .tree-canvas { position: relative; min-width: 660px; min-height: 100%; transform-origin: top center; }
 .connector-layer { position: absolute; z-index: 0; inset: 0; overflow: visible; pointer-events: none; }
 .connector-layer path { fill: none; stroke: #aebbb4; stroke-width: 1.25; vector-effect: non-scaling-stroke; }
+.connector-layer .parent-link { stroke-width: 1.75; }
 .connector-layer .marriage-link { stroke: #b78b45; stroke-width: 2; vector-effect: non-scaling-stroke; }
 .tree-generation { position: relative; z-index: 1; padding: 8px 0 17px; }
-.generation-heading { display: flex; align-items: center; justify-content: center; margin: 1px 0 9px; color: var(--ink); font-size: 9px; font-weight: 800; letter-spacing: 1.1px; text-transform: uppercase; }
+.tree-generation + .tree-generation { border-top: 1px dotted var(--line-strong); }
+.generation-heading { display: flex; align-items: center; justify-content: flex-start; width: fit-content; max-width: 100%; margin: 1px 0 9px; padding: 2px 6px; border-radius: 3px; color: var(--ink); background: var(--paper); font-size: 9px; font-weight: 800; letter-spacing: 1.1px; text-transform: uppercase; }
 .generation-nodes { display: flex; flex-wrap: wrap; align-items: stretch; justify-content: center; gap: 11px; }
 .ancestor-couple { width: 240px; flex: 0 0 240px; display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; }
 .ancestor-couple .person-node { flex: 0 0 auto; }
@@ -925,7 +927,7 @@ a.life-event-media-thumb:hover, a.life-event-media-thumb:focus-visible { border-
   .card-years, .card-place, .card-relation, .event-detail, .detail-life,
   .detail-section-title { color: #4a625b !important; }
   .pedigree-links path { stroke: #9fb0a7 !important; }
-  .pedigree-links .pedigree-marriage-link { stroke: #9d7435 !important; stroke: 2; }
+  .pedigree-links .pedigree-spouse-link { stroke: #9d7435 !important; stroke-width: 2; }
   .research-button, .dialog-button, .button-secondary, .icon-button {
     background: #fff !important; color: #315d4d !important; border-color: #c9d8cf !important;
   }
@@ -1182,7 +1184,7 @@ a.life-event-media-thumb:hover, a.life-event-media-thumb:focus-visible { border-
 .pedigree-links path {
   fill: none; stroke: var(--line, #cfd6d2); stroke-width: 1.5; vector-effect: non-scaling-stroke;
 }
-.pedigree-links .pedigree-marriage-link { stroke: #b78b45; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.pedigree-links .pedigree-spouse-link { stroke: #b78b45; stroke-width: 2; vector-effect: non-scaling-stroke; }
 .pedigree-column {
   position: relative; z-index: 1;
   display: flex; flex-direction: column; justify-content: center;

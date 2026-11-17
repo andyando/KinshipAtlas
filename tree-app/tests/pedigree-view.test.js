@@ -119,7 +119,7 @@ test('an empty slot in a generation still contributes two empty parent slots', (
   assert.equal(JSON.stringify(rows), JSON.stringify([['A'], ['P', '']]));
 });
 
-test('pedigree connectors include a marriage line for a married selected couple', () => {
+test('pedigree connectors include a spouse line without a recorded marriage event', () => {
   const calls = [];
   const svg = { setAttribute() {}, append(node) { calls.push(node); } };
   const flow = {
@@ -139,7 +139,7 @@ test('pedigree connectors include a marriage line for a married selected couple'
     { querySelectorAll: () => [focus, spouse] },
     { querySelectorAll: () => [parent1, parent2] }
   ];
-  const family = { id: 'F1', husbandId: 'A', wifeId: 'B', childIds: ['C'], marriage: { type: 'MARR' } };
+  const family = { id: 'F1', husbandId: 'A', wifeId: 'B', childIds: ['C'], marriage: null };
   const people = new Map([
     ['A', { id: 'A', spouseFamilyIds: ['F1'] }], ['B', { id: 'B', spouseFamilyIds: ['F1'] }],
     ['C', { id: 'C', spouseFamilyIds: [], parentFamilyIds: ['F1'] }]
@@ -150,5 +150,5 @@ test('pedigree connectors include a marriage line for a married selected couple'
   });
   vm.runInContext(`${source.slice(start, end)}\nglobalThis.draw = drawPedigreeLinks;`, context);
   context.draw(flow, columns, [['A', 'B'], ['C']]);
-  assert.ok(calls.some((path) => path.class === 'pedigree-marriage-link' && /H 120/.test(path.d)));
+  assert.ok(calls.some((path) => path.class === 'pedigree-spouse-link' && /H 120/.test(path.d)));
 });

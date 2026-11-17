@@ -1317,8 +1317,8 @@
     elements.clear.disabled = true; elements.back.disabled = true; elements.forward.disabled = true;
     document.querySelector('#importGedcomButton').disabled = true;
     elements.printMapButton.disabled = true;
-    state.showSiblings = true;
-    elements.showSiblings.checked = true;
+    state.showSiblings = false;
+    elements.showSiblings.checked = false;
     elements.showSiblings.disabled = true;
     elements.zoomIn.disabled = true; elements.zoomOut.disabled = true;
     elements.treeLabel.textContent = 'No tree loaded'; elements.treeLabel.disabled = true; elements.peopleCount.textContent = '0';

@@ -366,6 +366,11 @@
         const ranked = [...group].sort((a, b) => b.parentIds.length - a.parentIds.length);
         const keeper = ranked[0];
         for (const extra of ranked.slice(1)) {
+          const extraFamily = state.families.get(extra.familyId);
+          const keeperFamily = state.families.get(keeper.familyId);
+          // When both family records explicitly list this child, the family-side
+          // child-link detector below reports and removes the duplicate CHIL link.
+          if (extraFamily?.childIds.includes(record.xref) && keeperFamily?.childIds.includes(record.xref)) continue;
           const key = `${extra.index}`;
           if (reported.has(key)) continue;
           reported.add(key);
@@ -375,6 +380,44 @@
             description: `${personNameOf(record.xref)} is linked to ${personNameOf(parentId)} twice, through families @${keeper.familyId}@ and @${extra.familyId}@. Deleting the extra FAMC keeps the @${keeper.familyId}@ link.`
           });
         }
+      }
+    }
+    // Some GEDCOM exports record a child's parent relationship only from the
+    // FAM side (CHIL) and omit the child's FAMC back-reference. Find repeated
+    // parent links by comparing those family-side child entries directly.
+    const childFamilyEntries = new Map();
+    for (const record of state.gedcomRecords) {
+      if (record.tag !== 'FAM') continue;
+      const family = state.families.get(record.xref);
+      if (!family) continue;
+      const familyParentIds = [...new Set([family.husbandId, family.wifeId]
+        .filter((id) => id && state.people.has(id)))];
+      if (!familyParentIds.length) continue;
+      const seenChildren = new Set();
+      record.lines.forEach((line, lineIndex) => {
+        const field = parseGedcomField(line);
+        const childId = field?.level === 1 && field.tag === 'CHIL' ? splitXref(field.value) : '';
+        if (!childId || seenChildren.has(childId) || !state.people.has(childId)) return;
+        seenChildren.add(childId);
+        const parentIds = familyParentIds.filter((id) => id !== childId);
+        if (!parentIds.length) return;
+        if (!childFamilyEntries.has(childId)) childFamilyEntries.set(childId, []);
+        childFamilyEntries.get(childId).push({ familyId: record.xref, parentIds, lineIndex });
+      });
+    }
+    for (const [childId, entries] of childFamilyEntries) {
+      if (entries.length < 2) continue;
+      const ranked = [...entries].sort((a, b) => b.parentIds.length - a.parentIds.length);
+      for (let index = 1; index < ranked.length; index += 1) {
+        const extra = ranked[index];
+        const keeper = ranked.slice(0, index).find((candidate) =>
+          extra.parentIds.every((parentId) => candidate.parentIds.includes(parentId)));
+        if (!keeper) continue;
+        findings.push({
+          kind: 'duplicate-parent-family-child', recordXref: extra.familyId, lineIndex: extra.lineIndex,
+          personId: childId, otherId: extra.parentIds[0], keepFamilyId: keeper.familyId,
+          description: `${personNameOf(childId)} is listed under ${extra.parentIds.map(personNameOf).join(' and ')} in both families @${keeper.familyId}@ and @${extra.familyId}@. Deleting the duplicate child link keeps the more complete @${keeper.familyId}@ family.`
+        });
       }
     }
     return findings;
@@ -404,6 +447,44 @@
       }
       const record = state.gedcomRecords.find((entry) => entry.xref === finding.recordXref);
       if (!record || finding.lineIndex < 0 || finding.lineIndex >= record.lines.length) continue;
+      // A duplicate parent link stored on the family side must remove the
+      // duplicate CHIL entry and any matching child-side FAMC pointers, while
+      // preserving the fuller family and its relationship.
+      if (finding.kind === 'duplicate-parent-family-child') {
+        const duplicateFamily = state.families.get(finding.recordXref);
+        const keeperFamily = state.families.get(finding.keepFamilyId);
+        const duplicateRecord = record.tag === 'FAM' ? record : null;
+        const keeperRecord = state.gedcomRecords.find((entry) => entry.tag === 'FAM' && entry.xref === finding.keepFamilyId);
+        const parentIds = [duplicateFamily?.husbandId, duplicateFamily?.wifeId].filter((id) => id && id !== finding.personId && state.people.has(id));
+        const keeperParentIds = [keeperFamily?.husbandId, keeperFamily?.wifeId].filter((id) => id && id !== finding.personId && state.people.has(id));
+        const keeperHasChild = keeperRecord?.lines.some((line) => {
+          const entry = parseGedcomField(line);
+          return entry?.level === 1 && entry.tag === 'CHIL' && splitXref(entry.value) === finding.personId;
+        });
+        const target = parseGedcomField(record.lines[finding.lineIndex]);
+        if (!duplicateRecord || !duplicateFamily || !keeperFamily || !keeperHasChild
+          || !parentIds.length || !parentIds.every((id) => keeperParentIds.includes(id))
+          || target?.level !== 1 || target.tag !== 'CHIL' || splitXref(target.value) !== finding.personId) continue;
+        const childRecord = state.gedcomRecords.find((entry) => entry.tag === 'INDI' && entry.xref === finding.personId);
+        const duplicateChildLines = duplicateRecord.lines.map((line, index) => ({ line, index })).filter(({ line }) => {
+          const entry = parseGedcomField(line);
+          return entry?.level === 1 && entry.tag === 'CHIL' && splitXref(entry.value) === finding.personId;
+        });
+        if (!duplicateChildLines.length) continue;
+        if (!lineDeletions.has(duplicateRecord)) lineDeletions.set(duplicateRecord, new Set());
+        duplicateChildLines.forEach(({ index }) => lineDeletions.get(duplicateRecord).add(index));
+        if (childRecord) {
+          const backReferences = childRecord.lines.map((line, index) => ({ line, index })).filter(({ line }) => {
+            const entry = parseGedcomField(line);
+            return entry?.level === 1 && entry.tag === 'FAMC' && splitXref(entry.value) === finding.recordXref;
+          });
+          if (backReferences.length) {
+            if (!lineDeletions.has(childRecord)) lineDeletions.set(childRecord, new Set());
+            backReferences.forEach(({ index }) => lineDeletions.get(childRecord).add(index));
+          }
+        }
+        continue;
+      }
       // A child linked to the same parent through two family records: the kept
       // FAMC line names a different family, so the identical-line rule below
       // does not apply. Verify the keeper line still exists before removing.

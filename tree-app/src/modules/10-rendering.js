@@ -464,7 +464,21 @@
       if (!groupedAncestors.has(person.id)) greatGrandparentGroups.push({ familyId: '', people: [person] });
     }
     const childrenRow = orderByRelatives(descendantIds(1), selectedAndPartners, childrenOf);
-    const grandchildrenRow = orderByRelatives(descendantIds(2), childrenRow, childrenOf);
+    const grandchildrenBase = orderByRelatives(descendantIds(2), childrenRow, childrenOf);
+    const grandchildrenOrder = new Map(grandchildrenBase.map((person, index) => [person.id, { index, positions: [] }]));
+    childrenRow.forEach((parent, parentIndex) => {
+      for (const childId of childrenOf(parent.id)) {
+        const order = grandchildrenOrder.get(childId);
+        if (order) order.positions.push(parentIndex);
+      }
+    });
+    const grandchildrenRow = [...grandchildrenBase].sort((a, b) => {
+      const orderA = grandchildrenOrder.get(a.id);
+      const orderB = grandchildrenOrder.get(b.id);
+      const centerA = orderA.positions.length ? orderA.positions.reduce((sum, position) => sum + position, 0) / orderA.positions.length : Number.POSITIVE_INFINITY;
+      const centerB = orderB.positions.length ? orderB.positions.reduce((sum, position) => sum + position, 0) / orderB.positions.length : Number.POSITIVE_INFINITY;
+      return centerA - centerB || orderA.index - orderB.index;
+    });
     const rows = [
       { generation: -3, label: 'Great-grandparents', people: greatGrandparentsRow, familyGroups: greatGrandparentGroups },
       { generation: -2, label: 'Grandparents', people: grandparentsRow },
@@ -520,10 +534,21 @@
         y: (side === 'top' ? rect.top - canvasRect.top : rect.bottom - canvasRect.top) / zoom
       };
     }
-    function appendPath(d, className) {
+    const familyColors = new Map();
+    function appendPath(d, className, familyId, generation) {
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', d);
       path.setAttribute('class', className);
+      if (className === 'parent-link') {
+        const groupKey = `${generation}:${familyId}`;
+        if (!familyColors.has(groupKey)) {
+          const hue = (familyColors.size * 137.508) % 360;
+          familyColors.set(groupKey, `hsl(${hue.toFixed(1)} 62% 42%)`);
+        }
+        path.setAttribute('style', `stroke: ${familyColors.get(groupKey)}`);
+        path.setAttribute('data-family-id', familyId);
+        path.setAttribute('data-parent-generation', String(generation));
+      }
       svg.append(path);
     }
     function rectPoint(card) {
@@ -557,7 +582,7 @@
     }
 
     for (const [familyId, family] of state.families) {
-      for (const generation of [-3, -2, -1, 0, 1]) {
+      for (const generation of [-3, -2, -1, 0, 1, 2]) {
         const parentPoints = [family.husbandId, family.wifeId].filter(Boolean)
           .filter((parentId) => nodeKeys.has(`${generation}|${parentId}`))
           .map((parentId) => point(cardFor(generation, parentId), 'bottom'))
@@ -575,10 +600,10 @@
           const child = point(cardFor(generation + 1, childId), 'top');
           if (child) {
             const middle = (origin.y + child.y) / 2;
-            appendPath(`M ${origin.x} ${origin.y} C ${origin.x} ${middle}, ${child.x} ${middle}, ${child.x} ${child.y}`, 'parent-link');
+            appendPath(`M ${origin.x} ${origin.y} C ${origin.x} ${middle}, ${child.x} ${middle}, ${child.x} ${child.y}`, 'parent-link', familyId, generation);
           }
         }
-        if (family.marriage) {
+        if (family.husbandId && family.wifeId) {
           const husband = family.husbandId && nodeKeys.has(`${generation}|${family.husbandId}`)
             ? rectPoint(cardFor(generation, family.husbandId)) : null;
           const wife = family.wifeId && nodeKeys.has(`${generation}|${family.wifeId}`)
@@ -2513,7 +2538,7 @@
         const person = state.people.get(personId);
         for (const familyId of person?.spouseFamilyIds || []) {
           const family = state.families.get(familyId);
-          if (!family?.marriage || !family.husbandId || !family.wifeId) continue;
+          if (!family || !family.husbandId || !family.wifeId) continue;
           const spouseId = family.husbandId === personId ? family.wifeId : family.husbandId;
           const spouseSlot = ids.indexOf(spouseId);
           if (spouseSlot < 0 || spouseSlot <= slot) continue;
@@ -2521,7 +2546,7 @@
           const second = boxOf(cardAt(generation, spouseSlot));
           if (!first || !second) continue;
           const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-          line.setAttribute('class', 'pedigree-marriage-link');
+          line.setAttribute('class', 'pedigree-spouse-link');
           if (Math.abs(first.midY - second.midY) < 2) {
             const left = first.midX < second.midX ? first : second;
             const right = first.midX < second.midX ? second : first;

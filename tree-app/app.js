@@ -78,7 +78,7 @@
   const state = {
     mapMode: false, mapStats: null, directoryMatches: [], reportsMode: false, mediaLibraryMode: false, pedigreeMode: false, pedigreeZoom: 1,
     people: new Map(), families: new Map(), sources: new Map(), selectedId: null,
-    fileName: '', searchText: '', history: [], historyIndex: -1, zoom: 1, showSiblings: true,
+    fileName: '', searchText: '', history: [], historyIndex: -1, zoom: 1, showSiblings: false,
     mediaIndex: null, mediaUrls: new Map(), mediaRelativePaths: new WeakMap(), mediaDirectoryHandle: null,
     rememberedMediaDirectoryHandle: null, mediaFolderPicked: false, mediaHelper: null,
     pendingUploadPersonId: null, pendingPortraitReplacement: null, pendingResearchPersonId: null,
@@ -2368,7 +2368,21 @@
       if (!groupedAncestors.has(person.id)) greatGrandparentGroups.push({ familyId: '', people: [person] });
     }
     const childrenRow = orderByRelatives(descendantIds(1), selectedAndPartners, childrenOf);
-    const grandchildrenRow = orderByRelatives(descendantIds(2), childrenRow, childrenOf);
+    const grandchildrenBase = orderByRelatives(descendantIds(2), childrenRow, childrenOf);
+    const grandchildrenOrder = new Map(grandchildrenBase.map((person, index) => [person.id, { index, positions: [] }]));
+    childrenRow.forEach((parent, parentIndex) => {
+      for (const childId of childrenOf(parent.id)) {
+        const order = grandchildrenOrder.get(childId);
+        if (order) order.positions.push(parentIndex);
+      }
+    });
+    const grandchildrenRow = [...grandchildrenBase].sort((a, b) => {
+      const orderA = grandchildrenOrder.get(a.id);
+      const orderB = grandchildrenOrder.get(b.id);
+      const centerA = orderA.positions.length ? orderA.positions.reduce((sum, position) => sum + position, 0) / orderA.positions.length : Number.POSITIVE_INFINITY;
+      const centerB = orderB.positions.length ? orderB.positions.reduce((sum, position) => sum + position, 0) / orderB.positions.length : Number.POSITIVE_INFINITY;
+      return centerA - centerB || orderA.index - orderB.index;
+    });
     const rows = [
       { generation: -3, label: 'Great-grandparents', people: greatGrandparentsRow, familyGroups: greatGrandparentGroups },
       { generation: -2, label: 'Grandparents', people: grandparentsRow },
@@ -2424,10 +2438,21 @@
         y: (side === 'top' ? rect.top - canvasRect.top : rect.bottom - canvasRect.top) / zoom
       };
     }
-    function appendPath(d, className) {
+    const familyColors = new Map();
+    function appendPath(d, className, familyId, generation) {
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', d);
       path.setAttribute('class', className);
+      if (className === 'parent-link') {
+        const groupKey = `${generation}:${familyId}`;
+        if (!familyColors.has(groupKey)) {
+          const hue = (familyColors.size * 137.508) % 360;
+          familyColors.set(groupKey, `hsl(${hue.toFixed(1)} 62% 42%)`);
+        }
+        path.setAttribute('style', `stroke: ${familyColors.get(groupKey)}`);
+        path.setAttribute('data-family-id', familyId);
+        path.setAttribute('data-parent-generation', String(generation));
+      }
       svg.append(path);
     }
     function rectPoint(card) {
@@ -2461,7 +2486,7 @@
     }
 
     for (const [familyId, family] of state.families) {
-      for (const generation of [-3, -2, -1, 0, 1]) {
+      for (const generation of [-3, -2, -1, 0, 1, 2]) {
         const parentPoints = [family.husbandId, family.wifeId].filter(Boolean)
           .filter((parentId) => nodeKeys.has(`${generation}|${parentId}`))
           .map((parentId) => point(cardFor(generation, parentId), 'bottom'))
@@ -2479,10 +2504,10 @@
           const child = point(cardFor(generation + 1, childId), 'top');
           if (child) {
             const middle = (origin.y + child.y) / 2;
-            appendPath(`M ${origin.x} ${origin.y} C ${origin.x} ${middle}, ${child.x} ${middle}, ${child.x} ${child.y}`, 'parent-link');
+            appendPath(`M ${origin.x} ${origin.y} C ${origin.x} ${middle}, ${child.x} ${middle}, ${child.x} ${child.y}`, 'parent-link', familyId, generation);
           }
         }
-        if (family.marriage) {
+        if (family.husbandId && family.wifeId) {
           const husband = family.husbandId && nodeKeys.has(`${generation}|${family.husbandId}`)
             ? rectPoint(cardFor(generation, family.husbandId)) : null;
           const wife = family.wifeId && nodeKeys.has(`${generation}|${family.wifeId}`)
@@ -4417,7 +4442,7 @@
         const person = state.people.get(personId);
         for (const familyId of person?.spouseFamilyIds || []) {
           const family = state.families.get(familyId);
-          if (!family?.marriage || !family.husbandId || !family.wifeId) continue;
+          if (!family || !family.husbandId || !family.wifeId) continue;
           const spouseId = family.husbandId === personId ? family.wifeId : family.husbandId;
           const spouseSlot = ids.indexOf(spouseId);
           if (spouseSlot < 0 || spouseSlot <= slot) continue;
@@ -4425,7 +4450,7 @@
           const second = boxOf(cardAt(generation, spouseSlot));
           if (!first || !second) continue;
           const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-          line.setAttribute('class', 'pedigree-marriage-link');
+          line.setAttribute('class', 'pedigree-spouse-link');
           if (Math.abs(first.midY - second.midY) < 2) {
             const left = first.midX < second.midX ? first : second;
             const right = first.midX < second.midX ? second : first;
@@ -6588,6 +6613,11 @@
         const ranked = [...group].sort((a, b) => b.parentIds.length - a.parentIds.length);
         const keeper = ranked[0];
         for (const extra of ranked.slice(1)) {
+          const extraFamily = state.families.get(extra.familyId);
+          const keeperFamily = state.families.get(keeper.familyId);
+          // When both family records explicitly list this child, the family-side
+          // child-link detector below reports and removes the duplicate CHIL link.
+          if (extraFamily?.childIds.includes(record.xref) && keeperFamily?.childIds.includes(record.xref)) continue;
           const key = `${extra.index}`;
           if (reported.has(key)) continue;
           reported.add(key);
@@ -6597,6 +6627,44 @@
             description: `${personNameOf(record.xref)} is linked to ${personNameOf(parentId)} twice, through families @${keeper.familyId}@ and @${extra.familyId}@. Deleting the extra FAMC keeps the @${keeper.familyId}@ link.`
           });
         }
+      }
+    }
+    // Some GEDCOM exports record a child's parent relationship only from the
+    // FAM side (CHIL) and omit the child's FAMC back-reference. Find repeated
+    // parent links by comparing those family-side child entries directly.
+    const childFamilyEntries = new Map();
+    for (const record of state.gedcomRecords) {
+      if (record.tag !== 'FAM') continue;
+      const family = state.families.get(record.xref);
+      if (!family) continue;
+      const familyParentIds = [...new Set([family.husbandId, family.wifeId]
+        .filter((id) => id && state.people.has(id)))];
+      if (!familyParentIds.length) continue;
+      const seenChildren = new Set();
+      record.lines.forEach((line, lineIndex) => {
+        const field = parseGedcomField(line);
+        const childId = field?.level === 1 && field.tag === 'CHIL' ? splitXref(field.value) : '';
+        if (!childId || seenChildren.has(childId) || !state.people.has(childId)) return;
+        seenChildren.add(childId);
+        const parentIds = familyParentIds.filter((id) => id !== childId);
+        if (!parentIds.length) return;
+        if (!childFamilyEntries.has(childId)) childFamilyEntries.set(childId, []);
+        childFamilyEntries.get(childId).push({ familyId: record.xref, parentIds, lineIndex });
+      });
+    }
+    for (const [childId, entries] of childFamilyEntries) {
+      if (entries.length < 2) continue;
+      const ranked = [...entries].sort((a, b) => b.parentIds.length - a.parentIds.length);
+      for (let index = 1; index < ranked.length; index += 1) {
+        const extra = ranked[index];
+        const keeper = ranked.slice(0, index).find((candidate) =>
+          extra.parentIds.every((parentId) => candidate.parentIds.includes(parentId)));
+        if (!keeper) continue;
+        findings.push({
+          kind: 'duplicate-parent-family-child', recordXref: extra.familyId, lineIndex: extra.lineIndex,
+          personId: childId, otherId: extra.parentIds[0], keepFamilyId: keeper.familyId,
+          description: `${personNameOf(childId)} is listed under ${extra.parentIds.map(personNameOf).join(' and ')} in both families @${keeper.familyId}@ and @${extra.familyId}@. Deleting the duplicate child link keeps the more complete @${keeper.familyId}@ family.`
+        });
       }
     }
     return findings;
@@ -6626,6 +6694,44 @@
       }
       const record = state.gedcomRecords.find((entry) => entry.xref === finding.recordXref);
       if (!record || finding.lineIndex < 0 || finding.lineIndex >= record.lines.length) continue;
+      // A duplicate parent link stored on the family side must remove the
+      // duplicate CHIL entry and any matching child-side FAMC pointers, while
+      // preserving the fuller family and its relationship.
+      if (finding.kind === 'duplicate-parent-family-child') {
+        const duplicateFamily = state.families.get(finding.recordXref);
+        const keeperFamily = state.families.get(finding.keepFamilyId);
+        const duplicateRecord = record.tag === 'FAM' ? record : null;
+        const keeperRecord = state.gedcomRecords.find((entry) => entry.tag === 'FAM' && entry.xref === finding.keepFamilyId);
+        const parentIds = [duplicateFamily?.husbandId, duplicateFamily?.wifeId].filter((id) => id && id !== finding.personId && state.people.has(id));
+        const keeperParentIds = [keeperFamily?.husbandId, keeperFamily?.wifeId].filter((id) => id && id !== finding.personId && state.people.has(id));
+        const keeperHasChild = keeperRecord?.lines.some((line) => {
+          const entry = parseGedcomField(line);
+          return entry?.level === 1 && entry.tag === 'CHIL' && splitXref(entry.value) === finding.personId;
+        });
+        const target = parseGedcomField(record.lines[finding.lineIndex]);
+        if (!duplicateRecord || !duplicateFamily || !keeperFamily || !keeperHasChild
+          || !parentIds.length || !parentIds.every((id) => keeperParentIds.includes(id))
+          || target?.level !== 1 || target.tag !== 'CHIL' || splitXref(target.value) !== finding.personId) continue;
+        const childRecord = state.gedcomRecords.find((entry) => entry.tag === 'INDI' && entry.xref === finding.personId);
+        const duplicateChildLines = duplicateRecord.lines.map((line, index) => ({ line, index })).filter(({ line }) => {
+          const entry = parseGedcomField(line);
+          return entry?.level === 1 && entry.tag === 'CHIL' && splitXref(entry.value) === finding.personId;
+        });
+        if (!duplicateChildLines.length) continue;
+        if (!lineDeletions.has(duplicateRecord)) lineDeletions.set(duplicateRecord, new Set());
+        duplicateChildLines.forEach(({ index }) => lineDeletions.get(duplicateRecord).add(index));
+        if (childRecord) {
+          const backReferences = childRecord.lines.map((line, index) => ({ line, index })).filter(({ line }) => {
+            const entry = parseGedcomField(line);
+            return entry?.level === 1 && entry.tag === 'FAMC' && splitXref(entry.value) === finding.recordXref;
+          });
+          if (backReferences.length) {
+            if (!lineDeletions.has(childRecord)) lineDeletions.set(childRecord, new Set());
+            backReferences.forEach(({ index }) => lineDeletions.get(childRecord).add(index));
+          }
+        }
+        continue;
+      }
       // A child linked to the same parent through two family records: the kept
       // FAMC line names a different family, so the identical-line rule below
       // does not apply. Verify the keeper line still exists before removing.
@@ -8398,8 +8504,8 @@
     elements.clear.disabled = true; elements.back.disabled = true; elements.forward.disabled = true;
     document.querySelector('#importGedcomButton').disabled = true;
     elements.printMapButton.disabled = true;
-    state.showSiblings = true;
-    elements.showSiblings.checked = true;
+    state.showSiblings = false;
+    elements.showSiblings.checked = false;
     elements.showSiblings.disabled = true;
     elements.zoomIn.disabled = true; elements.zoomOut.disabled = true;
     elements.treeLabel.textContent = 'No tree loaded'; elements.treeLabel.disabled = true; elements.peopleCount.textContent = '0';
