@@ -27,9 +27,35 @@
     return birth || death ? `${birth || '?'}\u2013${death || '?'}` : '';
   }
 
+  function setSearchIndicator(button, status) {
+    const indicator = button?.nextElementSibling;
+    if (!indicator?.classList.contains('public-record-search-indicator')) return;
+    indicator.classList.remove('is-results', 'is-empty', 'is-searching');
+    indicator.textContent = '';
+    indicator.removeAttribute('aria-label');
+    indicator.removeAttribute('title');
+    if (status === 'results') {
+      indicator.classList.add('is-results');
+      indicator.textContent = '✓';
+      indicator.setAttribute('aria-label', 'Results found');
+      indicator.title = 'Results found';
+    } else if (status === 'empty') {
+      indicator.classList.add('is-empty');
+      indicator.textContent = '✕';
+      indicator.setAttribute('aria-label', 'No results found');
+      indicator.title = 'No results found';
+    } else if (status === 'searching') {
+      indicator.classList.add('is-searching');
+      indicator.textContent = '…';
+      indicator.setAttribute('aria-label', 'Searching');
+    }
+  }
+
   function setProviderStatus(card, status, message = '') {
     const statusEl = card.querySelector('.public-record-status');
     const list = card.querySelector('.public-record-results');
+    const searchButton = card.querySelector('[data-provider-search]');
+    setSearchIndicator(searchButton, status === 'results' || status === 'empty' || status === 'searching' ? status : '');
     statusEl.classList.remove('is-ready', 'is-searching', 'is-results', 'is-empty', 'is-error');
     statusEl.classList.add(`is-${status}`);
     if (status === 'searching') {
@@ -41,7 +67,7 @@
     } else if (status === 'results') statusEl.textContent = message || 'Results found';
     else if (status === 'empty') {
       statusEl.replaceChildren();
-      statusEl.append(document.createTextNode('No results found — refine your search below. '));
+      statusEl.append(document.createTextNode('No results found '));
       const providerId = card.dataset.providerId;
       const fallbackUrl = PUBLIC_RECORD_HOME_LINKS[providerId];
       if (fallbackUrl) {
@@ -115,7 +141,14 @@
       const searchButton = makeButton('Search', 'research-button public-record-search');
       searchButton.dataset.providerSearch = provider.id;
       searchButton.title = `Search ${provider.name} for this person`;
-      head.append(name, note, searchButton);
+      const searchRow = document.createElement('div');
+      searchRow.className = 'public-record-search-row';
+      const searchIndicator = document.createElement('span');
+      searchIndicator.className = 'public-record-search-indicator';
+      searchIndicator.setAttribute('aria-live', 'polite');
+      searchIndicator.setAttribute('aria-hidden', 'true');
+      searchRow.append(searchButton, searchIndicator);
+      head.append(name, note, searchRow);
       const status = document.createElement('div');
       status.className = 'public-record-status is-ready';
       status.setAttribute('role', 'status');
@@ -133,21 +166,27 @@
     const card = document.querySelector(`.public-record-card[data-provider-id="${providerId}"]`);
     if (!provider || !card) return;
     const person = state.people.get(state.pendingResearchPersonId);
-    if (!person) return;
+    if (!person) return null;
     setProviderStatus(card, 'searching');
     const outcome = await window.KinshipPublicRecords.runProvider(provider, person);
-    if (outcome.status === 'results') {
+    if (outcome.status === 'results' && outcome.results.length > 0) {
       setProviderStatus(card, 'results', `${outcome.results.length} result${outcome.results.length === 1 ? '' : 's'} found`);
       renderPublicRecordResults(card, outcome.results);
-    } else if (outcome.status === 'empty') {
+    } else if (outcome.status === 'empty' || outcome.status === 'results') {
       setProviderStatus(card, 'empty');
+      outcome.status = 'empty';
     } else {
       setProviderStatus(card, 'error', outcome.errorMessage);
     }
+    return outcome;
   }
 
-  function searchAllProviders() {
-    for (const provider of window.KinshipPublicRecords.PROVIDERS) searchOneProvider(provider.id);
+  async function searchAllProviders() {
+    const button = document.querySelector('#searchAllPublicRecords');
+    setSearchIndicator(button, 'searching');
+    const outcomes = await Promise.all(window.KinshipPublicRecords.PROVIDERS.map((provider) => searchOneProvider(provider.id)));
+    const hasResults = outcomes.some((outcome) => outcome?.status === 'results' && outcome.results.length > 0);
+    setSearchIndicator(button, hasResults ? 'results' : 'empty');
   }
 
   // Retained name: the search helpers still reference a normalised snapshot.

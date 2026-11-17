@@ -873,9 +873,35 @@
     return birth || death ? `${birth || '?'}\u2013${death || '?'}` : '';
   }
 
+  function setSearchIndicator(button, status) {
+    const indicator = button?.nextElementSibling;
+    if (!indicator?.classList.contains('public-record-search-indicator')) return;
+    indicator.classList.remove('is-results', 'is-empty', 'is-searching');
+    indicator.textContent = '';
+    indicator.removeAttribute('aria-label');
+    indicator.removeAttribute('title');
+    if (status === 'results') {
+      indicator.classList.add('is-results');
+      indicator.textContent = '✓';
+      indicator.setAttribute('aria-label', 'Results found');
+      indicator.title = 'Results found';
+    } else if (status === 'empty') {
+      indicator.classList.add('is-empty');
+      indicator.textContent = '✕';
+      indicator.setAttribute('aria-label', 'No results found');
+      indicator.title = 'No results found';
+    } else if (status === 'searching') {
+      indicator.classList.add('is-searching');
+      indicator.textContent = '…';
+      indicator.setAttribute('aria-label', 'Searching');
+    }
+  }
+
   function setProviderStatus(card, status, message = '') {
     const statusEl = card.querySelector('.public-record-status');
     const list = card.querySelector('.public-record-results');
+    const searchButton = card.querySelector('[data-provider-search]');
+    setSearchIndicator(searchButton, status === 'results' || status === 'empty' || status === 'searching' ? status : '');
     statusEl.classList.remove('is-ready', 'is-searching', 'is-results', 'is-empty', 'is-error');
     statusEl.classList.add(`is-${status}`);
     if (status === 'searching') {
@@ -887,7 +913,7 @@
     } else if (status === 'results') statusEl.textContent = message || 'Results found';
     else if (status === 'empty') {
       statusEl.replaceChildren();
-      statusEl.append(document.createTextNode('No results found — refine your search below. '));
+      statusEl.append(document.createTextNode('No results found '));
       const providerId = card.dataset.providerId;
       const fallbackUrl = PUBLIC_RECORD_HOME_LINKS[providerId];
       if (fallbackUrl) {
@@ -961,7 +987,14 @@
       const searchButton = makeButton('Search', 'research-button public-record-search');
       searchButton.dataset.providerSearch = provider.id;
       searchButton.title = `Search ${provider.name} for this person`;
-      head.append(name, note, searchButton);
+      const searchRow = document.createElement('div');
+      searchRow.className = 'public-record-search-row';
+      const searchIndicator = document.createElement('span');
+      searchIndicator.className = 'public-record-search-indicator';
+      searchIndicator.setAttribute('aria-live', 'polite');
+      searchIndicator.setAttribute('aria-hidden', 'true');
+      searchRow.append(searchButton, searchIndicator);
+      head.append(name, note, searchRow);
       const status = document.createElement('div');
       status.className = 'public-record-status is-ready';
       status.setAttribute('role', 'status');
@@ -979,21 +1012,27 @@
     const card = document.querySelector(`.public-record-card[data-provider-id="${providerId}"]`);
     if (!provider || !card) return;
     const person = state.people.get(state.pendingResearchPersonId);
-    if (!person) return;
+    if (!person) return null;
     setProviderStatus(card, 'searching');
     const outcome = await window.KinshipPublicRecords.runProvider(provider, person);
-    if (outcome.status === 'results') {
+    if (outcome.status === 'results' && outcome.results.length > 0) {
       setProviderStatus(card, 'results', `${outcome.results.length} result${outcome.results.length === 1 ? '' : 's'} found`);
       renderPublicRecordResults(card, outcome.results);
-    } else if (outcome.status === 'empty') {
+    } else if (outcome.status === 'empty' || outcome.status === 'results') {
       setProviderStatus(card, 'empty');
+      outcome.status = 'empty';
     } else {
       setProviderStatus(card, 'error', outcome.errorMessage);
     }
+    return outcome;
   }
 
-  function searchAllProviders() {
-    for (const provider of window.KinshipPublicRecords.PROVIDERS) searchOneProvider(provider.id);
+  async function searchAllProviders() {
+    const button = document.querySelector('#searchAllPublicRecords');
+    setSearchIndicator(button, 'searching');
+    const outcomes = await Promise.all(window.KinshipPublicRecords.PROVIDERS.map((provider) => searchOneProvider(provider.id)));
+    const hasResults = outcomes.some((outcome) => outcome?.status === 'results' && outcome.results.length > 0);
+    setSearchIndicator(button, hasResults ? 'results' : 'empty');
   }
 
   // Retained name: the search helpers still reference a normalised snapshot.
@@ -2185,53 +2224,69 @@
     elements.viewport.scrollTop = 0;
   }
 
-  function addPersonControl(container, personId, relation = '', navigation = {}) {
+  function addPersonControl(container, personId, relation = '', navigation = {}, compact = false) {
     const person = state.people.get(personId);
     if (!person) return;
     const node = document.createElement('div');
-    node.className = 'person-node';
-    const button = makeButton('', `person-card${person.sex === 'F' ? ' female' : ''}${relation === 'Partner' ? ' partner' : ''}`);
+    node.className = `person-node${compact ? ' person-node-compact' : ''}`;
+    const button = makeButton('', `person-card${person.sex === 'F' ? ' female' : ''}${relation === 'Partner' ? ' partner' : ''}${compact ? ' compact-grandchild' : ''}`);
     button.dataset.personId = personId;
     button.dataset.generation = container.dataset.generation;
     button.setAttribute('aria-current', String(personId === state.selectedId));
     const canShiftUp = navigation.up && parentsOf(personId).length > 0;
     const canShiftDown = navigation.down && childrenOf(personId).length > 0;
     if (canShiftUp || canShiftDown) button.classList.add('has-generation-shifts');
-    const primaryImage = primaryImageFor(person);
+    const primaryImage = compact ? null : primaryImageFor(person);
     if (primaryImage) {
       button.classList.add('has-photo');
+      const photoFrame = document.createElement('span');
+      photoFrame.className = 'card-photo-frame';
       const photo = document.createElement('img');
       photo.className = 'card-photo';
       photo.src = mediaUrl(primaryImage.file);
       photo.alt = `${person.name} photo`;
-      button.append(photo);
+      const framing = loadHeroFrameState(person.id, primaryImage.file) || { file: primaryImage.file, x: 0, y: 0, scale: 1 };
+      createHeroFrameRenderer(framing).paintHero(photo);
+      photoFrame.append(photo);
+      button.append(photoFrame);
     }
+    const birthEvent = person.events.find((event) => event.type === 'BIRT');
+    const deathEvent = person.events.find((event) => event.type === 'DEAT');
+    const birthPlace = birthEvent?.place || '';
+    const deathPlace = deathEvent?.place || '';
+    const birthCountry = countryFlagForPlace(birthPlace);
+    const deathCountry = countryFlagForPlace(deathPlace);
     const relationLabel = document.createElement('span');
     relationLabel.className = 'card-relation';
-    relationLabel.textContent = relation || (personId === state.selectedId ? 'Selected person' : 'Family member');
-    const birthPlace = person.events.find((event) => event.type === 'BIRT')?.place || '';
+    relationLabel.textContent = relation;
     const nameLine = document.createElement('span');
     nameLine.className = 'card-name-line';
     const name = document.createElement('span');
     name.className = 'card-name';
     name.textContent = person.name;
     nameLine.append(name);
-    const birthCountry = countryFlagForPlace(birthPlace);
-    if (birthCountry) {
+    const flags = document.createElement('span');
+    flags.className = 'card-country-flags';
+    for (const [eventLabel, country] of [['Birth', birthCountry], ['Death', deathCountry]]) {
+      if (!country) continue;
       const flag = document.createElement('span');
       flag.className = 'card-country-flag';
       const image = document.createElement('img');
-      image.src = `flags/4x3/${birthCountry.file}`;
-      image.alt = `Birth country: ${birthCountry.country}`;
-      flag.title = birthCountry.country;
+      image.src = `flags/4x3/${country.file}`;
+      image.alt = `${eventLabel} country: ${country.country}`;
+      if (!compact) flag.title = `${eventLabel} country: ${country.country}`;
       flag.append(image);
-      relationLabel.append(flag);
+      flags.append(flag);
     }
+    if (flags.childElementCount) nameLine.append(flags);
     const years = document.createElement('span');
     years.className = 'card-years';
-    years.textContent = lifespan(person);
-    button.append(relationLabel, nameLine, years);
-    if (birthPlace) {
+    years.textContent = compact
+      ? [birthEvent?.date, deathEvent?.date].map((date) => yearFrom(date)).filter(Boolean).join('–')
+      : lifespan(person);
+    if (relation) button.append(relationLabel);
+    button.append(nameLine, years);
+    if (!compact && birthPlace) {
       const place = document.createElement('span');
       place.className = 'card-place';
       place.textContent = birthPlace;
@@ -2251,7 +2306,7 @@
     container.append(node);
   }
 
-  function appendGeneration(canvas, label, generation, people, relation = '', navigation = {}, familyGroups = null) {
+  function appendGeneration(canvas, label, generation, people, relation = '', navigation = {}, familyGroups = null, compact = false) {
     if (!people.length) return null;
     const section = document.createElement('section');
     section.className = 'tree-generation';
@@ -2272,7 +2327,7 @@
         nodes.append(group);
       }
     } else {
-      for (const person of people) addPersonControl(nodes, person.id, typeof relation === 'function' ? relation(person) : relation, navigation);
+      for (const person of people) addPersonControl(nodes, person.id, typeof relation === 'function' ? relation(person) : relation, navigation, compact);
     }
     section.append(heading, nodes);
     canvas.append(section);
@@ -2402,7 +2457,7 @@
       appendGeneration(elements.canvas, row.label, row.generation, row.people, row.generation === 0 ? (person) => siblingIds.has(person.id) ? 'Sibling' : '' : '', {
         up: row.generation === topGeneration,
         down: row.generation === bottomGeneration
-      }, row.familyGroups);
+      }, row.familyGroups, row.generation === 2 && row.people.length > 7);
       for (const person of row.people) nodeKeys.add(`${row.generation}|${person.id}`);
     }
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -3300,6 +3355,7 @@
       const stored = saveHeroFrameState(person.id, { ...frameRenderer.state, file: cardImage.file });
       close();
       renderDetails();
+      if (!state.mapMode && !state.reportsMode && !state.mediaLibraryMode) renderGraph();
       const synced = await syncSelectionsToHelper();
       if (stored && synced) showToast('Photo framing saved.');
       else showToast('Photo framing could not be saved. Check browser storage and kinship-selections.json.');

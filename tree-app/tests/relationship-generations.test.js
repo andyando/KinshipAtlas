@@ -57,8 +57,8 @@ function harness({ children = false, childIds = null, grandchildren = {}, greatG
     siblingsOf: () => ['sibling'],
     partnersOf: () => partners.map((id) => ({ id })),
     sortedPeople: (ids) => [...ids].sort().map((id) => people.get(id)),
-    appendGeneration(canvas, label, generation, people, relation, navigation, familyGroups) {
-      rows.push({ label, generation, ids: people.map((person) => person.id), navigation, familyGroups });
+    appendGeneration(canvas, label, generation, people, relation, navigation, familyGroups, compact) {
+      rows.push({ label, generation, ids: people.map((person) => person.id), navigation, familyGroups, compact: Boolean(compact) });
       for (const group of familyGroups || []) groups.set(group.familyId, {
         getBoundingClientRect: () => ({ left: 10, top: 0, bottom: 210, width: 240 })
       });
@@ -79,6 +79,33 @@ function harness({ children = false, childIds = null, grandchildren = {}, greatG
   vm.runInContext(levelsSource + graphSource, context);
   return { context, rows, paths, offspring, people };
 }
+
+test('relationship-map portrait uses the same saved hero crop and renders inside a circular frame', () => {
+  const sourceHasSharedCropRenderer = /loadHeroFrameState\(person\.id, primaryImage\.file\)[\s\S]*?createHeroFrameRenderer\(framing\)\.paintHero\(photo\)/.test(source);
+  const sourceUsesCircularPortraitFrame = /card-photo-frame[\s\S]*?photoFrame\.append\(photo\)[\s\S]*?button\.append\(photoFrame\)/.test(source);
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+  assert.ok(sourceHasSharedCropRenderer, 'map portrait paints with the person record hero framing state');
+  assert.ok(sourceUsesCircularPortraitFrame, 'map portrait is contained in a circular crop frame');
+  assert.match(styles, /\.card-photo-frame\s*\{[^}]*border-radius:\s*50%/s, 'map portrait frame is circular');
+});
+
+test('grandchildren switch to compact cards only when more than seven are displayed', () => {
+  const moreThanSeven = harness({ childIds: ['child'], grandchildren: { child: Array.from({ length: 8 }, (_, index) => `grandchild${index}`) } });
+  moreThanSeven.context.renderGraph();
+  assert.equal(moreThanSeven.rows.find((row) => row.generation === 2).compact, true);
+
+  const seven = harness({ childIds: ['child'], grandchildren: { child: Array.from({ length: 7 }, (_, index) => `grandchild${index}`) } });
+  seven.context.renderGraph();
+  assert.equal(seven.rows.find((row) => row.generation === 2).compact, false);
+});
+
+test('relationship-map cards omit generic person titles and provide birth and death flags', () => {
+  const rendererStart = source.indexOf('  function addPersonControl(');
+  const rendererEnd = source.indexOf('  function appendGeneration(', rendererStart);
+  const renderer = source.slice(rendererStart, rendererEnd);
+  assert.ok(!renderer.includes("'Selected person'") && !renderer.includes("'Family member'"), 'generic titles are not rendered');
+  assert.match(renderer, /\['Birth', birthCountry\], \['Death', deathCountry\]/, 'both event countries are rendered as flags');
+});
 
 test('a person without children shows great-grandparents and all ancestor connectors', () => {
   const h = harness();

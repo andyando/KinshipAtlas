@@ -20,8 +20,8 @@
  *   Europeana       https://api.europeana.eu/record/v2/search.json
  *   DPLA            https://api.dp.la/v2/items  (single `q` parameter)
  *   Internet Arch.  https://archive.org/advancedsearch.php (exact phrase)
- *   Find A Grave    no public API; the backend queries the memorial search
- *                   HTML for the result count, then the card links to it.
+ *   Find A Grave    no public search API; the card offers a manual search link
+ *                   and does not report the search URL as a matching record.
  */
 (() => {
   'use strict';
@@ -428,8 +428,8 @@
   }
 
   /* ----------------------------- Find A Grave ----------------------------- */
-  // Find A Grave has no public search API. Build a direct search URL with
-  // separate first- and last-name fields; never submit a middle name or fulltext.
+  // Find A Grave has no public search API. Keep a direct-search URL builder for
+  // manual use, with separate name fields and no middle name or fulltext.
   function findAGraveSearchUrl(person) {
     const { searchEndpoint } = PROVIDER_CONFIG.findAGrave;
     const first = person.givenName.split(/\s+/)[0] || '';
@@ -456,15 +456,11 @@
     return `${searchEndpoint}?${params.toString()}`;
   }
 
-  async function searchFindAGrave(person) {
-    const url = findAGraveSearchUrl(person);
-    return [{
-      service: 'Find A Grave',
-      title: 'Open Find A Grave search',
-      description: `${person.givenName.split(/\s+/)[0] || ''} ${person.surname} · ${person.birthYear ?? '?'}–${person.deathYear ?? '?'}`.trim(),
-      url,
-      sourceId: ''
-    }];
+  async function searchFindAGrave() {
+    // A search-results URL is not a memorial record. Treat this provider as
+    // unavailable for automated matching rather than showing a false positive;
+    // setProviderStatus renders the manual search link in its empty state.
+    return [];
   }
 
   const PROVIDERS = [

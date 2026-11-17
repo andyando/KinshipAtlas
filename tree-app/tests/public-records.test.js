@@ -153,25 +153,14 @@ test('documentation updated', () => {
   assert.ok(html.includes('data-help-nav="public-records"'), 'help nav entry exists');
 });
 
-test('Find A Grave search result link stays available without relying on an HTML count endpoint', async () => {
+test('Find A Grave does not report a search-results URL as a matching memorial record', async () => {
   const provider = api.PROVIDERS.find((entry) => entry.id === 'findAGrave');
-  const originalFetch = sandbox.fetch;
-  sandbox.fetch = () => { throw new Error('the Find A Grave search should not depend on helper count parsing'); };
-  try {
-    const outcome = await api.runProvider(provider, {
-      id: 'J', name: 'Julius Alexander Magnus', surname: 'Magnus', givenName: 'Julius Alexander',
-      events: [{ type: 'DEAT', date: '1904', place: 'Berlin, Germany' }]
-    });
-    assert.equal(outcome.status, 'results');
-    assert.equal(outcome.results.length, 1);
-    assert.equal(new URL(outcome.results[0].url).searchParams.get('firstname'), 'Julius');
-    assert.equal(new URL(outcome.results[0].url).searchParams.get('middlename'), '');
-    assert.equal(new URL(outcome.results[0].url).searchParams.get('lastname'), 'Magnus');
-    assert.equal(new URL(outcome.results[0].url).searchParams.get('deathyear'), '1904');
-    assert.equal(new URL(outcome.results[0].url).searchParams.get('location'), 'Berlin, Germany');
-  } finally {
-    sandbox.fetch = originalFetch;
-  }
+  const outcome = await api.runProvider(provider, {
+    id: 'J', name: 'Rebecca Mundell', surname: 'Mundell', givenName: 'Rebecca',
+    events: [{ type: 'BIRT', date: '1809' }, { type: 'DEAT', date: '1881' }]
+  });
+  assert.equal(outcome.status, 'empty');
+  assert.deepEqual([...outcome.results], []);
 });
 
 test('Europeana accepts only exact supported person-name phrases and searches each phrase', async () => {

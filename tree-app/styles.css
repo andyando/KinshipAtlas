@@ -173,8 +173,9 @@ button { color: inherit; }
 .person-node { width: 240px; position: relative; flex: 0 0 240px; }
 .person-card { width: 100%; height: 100%; min-height: 90px; position: relative; display: grid; grid-template-columns: minmax(0, 1fr); align-content: center; column-gap: 10px; padding: 11px 12px 10px 15px; overflow: hidden; border: 1px solid #d6e0da; border-radius: 5px; color: var(--ink); background: rgba(255,255,255,.96); box-shadow: 0 3px 8px rgba(23,53,47,.045); text-align: left; cursor: pointer; transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease; }
 .person-card.has-generation-shifts .card-relation { padding-right: 24px; }
-.person-card.has-photo { grid-template-columns: 38px minmax(0, 1fr); }
-.card-photo { width: 38px; height: 50px; grid-column: 1; grid-row: 3 / 5; align-self: center; margin-top: 4px; border-radius: 3px; object-fit: cover; background: #edf2ee; }
+.person-card.has-photo { grid-template-columns: 42px minmax(0, 1fr); }
+.card-photo-frame { width: 38px; height: 38px; position: relative; grid-column: 1; grid-row: 3 / 5; align-self: center; margin-top: 4px; overflow: hidden; border-radius: 50%; background: #edf2ee; }
+.card-photo { width: 38px; height: 38px; max-width: none; display: block; object-fit: cover; object-position: center; }
 .generation-shift { width: 22px; height: 22px; position: absolute; z-index: 4; right: 6px; display: grid; place-items: center; padding: 0; border: 1px solid #d2ddd6; border-radius: 50%; color: #647d72; background: #fff; box-shadow: 0 1px 3px rgba(23,53,47,.1); cursor: pointer; font-size: 16px; line-height: 1; }
 .generation-shift:hover { color: #fff; border-color: var(--green); background: var(--green); }
 .generation-shift:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
@@ -189,12 +190,22 @@ button { color: inherit; }
 .person-card .card-relation { grid-column: 1 / -1; grid-row: 1; display: flex; align-items: center; justify-content: space-between; gap: 5px; margin-bottom: 4px; color: #89968f; font-size: 9px; font-weight: 800; letter-spacing: .9px; text-transform: uppercase; }
 .person-card .card-name-line { grid-column: 1 / -1; grid-row: 2; min-width: 0; display: flex; align-items: center; }
 .person-card .card-name { min-width: 0; flex: 1; color: #1d3932; font-family: Baskerville, "Palatino Linotype", Georgia, serif; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; white-space: normal; }
+.person-card .card-country-flags { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 .person-card .card-country-flag { width: 20px; height: 15px; flex: 0 0 auto; line-height: 0; }
 .person-card .card-country-flag img { width: 100%; height: 100%; display: block; object-fit: contain; }
 .person-card .card-years { grid-column: 1 / -1; grid-row: 3; margin-top: 4px; overflow: hidden; color: #82918a; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .person-card .card-place { grid-column: 1 / -1; grid-row: 4; display: -webkit-box; margin-top: 2px; overflow: hidden; color: #82918a; font-size: 10px; line-height: 1.35; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 .person-card.has-photo .card-years, .person-card.has-photo .card-place { grid-column: 2; }
 .person-card.has-generation-shifts .card-years, .person-card.has-generation-shifts .card-place { padding-right: 24px; }
+.person-node-compact { width: 190px; flex-basis: 190px; }
+.person-card.compact-grandchild { min-height: 62px; grid-template-columns: minmax(0, 1fr); align-content: center; gap: 3px 6px; padding: 8px 10px 8px 13px; }
+.person-card.compact-grandchild .card-relation { display: none; }
+.person-card.compact-grandchild .card-name-line { grid-column: 1; grid-row: 1; align-items: center; gap: 5px; }
+.person-card.compact-grandchild .card-name { font-size: 13px; }
+.person-card.compact-grandchild .card-country-flags { gap: 3px; }
+.person-card.compact-grandchild .card-country-flag { width: 18px; height: 13px; }
+.person-card.compact-grandchild .card-years { grid-column: 1; grid-row: 2; margin-top: 0; padding-right: 0; font-size: 10px; }
+.person-card.compact-grandchild.has-generation-shifts .card-years { padding-right: 24px; }
 .generation-empty { padding: 14px; color: #9aa7a1; font-size: 11px; font-style: italic; text-align: center; }
 .graph-footer { min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 20px; color: #8b9992; background: rgba(255,255,255,.55); border-top: 1px solid var(--line); font-size: 9px; font-weight: 800; letter-spacing: 1px; }
 .graph-footer-right { color: #a0aca6; text-align: right; }
@@ -1755,7 +1766,17 @@ a.life-event-media-thumb:hover, a.life-event-media-thumb:focus-visible { border-
 .public-record-head { display: flex; flex-direction: column; gap: 2px; }
 .public-record-name { font-weight: 700; font-size: 13px; color: var(--ink); }
 .public-record-note { font-size: 11px; color: var(--muted); }
-.public-record-search { align-self: flex-start; margin-top: 5px; }
+.public-record-search-row { display: inline-flex; align-items: center; gap: 7px; align-self: flex-start; margin-top: 5px; }
+.public-record-search { align-self: flex-start; }
+.public-record-search-indicator {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 16px; min-height: 18px; font-size: 16px; font-weight: 800; line-height: 1;
+}
+.public-record-search-indicator:empty { display: none; }
+.public-record-search-indicator.is-results { color: #16834a; }
+.public-record-search-indicator.is-empty { color: #c43c3c; }
+.public-record-search-indicator.is-searching { color: var(--green); }
+.public-records-actions .public-record-search-indicator { margin-left: -6px; }
 .public-record-status {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 11px; font-weight: 700; color: var(--ink-soft);
