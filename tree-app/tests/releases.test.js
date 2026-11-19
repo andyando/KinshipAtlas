@@ -63,6 +63,10 @@ test('installer package never picks up family files, quarantined updater or sign
   assert.ok(files.includes('tree-app/flags/4x3/gb.svg'));
   assert.ok(files.includes('tree-app/release-check.js'));
   assert.ok(files.includes('tree-app/Kinship Atlas.exe'));
+  assert.ok(files.includes('tree-app/face-scan.js'));
+  assert.ok(files.includes('tree-app/vendor/mediapipe/vision_bundle.mjs'));
+  assert.ok(files.includes('tree-app/vendor/mediapipe/wasm/vision_wasm_internal.wasm'));
+  assert.ok(files.includes('tree-app/models/blaze_face_short_range.tflite'));
   assert.ok(!files.some((file) => /primary-data|kinship-defaults|kinship-selections|\.ged$|family_media|updater\.js|bundle\.json/.test(file)));
 });
 test('app loads release checker before app.js and exposes only a release link', () => {

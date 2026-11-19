@@ -27,6 +27,10 @@
     state.additionalMedia = loadAdditionalMedia(storageKey, state.people);
     state.primaryMedia = loadPrimaryMedia(storageKey, state.people);
     state.mediaTypes = loadMediaTypes(storageKey);
+    state.mediaFaceAnalysis = null;
+    // Face scans and classifications recorded before the first save are keyed by
+    // file name; adopt them so a freshly opened tree keeps its results.
+    adoptUnsavedMediaSelections();
     state.mediaLibraryCache = null;
     state.mediaLibraryCacheKey = '';
     document.querySelector('#mediaLibrarySearch').value = '';
@@ -1267,7 +1271,7 @@
   }
 
   // --- Hero image reframing -------------------------------------------------
-  // Stores how the card image sits inside its circular frame, per person, in
+  // Stores how the card image sits inside its square frame, per person, in
   // browser storage and the helper-backed selections file.
   function heroFrameStorageKey(personId) {
     return `kinship-atlas:hero-frame:${personId}`;
@@ -1283,11 +1287,25 @@
     return storeSelection(heroFrameStorageKey(personId), framing);
   }
 
-  function createHeroFrameRenderer(framing) {
-    const cropSize = 0.84;
+  // The crop fills the entire square frame by default.
+  // Only framing values are stored: the original image file is never rewritten,
+  // so any framing can be undone by pressing Reset.
+  const HERO_CROP_SIZE = 1;
+  const HERO_BASE_FIT = 1 / HERO_CROP_SIZE;
+
+  // Panning stops when the photo's edge reaches the square: a photo painted at
+  // `scale` of the square's size has half-extent scale/2 against the square's
+  // cropSize/2, so the difference is how far it can move. It is never clipped on
+  // screen - the image element is large enough to hold the whole photo - so the
+  // square travels out to the photo edge instead of the photo being cut off.
+  function heroMaxOffset(scale, cropSize = HERO_CROP_SIZE) {
+    return Math.max(0, (scale - cropSize) / 2);
+  }
+
+  function createHeroFrameRenderer(framing, cropSize = HERO_CROP_SIZE) {
     const clamp = () => {
       framing.scale = Math.min(3, Math.max(1, Number(framing.scale) || 1));
-      const maxOffset = Math.max(0, (framing.scale - cropSize) / 2);
+      const maxOffset = heroMaxOffset(framing.scale, cropSize);
       framing.x = Math.min(maxOffset, Math.max(-maxOffset, Number(framing.x) || 0));
       framing.y = Math.min(maxOffset, Math.max(-maxOffset, Number(framing.y) || 0));
     };
@@ -1298,15 +1316,22 @@
     };
     clamp();
     return {
-      paintHero(img) { paint(img, 1 / cropSize, 1 / cropSize); },
-      paintHelper(img) { paint(img, 1, 1); },
+      // 100% is the fully zoomed-out framing.
+      get zoomPercent() { return Math.round(framing.scale * 100); },
+      get state() { return { ...framing }; },
+      // Both views paint the photo 1/cropSize larger than the crop. Its edges
+      // therefore reach past the crop (no gap) and the full photo is always
+      // visible around it.
+      paintHero(img) { paint(img, HERO_BASE_FIT, 1 / cropSize); },
+      paintHelper(img) { paint(img, HERO_BASE_FIT, 1 / cropSize); },
       setOffset(dx, dy) {
         framing.x += dx;
         framing.y += dy;
         clamp();
       },
       zoomBy(direction) {
-        framing.scale = Math.min(3, Math.max(1, framing.scale + direction * 0.2));
+        // 5% steps of the displayed zoom, so the label and the buttons agree.
+        framing.scale = Math.min(3, Math.max(1, framing.scale + direction * 0.05));
         clamp();
       },
       reset() { framing.x = 0; framing.y = 0; framing.scale = 1; },
@@ -1315,12 +1340,14 @@
   }
 
   // Bigger editor: shows the photo enlarged inside a square stage with a
-  // dashed circular overlay showing the crop. Drag to pan, wheel or buttons
+  // dashed square overlay showing the crop. Drag to pan, wheel or buttons
   // to zoom. "Apply & close" persists; Cancel discards the adjustments.
   function openHeroReframeEditor(person) {
     const cardImage = primaryImageFor(person);
     if (!cardImage) return;
     const saved = loadHeroFrameState(person.id, cardImage.file);
+    // 100% is the fully zoomed-out fit (the photo fills the square), so a
+    // stored framing scales from there; the minimum is clamped to 1.
     const working = saved ? { ...saved } : { file: cardImage.file, x: 0, y: 0, scale: 1 };
 
     const dialog = document.createElement('dialog');
@@ -1330,10 +1357,10 @@
         <h2>Reframe photo — ${person.name}</h2>
         <button type="button" class="dialog-close" aria-label="Close">&times;</button>
       </header>
-      <p class="hero-frame-hint">Drag the photo or use the controls to choose what appears inside the circular hero frame. The dashed circle shows the exact crop.</p>
+      <p class="hero-frame-hint">Drag the photo or use the controls to choose what appears inside the square hero frame. The dashed square shows the exact crop.</p>
       <div class="hero-frame-stage">
         <img class="hero-frame-photo" alt="${person.name} — reframing preview">
-        <div class="hero-frame-circle" aria-hidden="true"></div>
+        <div class="hero-frame-square" aria-hidden="true"></div>
       </div>
       <div class="hero-frame-controls">
         <button type="button" class="hero-frame-replace">Replace portrait</button>
@@ -1368,7 +1395,7 @@
 
     const render = () => {
       frameRenderer.paintHelper(img);
-      zoomValue.textContent = `${Math.round(working.scale * 100)}%`;
+      zoomValue.textContent = `${frameRenderer.zoomPercent}%`;
     };
     render();
 
@@ -1426,8 +1453,8 @@
     const reframe = document.createElement('button');
     reframe.type = 'button';
     reframe.className = 'detail-monogram-reframe';
-    reframe.title = 'Reframe photo (move, zoom and pan inside the circle)';
-    reframe.setAttribute('aria-label', 'Reframe the card photo inside its circular frame');
+    reframe.title = 'Reframe photo (move, zoom and pan inside the square)';
+    reframe.setAttribute('aria-label', 'Reframe the card photo inside its square frame');
     reframe.textContent = '⛶';
     reframe.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -1860,7 +1887,8 @@
   }
 
   function computeMediaLibraryCacheKey() {
-    return `${state.gedcomRecords.length}:${state.people.size}:${state.families.size}:${state.gedcomDirty ? 'dirty' : 'clean'}`;
+    const folderCount = state.folderMediaFiles ? state.folderMediaFiles.size : 0;
+    return `${state.gedcomRecords.length}:${state.people.size}:${state.families.size}:${state.gedcomDirty ? 'dirty' : 'clean'}:${folderCount}`;
   }
 
   function getMediaLibraryEntries() {
@@ -1935,6 +1963,13 @@
       }
     }
 
+    // Files picked from the linked media folder are library items in their own
+    // right, whether or not the GEDCOM references them. They carry no person
+    // links, but the user still needs to see and scan them.
+    for (const [relativePath, file] of state.folderMediaFiles || []) {
+      const entry = ensureEntry(relativePath);
+      if (entry && !entry.file) entry.file = file;
+    }
     for (const record of state.gedcomRecords) {
       const paths = new Set();
       for (const line of record.lines.slice(1)) {
@@ -1971,67 +2006,496 @@
     return result;
   }
 
-  function renderMediaLibrary() {
-    if (!state.people.size) {
-      elements.mediaLibraryContent.replaceChildren();
+  function mediaEntryAnalysis(entry) {
+    if (!state.mediaFaceAnalysis) state.mediaFaceAnalysis = loadMediaFaceAnalysis();
+    // Results are stored under the normalised FILE path, which is exactly the
+    // entry key, so no alias lookup is needed here.
+    return state.mediaFaceAnalysis.images[entry.key] || null;
+  }
+
+
+
+  // Persists media types and tells the helper to save them, then repaints the
+  // library so every card and badge reflects the new classification.
+  async function syncMediaSelections() {
+    await persistActiveSession();
+    renderMediaLibrary();
+    return true;
+  }
+
+  // Applies one classification to every selected media item, then redraws once.
+  function applyBulkMediaClassification(entries, value) {
+    if (!value || !entries.length) return 0;
+    for (const entry of entries) state.mediaTypes.set(entry.key, value);
+    const saved = saveMediaTypes();
+    void syncMediaSelections();
+    renderMediaLibrary();
+    if (!saved) showToast('Classification saved for this tab only; browser storage is unavailable.');
+    return entries.length;
+  }
+
+  // Shows or clears the spinner inside the Scan faces button. The label keeps
+  // naming what is happening, because the button stays on screen throughout.
+  function setMediaScanButtonState(running, label) {
+    const button = document.querySelector('#mediaLibraryScanButton');
+    if (!button) return;
+    button.disabled = running;
+    button.classList.toggle('is-scanning', running);
+    button.setAttribute('aria-busy', running ? 'true' : 'false');
+    if (running) {
+      const spinner = document.createElement('span');
+      spinner.className = 'media-scan-spinner';
+      spinner.setAttribute('aria-hidden', 'true');
+      button.replaceChildren(spinner, document.createTextNode(label || 'Scanning…'));
+    } else setButtonContent(button, 'scanFace', 'Scan faces');
+  }
+
+  // Scans only the media files currently listed in the library — the same
+  // filtered/sorted set the cards are drawn from — then opens the results screen
+  // where the user applies the Portrait classification.
+  async function scanMediaFaces() {
+    if (state.mediaFaceScanRunning) return;
+    const scanner = window.KinshipFaceScan;
+    if (!scanner?.isAvailable()) {
+      showToast('Face scanning is not available in this browser.');
       return;
     }
-    document.querySelector('#mediaLibraryFileName').textContent = state.fileName;
-    const search = document.querySelector('#mediaLibrarySearch').value.trim().toLocaleLowerCase();
-    const selectedType = document.querySelector('#mediaLibraryTypeFilter').value;
-    const allEntries = getMediaLibraryEntries();
+    const images = visibleMediaLibraryEntries().filter((entry) => entry.file && isImageFile(entry.file));
+    if (!images.length) {
+      showToast('No images in the current list to scan.');
+      return;
+    }
+    state.mediaFaceScanRunning = true;
+    if (!state.mediaFaceAnalysis) state.mediaFaceAnalysis = loadMediaFaceAnalysis();
+    setMediaScanButtonState(true, 'Loading model…');
+    let scanned = 0;
+    // Results collected here and only committed to the cache once the run
+    // completes, so a model failure never leaves half-scanned entries behind.
+    const results = new Map();
+    let failure = null;
+    let skipped = 0;
+    try {
+      // One initialisation covers every image; a missing or broken model aborts
+      // before any image is scanned.
+      await scanner.initialise();
+      setMediaScanButtonState(true, `Scanning 0/${images.length}`);
+      for (const entry of images) {
+        // An explicit Scan faces run always rechecks the files in view. Cached
+        // zero-face results must never make a later click appear successful
+        // without actually examining the images.
+        try {
+          const result = await scanner.analyse(entry.file);
+          results.set(entry.key, { ...result, size: entry.file.size, lastModified: entry.file.lastModified });
+        } catch (error) {
+          if (error && String(error.message || error).includes('image_unreadable')) {
+            results.set(entry.key, null);
+            skipped += 1;
+          } else {
+            failure = error;
+            break;
+          }
+        }
+        scanned += 1;
+        setMediaScanButtonState(true, `Scanning ${scanned}/${images.length}`);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    } catch (error) {
+      failure = error;
+    } finally {
+      state.mediaFaceScanRunning = false;
+      setMediaScanButtonState(false);
+    }
+    if (failure) {
+      const modelFailed = failure.code === 'FACE_MODEL_LOAD_FAILED';
+      showToast(modelFailed
+        ? 'Face scan failed: the face detector model could not be loaded. Please restart Kinship Atlas and try again.'
+        : failure.code === 'FACE_RUNTIME_LOAD_FAILED'
+          ? 'Face scan failed: the local face detector runtime could not be loaded.'
+          : 'Face scan failed before every image could be processed.');
+      renderMediaLibrary();
+      return;
+    }
+    for (const [key, result] of results) {
+      if (result) state.mediaFaceAnalysis.images[key] = result;
+      else delete state.mediaFaceAnalysis.images[key];
+    }
+    saveMediaFaceAnalysis();
+    const matches = images.filter((entry) => results.get(entry.key)?.hasFace);
+    renderMediaLibrary();
+    showToast(`Face scan finished: ${matches.length} of ${scanned} image${scanned === 1 ? '' : 's'} contain a face.${skipped ? ` ${skipped} unreadable image${skipped === 1 ? ' was' : 's were'} skipped.` : ''}`);
+    openFaceScanResults(matches, scanned);
+  }
+
+  // Results screen for one scan run: the scanned images that contain a face, each
+  // with its own Portrait button, plus a bulk action for everything ticked.
+  function openFaceScanResults(matches, scannedCount) {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'profile-review-dialog face-scan-results-dialog';
+    dialog.innerHTML = `
+      <header>
+        <h2>Faces detected</h2>
+        <button type="button" class="dialog-close" aria-label="Close">&times;</button>
+      </header>
+      <p class="profile-review-hint"></p>
+      <div class="profile-review-list face-scan-results-list"></div>
+      <footer>
+        <button type="button" class="button button-quiet face-scan-toggle-selection" disabled>Select all</button>
+        <button type="button" class="button button-secondary face-scan-cancel">Close</button>
+        <button type="button" class="button button-primary face-scan-apply" disabled>Apply Portrait classification</button>
+      </footer>`;
+    const list = dialog.querySelector('.face-scan-results-list');
+    const applyButton = dialog.querySelector('.face-scan-apply');
+    const toggleSelectionButton = dialog.querySelector('.face-scan-toggle-selection');
+    dialog.querySelector('.profile-review-hint').textContent = matches.length
+      ? `${matches.length} of ${scannedCount} scanned image${scannedCount === 1 ? '' : 's'} ${matches.length === 1 ? 'contains' : 'contain'} a face. Tick the ones to classify as Portrait; nothing changes until you apply.`
+      : `None of the ${scannedCount} scanned image${scannedCount === 1 ? '' : 's'} contain a face.`;
+    const close = () => { dialog.close(); dialog.remove(); renderMediaLibrary(); };
+    const updateApplyState = () => {
+      const selectable = [...list.querySelectorAll('input[type="checkbox"]:not(:disabled)')];
+      const checked = selectable.filter((input) => input.checked);
+      const count = checked.length;
+      applyButton.disabled = !count;
+      applyButton.textContent = count ? `Apply Portrait to ${count} selected` : 'Apply Portrait classification';
+      toggleSelectionButton.disabled = !selectable.length;
+      toggleSelectionButton.textContent = selectable.length && checked.length === selectable.length ? 'Deselect all' : 'Select all';
+    };
+    for (const entry of matches) {
+      const analysis = mediaEntryAnalysis(entry);
+      const row = document.createElement('div');
+      row.className = 'profile-review-row';
+      const check = document.createElement('input');
+      check.type = 'checkbox';
+      check.checked = true;
+      check.dataset.mediaKey = entry.key;
+      check.setAttribute('aria-label', `Select ${entry.file.name}`);
+      const preview = document.createElement('img');
+      preview.src = mediaUrl(entry.file);
+      preview.alt = '';
+      preview.className = 'profile-review-thumb';
+      const text = document.createElement('span');
+      const name = document.createElement('strong');
+      name.textContent = entry.file.name;
+      const detail = document.createElement('span');
+      detail.className = 'profile-review-detail';
+      const faces = analysis?.faceCount || 0;
+      detail.textContent = `${faces} face${faces === 1 ? '' : 's'} detected · ${mediaTypeLabel(state.mediaTypes.get(entry.key))}`;
+      text.append(name, detail);
+      // Per-image action: classify just this one as Portrait without touching
+      // anything else in the list. The row stays so the result is visible.
+      const single = document.createElement('button');
+      single.type = 'button';
+      single.className = 'button button-quiet face-scan-single';
+      single.textContent = 'Classify as Portrait';
+      single.addEventListener('click', () => {
+        applyBulkMediaClassification([entry], 'portrait');
+        check.checked = false;
+        check.disabled = true;
+        single.disabled = true;
+        single.textContent = 'Portrait applied';
+        row.classList.add('is-applied');
+        detail.textContent = `${faces} face${faces === 1 ? '' : 's'} detected · Portrait`;
+        updateApplyState();
+      });
+      // Removing a row only drops it from this review list; the scan result and
+      // the classification it already has are left untouched.
+      const dismiss = document.createElement('button');
+      dismiss.type = 'button';
+      dismiss.className = 'button button-quiet face-scan-dismiss';
+      dismiss.textContent = 'Remove';
+      dismiss.title = 'Remove this image from the list without changing its classification.';
+      dismiss.addEventListener('click', () => {
+        row.remove();
+        if (!list.children.length) close();
+        else updateApplyState();
+      });
+      row.append(check, preview, text, single, dismiss);
+      list.append(row);
+    }
+    list.addEventListener('change', updateApplyState);
+    toggleSelectionButton.addEventListener('click', () => {
+      const selectable = [...list.querySelectorAll('input[type="checkbox"]:not(:disabled)')];
+      const select = selectable.some((input) => !input.checked);
+      selectable.forEach((input) => { input.checked = select; });
+      updateApplyState();
+    });
+    applyButton.addEventListener('click', () => {
+      const chosen = [];
+      for (const check of list.querySelectorAll('input[type="checkbox"]:checked')) {
+        const entry = matches.find((item) => item.key === check.dataset.mediaKey);
+        if (entry) chosen.push(entry);
+      }
+      const applied = applyBulkMediaClassification(chosen, 'portrait');
+      // Only drop the rows that were actually applied; any unticked row stays
+      // on screen so it can still be reviewed individually.
+      for (const check of [...list.querySelectorAll('input[type="checkbox"]:checked')]) {
+        const row = check.closest('.profile-review-row');
+        check.checked = false;
+        check.disabled = true;
+        row?.classList.add('is-applied');
+        const single = row?.querySelector('.face-scan-single');
+        if (single) { single.disabled = true; single.textContent = 'Portrait applied'; }
+      }
+      if (!list.querySelector('.profile-review-row')) close();
+      if (applied) showToast(`${applied} image${applied === 1 ? '' : 's'} classified as Portrait.`);
+    });
+    dialog.querySelector('.face-scan-cancel').addEventListener('click', close);
+    dialog.querySelector('.dialog-close').addEventListener('click', close);
+    dialog.addEventListener('click', (event) => { if (event.target === dialog) close(); });
+    document.body.append(dialog);
+    updateApplyState();
+    dialog.showModal();
+  }
+
+  // Review only media explicitly classified as Portrait and attached directly
+  // to the person. Keep the order recorded on the person record so "first"
+  // means the first attached portrait, rather than a detector score or filename.
+  function portraitEntriesForPerson(personId, entries) {
+    const person = state.people.get(personId);
+    if (!person) return [];
+    const portraits = [];
+    const seen = new Set();
+    for (const path of person.mediaPaths) {
+      const file = resolveMediaFile(path);
+      if (!file || !isImageFile(file)) continue;
+      const entry = entries.find((item) => item.file === file && state.mediaTypes.get(item.key) === 'portrait');
+      if (entry && !seen.has(entry.key)) {
+        seen.add(entry.key);
+        portraits.push({ entry, path });
+      }
+    }
+    return portraits;
+  }
+
+  // Suggest a change only when the image currently displayed for the person is
+  // not itself classified as Portrait. This includes people with no resolvable
+  // hero image when a Portrait is attached.
+  function profileImageCandidates() {
+    const entries = getMediaLibraryEntries();
+    const candidates = [];
+    for (const person of sortedPeople(state.people.keys())) {
+      const portraits = portraitEntriesForPerson(person.id, entries);
+      if (!portraits.length) continue;
+      const current = primaryImageFor(person);
+      const currentEntry = current ? entries.find((entry) => entry.file === current.file) : null;
+      if (currentEntry && state.mediaTypes.get(currentEntry.key) === 'portrait') continue;
+      candidates.push({ person, entry: portraits[0].entry, path: portraits[0].path, current });
+    }
+    return candidates;
+  }
+
+  function openProfileImageReview() {
+    const candidates = profileImageCandidates();
+    const dialog = document.createElement('dialog');
+    dialog.className = 'profile-review-dialog';
+    dialog.innerHTML = `
+      <header>
+        <h2>Profile card images</h2>
+        <button type="button" class="dialog-close" aria-label="Close">&times;</button>
+      </header>
+      <p class="profile-review-hint">People with an attached image classified as Portrait whose current card image is not a Portrait. The first attached portrait is suggested; nothing changes until you apply it.</p>
+      <div class="profile-review-list"></div>
+      <footer>
+        <button type="button" class="button button-secondary profile-review-toggle-selection" disabled>Select all</button>
+        <button type="button" class="button button-secondary profile-review-cancel">Close</button>
+        <button type="button" class="button profile-review-apply" disabled>Update selected</button>
+      </footer>`;
+    const list = dialog.querySelector('.profile-review-list');
+    const applyButton = dialog.querySelector('.profile-review-apply');
+    const toggleSelectionButton = dialog.querySelector('.profile-review-toggle-selection');
+    const close = () => { dialog.close(); dialog.remove(); };
+    const updateApplyState = () => {
+      const selectable = [...list.querySelectorAll('input[type="checkbox"]')];
+      const selected = selectable.filter((input) => input.checked);
+      applyButton.disabled = !selected.length;
+      applyButton.textContent = selected.length ? `Update ${selected.length} selected` : 'Update selected';
+      toggleSelectionButton.disabled = !selectable.length;
+      toggleSelectionButton.textContent = selectable.length && selected.length === selectable.length ? 'Deselect all' : 'Select all';
+    };
+    for (const { person, entry, path, current } of candidates) {
+      const row = document.createElement('label');
+      row.className = 'profile-review-row';
+      const check = document.createElement('input');
+      check.type = 'checkbox';
+      check.checked = true;
+      check.dataset.profilePerson = person.id;
+      check.dataset.profilePath = path;
+      const preview = document.createElement('img');
+      preview.src = mediaUrl(entry.file);
+      preview.alt = '';
+      preview.className = 'profile-review-thumb';
+      const text = document.createElement('span');
+      const name = document.createElement('strong');
+      name.textContent = person.name;
+      const detail = document.createElement('span');
+      detail.className = 'profile-review-detail';
+      detail.textContent = `${current ? `Current: ${current.file.name}` : 'No card image'} · suggested: ${entry.file.name}`;
+      text.append(name, detail);
+      row.append(check, preview, text);
+      list.append(row);
+    }
+    if (!candidates.length) {
+      const empty = document.createElement('p');
+      empty.className = 'media-library-empty';
+      empty.textContent = 'No people need a profile card image update.';
+      list.append(empty);
+    }
+    list.addEventListener('change', updateApplyState);
+    toggleSelectionButton.addEventListener('click', () => {
+      const selectable = [...list.querySelectorAll('input[type="checkbox"]')];
+      const select = selectable.some((input) => !input.checked);
+      selectable.forEach((input) => { input.checked = select; });
+      updateApplyState();
+    });
+    updateApplyState();
+    applyButton.addEventListener('click', () => {
+      let updated = 0;
+      for (const check of list.querySelectorAll('input[type="checkbox"]:checked')) {
+        state.primaryMedia.set(check.dataset.profilePerson, check.dataset.profilePath);
+        updated += 1;
+      }
+      const saved = savePrimaryMedia();
+      void syncMediaSelections();
+      close();
+      render();
+      renderMediaLibrary();
+      if (!saved) showToast('Card images updated for this tab; browser storage is unavailable.');
+      else showToast(`Updated ${updated} profile card image${updated === 1 ? '' : 's'}.`);
+    });
+    dialog.querySelector('.profile-review-cancel').addEventListener('click', close);
+    dialog.querySelector('.dialog-close').addEventListener('click', close);
+    dialog.addEventListener('click', (event) => { if (event.target === dialog) close(); });
+    document.body.append(dialog);
+    dialog.showModal();
+  }
+
+  function mediaTypeLabel(type) {
+    const match = mediaTypeOptions.find(([value]) => value === (type || 'unclassified'));
+    return match ? match[1] : 'Unclassified';
+  }
+
+  const mediaLibraryPageSize = 60;
+
+  // Search, bulk actions and face scanning work across all matching pages.
+  function visibleMediaLibraryEntries(source) {
+    const allEntries = source || getMediaLibraryEntries();
+    const searchInput = document.querySelector('#mediaLibrarySearch');
+    const search = (searchInput?.value || '').trim().toLocaleLowerCase();
+    const typeInput = document.querySelector('#mediaLibraryTypeFilter');
+    const selectedType = typeInput?.value || '';
+    const sortInput = document.querySelector('#mediaLibrarySort');
+    // The dropdown is the only source of truth while the page is shown; the copy
+    // in state merely keeps the choice across re-renders and tree switches.
+    const sort = sortInput ? sortInput.value : state.mediaLibrarySort || 'name-asc';
     const entries = allEntries.filter((entry) => {
       const type = state.mediaTypes.get(entry.key) || 'unclassified';
       if (selectedType && type !== selectedType) return false;
       return !search || entry.searchText.includes(search);
     });
+    const nameOf = (entry) => (entry.file?.name || entry.path || '').toLocaleLowerCase();
+    const typeOf = (entry) => mediaTypeLabel(state.mediaTypes.get(entry.key)).toLocaleLowerCase();
+    entries.sort((a, b) => {
+      const direction = sort.endsWith('desc') ? -1 : 1;
+      const primary = sort.startsWith('type') ? typeOf(a).localeCompare(typeOf(b)) : nameOf(a).localeCompare(nameOf(b));
+      if (primary) return primary * direction;
+      // Ties keep a stable, predictable order rather than the previous iteration.
+      return nameOf(a).localeCompare(nameOf(b)) || String(a.key).localeCompare(String(b.key));
+    });
+    return entries;
+  }
+
+  function renderMediaLibrary() {
+    if (!state.mediaLibraryMode) return;
+    clearTimeout(state.mediaLibrarySearchDebounce);
+    state.mediaLibrarySearchDebounce = 0;
+    document.querySelector('#mediaLibraryFileName').textContent = state.fileName || '';
+    const mediaLibrarySortSelect = document.querySelector('#mediaLibrarySort');
+    if (mediaLibrarySortSelect) mediaLibrarySortSelect.value = state.mediaLibrarySort || 'name-asc';
+    const allEntries = getMediaLibraryEntries();
+    const entries = visibleMediaLibraryEntries(allEntries);
+    if (state.mediaLibrarySelected.size) {
+      const matchingKeys = new Set(entries.map((entry) => entry.key));
+      for (const key of state.mediaLibrarySelected) if (!matchingKeys.has(key)) state.mediaLibrarySelected.delete(key);
+    }
+    const pageCount = Math.ceil(entries.length / mediaLibraryPageSize);
+    state.mediaLibraryPage = Math.max(0, Math.min(state.mediaLibraryPage, pageCount - 1));
+    const start = state.mediaLibraryPage * mediaLibraryPageSize;
     const total = allEntries.length;
     document.querySelector('#mediaLibraryCount').textContent = `${entries.length.toLocaleString()} of ${total.toLocaleString()} items`;
-    document.querySelector('#mediaLibrarySummary').textContent = `${total.toLocaleString()} media item${total === 1 ? '' : 's'} linked or referenced in this tree.`;
-    elements.mediaLibraryContent.replaceChildren();
+    document.querySelector('#mediaLibrarySummary').textContent = state.people.size
+      ? `${total.toLocaleString()} media item${total === 1 ? '' : 's'} linked or referenced in this tree.`
+      : `${total.toLocaleString()} image${total === 1 ? '' : 's'} in the chosen folder.`;
+    const selectionCount = document.querySelector('#mediaLibrarySelectionCount');
+    if (selectionCount) selectionCount.textContent = state.mediaLibrarySelected.size ? `${state.mediaLibrarySelected.size} selected` : '';
+    const bulkApply = document.querySelector('#mediaLibraryBulkApplyButton');
+    const bulkType = document.querySelector('#mediaLibraryBulkType');
+    if (bulkApply) bulkApply.disabled = !state.mediaLibrarySelected.size || !bulkType.value;
+    document.querySelector('#mediaLibrarySelectAllButton').disabled = !entries.length;
+    for (const pager of elements.mediaLibraryView.querySelectorAll('.media-library-pagination')) {
+      pager.hidden = pageCount <= 1;
+      pager.querySelector('[data-media-page="-1"]').disabled = state.mediaLibraryPage === 0;
+      pager.querySelector('[data-media-page="1"]').disabled = state.mediaLibraryPage >= pageCount - 1;
+      pager.querySelector('.media-library-page-status').textContent = `Page ${state.mediaLibraryPage + 1} of ${pageCount}`;
+    }
     if (!entries.length) {
       const empty = document.createElement('p');
       empty.className = 'media-library-empty';
-      empty.textContent = total ? 'No media matches these filters.' : 'No attached media was found in this GEDCOM.';
-      elements.mediaLibraryContent.append(empty);
+      empty.textContent = total
+        ? 'No media matches these filters.'
+        : state.people.size
+          ? 'No attached media was found in this GEDCOM.'
+          : 'No images in this folder. Use “Choose media folder” to add images.';
+      elements.mediaLibraryContent.replaceChildren(empty);
       return;
     }
-    if (state.mediaLibraryRenderTimer) clearTimeout(state.mediaLibraryRenderTimer);
-    let index = 0;
-    const batchSize = 10;
     const fragment = document.createDocumentFragment();
-
-    function renderBatch() {
-      const end = Math.min(index + batchSize, entries.length);
-      for (; index < end; index++) {
-        const entry = entries[index];
-        fragment.append(createMediaLibraryCard(entry));
-      }
-      elements.mediaLibraryContent.appendChild(fragment);
-      if (index < entries.length) {
-        state.mediaLibraryRenderTimer = requestIdleCallback(renderBatch, { timeout: 200 });
-      } else {
-        state.mediaLibraryRenderTimer = 0;
-      }
+    for (const entry of entries.slice(start, start + mediaLibraryPageSize)) {
+      fragment.append(createMediaLibraryCard(entry));
     }
-    renderBatch();
+    elements.mediaLibraryContent.replaceChildren(fragment);
+  }
+
+  function changeMediaLibraryPage(offset) {
+    if (!state.mediaLibrarySearchDebounce) state.mediaLibraryPage += offset;
+    renderMediaLibrary();
+    const pager = elements.mediaLibraryView.querySelector('.media-library-pagination');
+    const target = pager.hidden ? document.querySelector('#mediaLibrarySearch') : pager.querySelector('.media-library-page-status');
+    target.focus({ preventScroll: true });
+    target.scrollIntoView({ block: 'nearest' });
   }
 
   function createMediaLibraryCard(entry) {
     const card = document.createElement('article');
     card.className = 'media-library-card';
     card.dataset.mediaKey = entry.key;
+    const analysis = mediaEntryAnalysis(entry);
+    const selectBox = document.createElement('input');
+    selectBox.type = 'checkbox';
+    selectBox.className = 'media-library-select';
+    selectBox.checked = state.mediaLibrarySelected.has(entry.key);
+    selectBox.setAttribute('aria-label', `Select ${entry.file?.name || entry.path}`);
+    selectBox.addEventListener('change', () => {
+      if (selectBox.checked) state.mediaLibrarySelected.add(entry.key);
+      else state.mediaLibrarySelected.delete(entry.key);
+      card.classList.toggle('is-selected', selectBox.checked);
+      const selectionCount = document.querySelector('#mediaLibrarySelectionCount');
+      if (selectionCount) selectionCount.textContent = state.mediaLibrarySelected.size ? `${state.mediaLibrarySelected.size} selected` : '';
+      const bulkApply = document.querySelector('#mediaLibraryBulkApplyButton');
+      if (bulkApply) bulkApply.disabled = !state.mediaLibrarySelected.size || !document.querySelector('#mediaLibraryBulkType').value;
+    });
+    card.classList.toggle('is-selected', selectBox.checked);
     const preview = document.createElement('div');
     preview.className = 'media-library-preview';
     if (entry.file && isImageFile(entry.file)) {
+      const url = mediaUrl(entry.file);
       const link = document.createElement('a');
-      link.href = mediaUrl(entry.file);
+      link.href = url;
       link.target = '_blank';
       link.rel = 'noopener';
       link.setAttribute('aria-label', `View ${entry.file.name}`);
       const image = document.createElement('img');
       image.loading = 'lazy';
-      image.src = mediaUrl(entry.file);
+      image.decoding = 'async';
+      image.src = url;
       image.alt = entry.file.name;
       link.append(image);
       preview.append(link);
@@ -2049,6 +2513,32 @@
       missing.textContent = 'File not found';
       preview.append(missing);
     }
+    // Face-scan and person-link state, both visible at a glance on the image.
+    const badges = document.createElement('div');
+    badges.className = 'media-library-badges';
+    if (entry.people.size) {
+      const linkedBadge = document.createElement('span');
+      linkedBadge.className = 'media-library-badge is-linked';
+      linkedBadge.textContent = entry.people.size === 1 ? 'Linked to 1 person' : `Linked to ${entry.people.size} people`;
+      linkedBadge.title = [...entry.people.values()].map(({ person }) => person.name).join(', ');
+      badges.append(linkedBadge);
+    } else {
+      const unlinkedBadge = document.createElement('span');
+      unlinkedBadge.className = 'media-library-badge is-unlinked';
+      unlinkedBadge.textContent = 'Not linked to a person';
+      badges.append(unlinkedBadge);
+    }
+    if (analysis) {
+      const faceBadge = document.createElement('span');
+      faceBadge.className = `media-library-badge${analysis.hasFace ? ' is-face' : ' is-noface'}`;
+      faceBadge.textContent = analysis.hasFace
+        ? (analysis.faceCount === 1 ? '1 face' : `${analysis.faceCount} faces`)
+        : 'No faces';
+      faceBadge.title = analysis.hasFace ? `${analysis.classification} · portrait score ${Math.round((analysis.portraitScore || 0) * 100)}%` : 'Face scan found no faces';
+      badges.append(faceBadge);
+    }
+    preview.append(badges);
+    preview.append(selectBox);
 
     const details = document.createElement('div');
     details.className = 'media-library-details';
@@ -2080,6 +2570,11 @@
       if (cardEl) {
         const selectEl = cardEl.querySelector('[data-media-type-key]');
         if (selectEl) selectEl.value = typeSelect.value;
+      }
+      // Bulk-selected rows keep the same label for the next bulk update.
+      if (state.mediaLibrarySelected.has(entry.key)) {
+        const bulkType = document.querySelector('#mediaLibraryBulkType');
+        if (bulkType) bulkType.value = typeSelect.value;
       }
       if (!saved) showToast('Classification saved for this tab only; browser storage is unavailable.');
     });
@@ -2311,6 +2806,7 @@
     trash: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M9 7V4h6v3"/>',
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 7.5v.5"/>',
     sliders: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
+    scanFace: '<path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><circle cx="9" cy="10" r=".7"/><circle cx="15" cy="10" r=".7"/><path d="M8.5 14.5c1.9 2 5.1 2 7 0"/>',
     folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
     book: '<path d="M4 5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2z"/><path d="M4 20a2 2 0 0 0 2 1h13v-3"/><path d="M9 8h6"/>',
     // Birth: a baby — round head with a hair curl, smile, and a swaddled body below.
@@ -2394,12 +2890,8 @@
   }
 
   function setMediaLibraryMode(on) {
-    if (on && !state.people.size) return;
+    if (on && !state.people.size && !(state.folderMediaFiles && state.folderMediaFiles.size)) return;
     if (!on) {
-      if (state.mediaLibraryRenderTimer) {
-        cancelIdleCallback(state.mediaLibraryRenderTimer);
-        state.mediaLibraryRenderTimer = 0;
-      }
       clearTimeout(state.mediaLibrarySearchDebounce);
       state.mediaLibrarySearchDebounce = 0;
     }
@@ -2415,6 +2907,7 @@
     elements.mediaLibraryButton.setAttribute('aria-pressed', String(on));
     syncViewSwitch();
     if (on) {
+      state.mediaLibraryPage = 0;
       renderMediaLibrary();
       elements.mediaLibraryView.scrollTop = 0;
     }
@@ -2473,7 +2966,7 @@
     }
     const person = state.people.get(personId);
     if (!person) return card;
-    // Round hero portraits for the selected person, parents, grandparents and
+    // Square hero portraits for the selected person, parents, grandparents and
     // great-grandparents; the outermost generation stays text-only.
     const portrait = generation <= 3 ? primaryImageFor(person) : null;
     if (portrait) {
@@ -2484,6 +2977,8 @@
       image.src = mediaUrl(portrait.file);
       image.alt = '';
       image.loading = 'lazy';
+      const framing = loadHeroFrameState(person.id, portrait.file) || { file: portrait.file, x: 0, y: 0, scale: 1 };
+      createHeroFrameRenderer(framing).paintHero(image);
       media.append(image);
       card.append(media);
     }

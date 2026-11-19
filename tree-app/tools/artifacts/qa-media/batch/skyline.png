@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240">
+  <g fill="none" stroke="#2f786a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity=".22">
+    <path d="M80 106V80M40 54v14h80V54M80 68v12M20 26v14h40V26M40 40v14M100 26v14h40V26M120 40v14"/>
+    <circle cx="80" cy="112" r="6"/>
+    <circle cx="40" cy="48" r="6"/>
+    <circle cx="120" cy="48" r="6"/>
+    <circle cx="20" cy="20" r="5"/>
+    <circle cx="60" cy="20" r="5"/>
+    <circle cx="100" cy="20" r="5"/>
+    <circle cx="140" cy="20" r="5"/>
+    <path d="M240 222v-26M200 170v14h80v-14M240 184v12M180 142v14h40v-14M200 156v14M260 142v14h40v-14M280 156v14"/>
+    <circle cx="240" cy="228" r="6"/>
+    <circle cx="200" cy="164" r="6"/>
+    <circle cx="280" cy="164" r="6"/>
+    <circle cx="180" cy="136" r="5"/>
+    <circle cx="220" cy="136" r="5"/>
+    <circle cx="260" cy="136" r="5"/>
+    <circle cx="300" cy="136" r="5"/>
+  </g>
+  <g fill="#c9694e" opacity=".18">
+    <circle cx="80" cy="112" r="3"/>
+    <circle cx="240" cy="228" r="3"/>
+  </g>
+</svg>

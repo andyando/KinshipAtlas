@@ -1242,6 +1242,14 @@
     notice.hidden = false;
   }
 
+  // Media can be inspected without a GEDCOM: picking a folder or files enables
+  // the Media Library button so its entries are reachable.
+  function openLibraryOnMediaImport() {
+    elements.mediaLibraryButton.disabled = false;
+    const menuButton = document.querySelector('#mediaLibraryMenuButton');
+    if (menuButton) menuButton.disabled = false;
+  }
+
   elements.mediaButton.addEventListener('click', showMediaFolderDialog);
   elements.linkExistingMediaFolder.addEventListener('click', () => {
     chooseMediaDirectory(false).finally(() => elements.mediaFolderDialog.close());
@@ -1267,13 +1275,24 @@
     syncMediaButton();
     state.mediaRelativePaths = new WeakMap();
     releaseMediaUrls();
+    openLibraryOnMediaImport();
     const byName = new Map();
+    // Files picked from the folder are Media Library entries in their own right,
+    // even when no GEDCOM person references them.
+    const folderFiles = new Map();
     for (const file of files) {
-      const name = normalizeMediaPath(file.name);
-      if (!byName.has(name)) byName.set(name, []);
-      byName.get(name).push(file);
+      // Index by bare name and, when the picker supplies it, the relative path.
+      for (const key of new Set([file.name, file.webkitRelativePath])) {
+        const name = normalizeMediaPath(key);
+        if (!name) continue;
+        if (!byName.has(name)) byName.set(name, []);
+        byName.get(name).push(file);
+        if (typeof isImageFile === 'function' ? isImageFile(file) : /^image\//.test(file.type || '')) folderFiles.set(name, file);
+      }
     }
+    state.folderMediaFiles = folderFiles;
     state.mediaIndex = { byName };
+    state.mediaLibraryCache = null;
     let references = 0;
     let matched = 0;
     for (const person of state.people.values()) {
@@ -1299,7 +1318,7 @@
     document.querySelector('#birthCountryMenuButton').disabled = true;
     document.querySelector('#duplicateFinderMenuButton').disabled = true;
     releaseMediaUrls(); state.mediaIndex = null; state.mediaFolderPicked = false;
-    state.mediaRelativePaths = new WeakMap(); state.mediaDirectoryHandle = null; state.pendingUploadPersonId = null; state.pendingPortraitReplacement = null;
+    state.mediaRelativePaths = new WeakMap(); state.folderMediaFiles = new Map(); state.mediaDirectoryHandle = null; state.pendingUploadPersonId = null; state.pendingPortraitReplacement = null;
     syncMediaButton();
     state.primaryMediaKey = ''; state.primaryMedia.clear(); state.mediaTypes.clear();
     state.additionalMedia.clear();
@@ -1566,9 +1585,48 @@
   document.querySelector('#mediaLibraryBackButton').addEventListener('click', () => setMediaLibraryMode(false));
   document.querySelector('#mediaLibrarySearch').addEventListener('input', () => {
     clearTimeout(state.mediaLibrarySearchDebounce);
+    state.mediaLibraryPage = 0;
     state.mediaLibrarySearchDebounce = setTimeout(renderMediaLibrary, 150);
   });
-  document.querySelector('#mediaLibraryTypeFilter').addEventListener('change', renderMediaLibrary);
+  document.querySelector('#mediaLibraryTypeFilter').addEventListener('change', () => {
+    state.mediaLibraryPage = 0;
+    renderMediaLibrary();
+  });
+  document.querySelector('#mediaLibrarySort').addEventListener('change', (event) => {
+    state.mediaLibrarySort = event.target.value || 'name-asc';
+    state.mediaLibraryPage = 0;
+    renderMediaLibrary();
+  });
+  for (const button of elements.mediaLibraryView.querySelectorAll('[data-media-page]')) {
+    button.addEventListener('click', () => changeMediaLibraryPage(Number(button.dataset.mediaPage)));
+  }
+  // Bulk and face features need the media library elements to exist on the page
+  // before the app wires handlers to them.
+  for (const [value, label] of mediaTypeOptions) {
+    if (!value) continue;
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    document.querySelector('#mediaLibraryBulkType').append(option);
+  }
+  document.querySelector('#mediaLibraryBulkType').addEventListener('change', () => {
+    document.querySelector('#mediaLibraryBulkApplyButton').disabled = !state.mediaLibrarySelected.size || !document.querySelector('#mediaLibraryBulkType').value;
+  });
+  document.querySelector('#mediaLibraryBulkApplyButton').addEventListener('click', () => {
+    const entries = visibleMediaLibraryEntries().filter((entry) => state.mediaLibrarySelected.has(entry.key));
+    const applied = applyBulkMediaClassification(entries, document.querySelector('#mediaLibraryBulkType').value);
+    if (applied) showToast(`Updated the classification of ${applied} item${applied === 1 ? '' : 's'}.`);
+  });
+  document.querySelector('#mediaLibrarySelectAllButton').addEventListener('click', () => {
+    for (const entry of visibleMediaLibraryEntries()) state.mediaLibrarySelected.add(entry.key);
+    renderMediaLibrary();
+  });
+  document.querySelector('#mediaLibraryClearSelectionButton').addEventListener('click', () => {
+    state.mediaLibrarySelected.clear();
+    renderMediaLibrary();
+  });
+  document.querySelector('#mediaLibraryScanButton').addEventListener('click', () => { scanMediaFaces(); });
+  document.querySelector('#mediaLibraryProfileReviewButton').addEventListener('click', openProfileImageReview);
   document.querySelector('#printReportsButton').addEventListener('click', printReports);
   elements.reportsContent.addEventListener('click', (event) => {
     const more = event.target.closest('[data-report-more]');

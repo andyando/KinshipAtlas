@@ -6,9 +6,14 @@ const path = require('node:path');
 const vm = require('node:vm');
 const root = path.resolve(__dirname, '..', '..');
 const runtimeFiles = [
-  'index.html', 'app.js', 'release-check.js', 'map.js', 'styles.css', 'version.js',
+  'index.html', 'app.js', 'release-check.js', 'map.js', 'styles.css', 'version.js', 'face-scan.js',
   'favicon.svg', 'welcome-pattern.svg', 'server.js', 'Kinship Atlas.exe',
   'THIRD-PARTY-NOTICES.md', 'data/world-data.js', 'launcher/kinship-atlas.ico',
+  'vendor/mediapipe/vision_bundle.mjs', 'vendor/mediapipe/wasm/vision_wasm_internal.js',
+  'vendor/mediapipe/wasm/vision_wasm_internal.wasm',
+  'vendor/mediapipe/wasm/vision_wasm_module_internal.js',
+  'vendor/mediapipe/wasm/vision_wasm_module_internal.wasm',
+  'models/blaze_face_short_range.tflite',
   'flags/LICENSE', 'flags/README.md'
 ];
 

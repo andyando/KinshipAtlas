@@ -130,7 +130,7 @@
     state.mediaIndex.byName.get(key).push(file);
   }
 
-  async function indexMediaDirectory(directoryHandle) {
+  function indexMediaDirectory(directoryHandle) {
     const byName = new Map();
     const relativePaths = new WeakMap();
     async function visit(directory, prefix = '') {
@@ -142,14 +142,20 @@
         }
         const file = await entry.getFile();
         relativePaths.set(file, path);
-        const key = normalizeMediaPath(file.name);
-        if (!byName.has(key)) byName.set(key, []);
-        byName.get(key).push(file);
+        // Primary card images are resolved by bare file name, so index the name
+        // as well as the relative path (e.g. "portraits/portrait.jpg").
+        for (const key of new Set([file.name, path])) {
+          const normalized = normalizeMediaPath(key);
+          if (!byName.has(normalized)) byName.set(normalized, []);
+          byName.get(normalized).push(file);
+        }
       }
     }
-    await visit(directoryHandle);
-    state.mediaRelativePaths = relativePaths;
-    state.mediaIndex = { byName };
+    return visit(directoryHandle).then(() => {
+      state.mediaRelativePaths = relativePaths;
+      state.mediaIndex = { byName };
+      state.mediaLibraryCache = null;
+    });
   }
 
   async function restoreMediaDirectoryHandle(directoryHandle) {

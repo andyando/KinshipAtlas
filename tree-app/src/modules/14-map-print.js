@@ -534,12 +534,12 @@
     setButtonContent(exitButton, 'exit', 'Exiting…');
     setSettingsOpen(false);
     await persistActiveSession();
-    if (!await syncSelectionsToHelper()) {
+    if (!await syncSelectionsToHelper() &&
+      !window.confirm('Card images and media preferences could not be saved to the local selections file. Exit anyway? Browser preferences may still be available the next time this app is opened.')) {
       exitButton.disabled = false;
       setButtonContent(exitButton, 'exit', 'Exit Kinship Atlas');
       return;
     }
-    window.clearInterval(mediaHeartbeat);
     try {
       await fetch('/api/exit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     } catch { }
@@ -862,8 +862,6 @@
   document.querySelector('#exitButton').addEventListener('click', exitKinshipAtlas);
 
   window.addEventListener('pagehide', () => { persistActiveSession(); });
-  // Keeps Kinship Atlas.exe's local server alive while this tab is open.
-  const mediaHeartbeat = window.setInterval(() => { if (state.mediaHelper) fetch('/api/media-info', { cache: 'no-store' }).catch(() => {}); }, 30000);
   // Apply the remembered colour theme before the first paint work below.
   applyTheme(preferredTheme(), { remember: false });
 

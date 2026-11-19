@@ -53,7 +53,7 @@
     mapMode: false, mapStats: null, directoryMatches: [], reportsMode: false, mediaLibraryMode: false, pedigreeMode: false, pedigreeZoom: 1,
     people: new Map(), families: new Map(), sources: new Map(), selectedId: null,
     fileName: '', searchText: '', history: [], historyIndex: -1, zoom: 1, showSiblings: false,
-    mediaIndex: null, mediaUrls: new Map(), mediaRelativePaths: new WeakMap(), mediaDirectoryHandle: null,
+    mediaIndex: null, mediaUrls: new Map(), mediaRelativePaths: new WeakMap(), folderMediaFiles: new Map(), mediaDirectoryHandle: null,
     rememberedMediaDirectoryHandle: null, mediaFolderPicked: false, mediaHelper: null,
     pendingUploadPersonId: null, pendingPortraitReplacement: null, pendingResearchPersonId: null,
     pendingPersonSummaryId: null,
@@ -68,7 +68,11 @@
     expandedSurnames: new Set(), surnameFilter: new Set(),
     mediaLibraryCache: null,
     mediaLibraryCacheKey: '',
-    mediaLibraryRenderTimer: 0,
-    mediaLibrarySearchDebounce: 0
+    mediaLibraryPage: 0,
+    mediaLibrarySearchDebounce: 0,
+    mediaFaceAnalysis: null,
+    mediaFaceScanRunning: false,
+    mediaLibrarySort: 'name-asc',
+    mediaLibrarySelected: new Set()
   };
 

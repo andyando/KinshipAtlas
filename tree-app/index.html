@@ -14,6 +14,7 @@
   <script src="data/world-data.js" defer></script>
   <script src="map.js" defer></script>
   <script src="public-records.js" defer></script>
+  <script src="face-scan.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -224,9 +225,38 @@
       <label class="media-library-filter" for="mediaLibraryTypeFilter">Type
         <select id="mediaLibraryTypeFilter"><option value="">All types</option></select>
       </label>
+      <label class="media-library-filter" for="mediaLibrarySort">Sort by
+        <select id="mediaLibrarySort">
+          <option value="name-asc">Filename A–Z</option>
+          <option value="name-desc">Filename Z–A</option>
+          <option value="type-asc">Classification A–Z</option>
+          <option value="type-desc">Classification Z–A</option>
+        </select>
+      </label>
       <span id="mediaLibraryCount" class="media-library-count"></span>
     </div>
+    <div class="media-library-bulk">
+      <button id="mediaLibraryScanButton" class="button button-secondary" type="button"><svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><circle cx="9" cy="10" r=".7"/><circle cx="15" cy="10" r=".7"/><path d="M8.5 14.5c1.9 2 5.1 2 7 0"/></svg>Scan faces</button>
+      <button id="mediaLibrarySelectAllButton" class="button button-secondary" type="button">Select all matches</button>
+      <button id="mediaLibraryClearSelectionButton" class="button button-quiet" type="button">Clear selection</button>
+      <label class="media-library-filter" for="mediaLibraryBulkType">Classify selected as
+        <select id="mediaLibraryBulkType"><option value="">Choose a class…</option></select>
+      </label>
+      <button id="mediaLibraryBulkApplyButton" class="button button-primary" type="button" disabled>Apply classification</button>
+      <span id="mediaLibrarySelectionCount" class="media-library-count"></span>
+      <button id="mediaLibraryProfileReviewButton" class="button button-secondary" type="button">Review profile card images</button>
+    </div>
+    <nav class="media-library-pagination" aria-label="Media Library pages (above results)" hidden>
+      <button class="button button-secondary" type="button" data-media-page="-1" aria-controls="mediaLibraryContent">Previous</button>
+      <span class="media-library-page-status" tabindex="-1"></span>
+      <button class="button button-secondary" type="button" data-media-page="1" aria-controls="mediaLibraryContent">Next</button>
+    </nav>
     <div id="mediaLibraryContent" class="media-library-content"></div>
+    <nav class="media-library-pagination" aria-label="Media Library pages (below results)" hidden>
+      <button class="button button-secondary" type="button" data-media-page="-1" aria-controls="mediaLibraryContent">Previous</button>
+      <span class="media-library-page-status"></span>
+      <button class="button button-secondary" type="button" data-media-page="1" aria-controls="mediaLibraryContent">Next</button>
+    </nav>
   </section>
   <section id="reportsView" class="reports-view" aria-labelledby="reportsTitle" hidden>
     <div class="reports-heading">
@@ -450,9 +480,14 @@
             <ul>
               <li>In a person record, choose <strong>Add photo or PDF</strong>. The files are copied into the media folder (renamed if a file with the same name exists) and appear under <strong>Attached media</strong>.</li>
               <li>The trash icon on a media item unlinks it from that person. The file itself stays in the folder.</li>
+              <li>Hero photos use a square crop on the person record, Relationship Map and Pedigree. Reframe photo shows the full-width square crop; at 100% it cannot pan because the image already fills the frame.</li>
             </ul>
             <h4>The media library</h4>
             <p>Choose <strong>Media</strong> in the top bar, or <strong>Settings &gt; Media library</strong>, to review every file referenced in the tree. Search by filename or person, filter by type, preview files, classify them, see who they are linked to, and choose card images. Files that are missing from the folder are listed but cannot be previewed until they are found. Deleting a file here removes it permanently, along with its GEDCOM links.</p>
+            <p>The library displays up to 60 items per page. Use <strong>Previous</strong> and <strong>Next</strong> to browse. Search, filters and sorting apply to the full library. Checked items stay selected as you change pages, and <strong>Select all matches</strong> selects matching items across all pages.</p>
+            <p><strong>Review profile card images</strong> finds people with attached Portrait-classified media whose current card image is not a Portrait, and suggests the first attached portrait. Select any combination or use Select all / Deselect all, then update the chosen profile cards.</p>
+            <h4>Find faces</h4>
+            <p>Use the search and type filters first, then choose <strong>Scan faces</strong>. Kinship Atlas scans matching image files across all pages, entirely on this device, and shows progress while it works. When the scan finishes, review the images where a face was detected and apply the <strong>Portrait</strong> label to one image or to all checked images. Scanning does not change any classifications by itself.</p>
           </article>
           <article class="help-article" data-help-article="maps-reports" hidden>
             <h3>Map View, Reports &amp; data checks</h3>

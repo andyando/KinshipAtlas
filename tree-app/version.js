@@ -7,6 +7,29 @@
 window.KINSHIP_VERSION = {
   releases: [
     {
+      version: '1.16.2',
+      date: '2026-11-20',
+      changes: [
+        'Kept the local media helper running while the browser is idle or the computer is asleep, so card and media preferences remain saveable.',
+        'Made Exit Kinship Atlas close normally only after attempting to save preferences, with a confirmation option when the helper is unavailable.',
+        'Limited the Media Library to 60 items per page to improve scrolling in large libraries, while keeping search and filters across all pages.'
+      ]
+    },
+    {
+      version: '1.16.1',
+      date: '2026-11-19',
+      changes: [
+        'Fixed offline MediaPipe face scanning in the packaged app and local helper by serving and installing the detector runtime, WASM files and face model.',
+        'Scan Faces now rechecks the currently shown media list with progress feedback, ignores obsolete zero-face results, and opens a review before individually or bulk applying the Portrait label.',
+        'Improved detection sensitivity and image resolution for small faces in historical portraits and group photographs.',
+        'Fixed launcher-provided media files so face scanning uses the same readable local URL as the image preview.',
+        'Reduced false face matches on written records and scans by requiring stronger detector confidence and rejecting weak page-edge detections.',
+        'Added a face icon to Scan faces and Select all / Deselect all controls to the face results review, with readable enabled and disabled states.',
+        'Profile card image review now finds attached Portrait media whose current hero is not a Portrait, then supports individual and bulk selection before updating.',
+        'Changed hero images on person records, Relationship Map and Pedigree to square crops, and updated Reframe photo so the default square fills the full image width.'
+      ]
+    },
+    {
       version: '1.16.0',
       date: '2026-11-14',
       changes: [

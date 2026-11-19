@@ -120,6 +120,40 @@
     ['wedding', 'Wedding'], ['will-probate', 'Will / Probate']
   ];
   const mediaTypeStorageKey = (storageKey) => `kinship-atlas:media-types:v1:${storageKey}`;
+  const mediaFaceAnalysisKey = (storageKey) => `kinship-atlas:media-face-analysis:v2:${storageKey}`;
+
+  // Face-scan cache, keyed by media path. Only new or changed files are scanned.
+  // Card images and face scans are keyed by the GEDCOM hash, which only exists
+  // after saving. Until then they live under the file name, so a freshly opened
+  // media folder's selections are carried over once the key appears.
+  function adoptUnsavedMediaSelections() {
+    if (!state.primaryMediaKey) return;
+    const unsavedKey = `kinship-atlas:primary-media:v1:${state.fileName}`;
+    const legacyTypes = readSelection(mediaTypeStorageKey(unsavedKey));
+    if (legacyTypes && typeof legacyTypes === 'object') {
+      for (const [key, value] of Object.entries(legacyTypes)) {
+        if (!state.mediaTypes.has(key)) state.mediaTypes.set(key, value);
+      }
+    }
+    const legacyFaces = readSelection(mediaFaceAnalysisKey(unsavedKey));
+    if (legacyFaces?.images && !state.mediaFaceAnalysis) state.mediaFaceAnalysis = legacyFaces;
+  }
+
+  function loadMediaFaceAnalysis() {
+    if (!state.primaryMediaKey) return { version: 1, images: {} };
+    const saved = readSelection(mediaFaceAnalysisKey(state.primaryMediaKey));
+    return saved && saved.version === 2 && saved.images && typeof saved.images === 'object'
+      ? saved
+      : { version: 2, images: {} };
+  }
+
+  function saveMediaFaceAnalysis() {
+    const analysis = state.mediaFaceAnalysis;
+    if (!analysis || !state.primaryMediaKey) return false;
+    const saved = storeSelection(mediaFaceAnalysisKey(state.primaryMediaKey), analysis);
+    syncSelectionsToHelper();
+    return saved;
+  }
 
   // Shared "Classify" dropdown used by the person record's attached media and
   // the life-event media list, so both write the same media-type store as the

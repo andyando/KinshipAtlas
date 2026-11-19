@@ -98,8 +98,6 @@ static class KinshipAtlasLauncher
     }
 
     static readonly string[] Ports = { "8811", "8765", "8766", "8767", "8768", "8769" };
-    static DateTime lastRequest = DateTime.UtcNow;
-    static bool seenRequest;
 
     static void Send(HttpListenerContext ctx, int status, byte[] body, string type)
     {
@@ -123,10 +121,12 @@ static class KinshipAtlasLauncher
         switch (Path.GetExtension(path).ToLowerInvariant())
         {
             case ".html": return "text/html; charset=utf-8";
-            case ".js": return "text/javascript; charset=utf-8";
+            case ".js": case ".mjs": return "text/javascript; charset=utf-8";
             case ".css": return "text/css; charset=utf-8";
             case ".svg": return "image/svg+xml";
             case ".json": return "application/json";
+            case ".wasm": return "application/wasm";
+            case ".tflite": return "application/octet-stream";
             case ".png": case ".gif": case ".webp": case ".avif": case ".bmp": case ".jpg": case ".jpeg": case ".pdf":
                 return MediaType(Path.GetExtension(path).ToLowerInvariant());
             default: return "application/octet-stream";
@@ -138,7 +138,8 @@ static class KinshipAtlasLauncher
         string full = Path.GetFullPath(Path.Combine(root, relative.Replace('/', '\\')));
         string rootFull = Path.GetFullPath(root).TrimEnd('\\') + "\\";
         string ext = Path.GetExtension(full).ToLowerInvariant();
-        bool allowed = ext == ".html" || ext == ".js" || ext == ".css" || ext == ".svg" || ext == ".json" || Array.IndexOf(MediaExtensions, ext) >= 0;
+        bool allowed = ext == ".html" || ext == ".js" || ext == ".mjs" || ext == ".css" || ext == ".svg" || ext == ".json" ||
+            ext == ".wasm" || ext == ".tflite" || Array.IndexOf(MediaExtensions, ext) >= 0;
         if (!full.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase) || !allowed || !File.Exists(full)) { SendJson(ctx, 404, "{\"error\":\"Not found\"}"); return; }
         Send(ctx, 200, File.ReadAllBytes(full), ContentType(full));
     }
@@ -330,8 +331,6 @@ static class KinshipAtlasLauncher
 
     static void Handle(HttpListenerContext ctx, string appDir, string mediaDir)
     {
-        lastRequest = DateTime.UtcNow;
-        seenRequest = true;
         string host = ctx.Request.Url.Host;
         string origin = ctx.Request.Headers["Origin"];
         bool hostOk = host == "127.0.0.1" || host == "localhost";
@@ -466,7 +465,9 @@ static class KinshipAtlasLauncher
         catch { return false; }
     }
 
-    // Serves the app and the default media folder over localhost so media can be added; exits when the browser stops pinging.
+    // Serves the app and the default media folder over localhost so media can be added.
+    // The browser ends the helper explicitly through /api/exit; inactivity is not a safe
+    // close signal because browsers throttle network timers in idle or background tabs.
     static void RunServer(string appDir, string mediaDir)
     {
         foreach (string port in Ports)
@@ -478,12 +479,6 @@ static class KinshipAtlasLauncher
             catch { continue; }
 
             OpenUrl("http://127.0.0.1:" + port + "/");
-            var timer = new System.Threading.Timer(delegate
-            {
-                if (seenRequest && DateTime.UtcNow - lastRequest > TimeSpan.FromMinutes(2)) Environment.Exit(0);
-                if (!seenRequest && DateTime.UtcNow - lastRequest > TimeSpan.FromMinutes(2)) Environment.Exit(0);
-            }, null, 15000, 15000);
-            GC.KeepAlive(timer);
             while (true)
             {
                 HttpListenerContext ctx;

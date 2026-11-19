@@ -1,0 +1,46 @@
+﻿{
+  "steps": [
+    {
+      "step": "library opened",
+      "sortExists": 1,
+      "facesFilterGone": true,
+      "sortOptions": [
+        "name-asc",
+        "name-desc",
+        "type-asc",
+        "type-desc"
+      ]
+    },
+    {
+      "step": "sort",
+      "sortProbe": {
+        "name-asc": [],
+        "name-desc": [],
+        "type-asc": [],
+        "type-desc": []
+      }
+    },
+    {
+      "step": "scan started",
+      "watch": {
+        "seen": false,
+        "labels": []
+      },
+      "disabled": false
+    },
+    {
+      "step": "scan finished",
+      "watch": {
+        "seen": false,
+        "labels": []
+      },
+      "resultsOpen": false,
+      "rowCount": 0,
+      "dialogIds": []
+    }
+  ],
+  "errors": [],
+  "consoleErrors": [
+    "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ]
+}

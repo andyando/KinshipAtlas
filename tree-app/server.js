@@ -18,9 +18,11 @@ if (!process.argv[2] && !process.env.MEDIA_DIR) {
 fs.mkdirSync(mediaDir, { recursive: true });
 
 const types = {
-  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
-  '.webp': 'image/webp', '.avif': 'image/avif', '.bmp': 'image/bmp', '.pdf': 'application/pdf'
+  '.webp': 'image/webp', '.avif': 'image/avif', '.bmp': 'image/bmp', '.pdf': 'application/pdf',
+  '.wasm': 'application/wasm', '.tflite': 'application/octet-stream'
 };
 const uploadExtensions = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.bmp', '.pdf']);
 
@@ -204,19 +206,13 @@ function deleteFile(request, response) {
   });
 }
 
-const startedAt = Date.now();
-let lastRequestAt = startedAt;
-let seenRequest = false;
 const server = http.createServer((request, response) => {
-  lastRequestAt = Date.now();
-  seenRequest = true;
   if (!isLocalRequest(request)) return send(response, 403, { error: 'Forbidden' });
   const url = new URL(request.url, `http://${request.headers.host}`);
   if (request.method === 'GET' && url.pathname === '/api/media-info') return send(response, 200, { available: true, folder: path.basename(mediaDir) });
   if (request.method === 'POST' && url.pathname === '/api/exit') {
     send(response, 200, { ok: true });
     setTimeout(() => {
-      clearInterval(idleShutdown);
       server.close(() => process.exit(0));
       setTimeout(() => process.exit(0), 1000).unref();
     }, 250).unref();
@@ -234,16 +230,6 @@ const server = http.createServer((request, response) => {
   if (request.method === 'GET') return serveFile(response, appDir, decodeURIComponent(url.pathname === '/' ? 'index.html' : url.pathname.slice(1)));
   send(response, 405, { error: 'Method not allowed' });
 });
-
-const idleShutdown = setInterval(() => {
-  const idleFor = Date.now() - (seenRequest ? lastRequestAt : startedAt);
-  if (idleFor < 2 * 60 * 1000) return;
-  console.log('No browser activity for two minutes; stopping Kinship Atlas helper.');
-  clearInterval(idleShutdown);
-  server.close(() => process.exit(0));
-  setTimeout(() => process.exit(0), 5000).unref();
-}, 15000);
-idleShutdown.unref();
 
 server.listen(port, '127.0.0.1', () => {
   console.log(`Kinship Atlas helper running at http://localhost:${port}/`);

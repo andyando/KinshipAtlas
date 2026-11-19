@@ -1,0 +1,8 @@
+{
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^1.2.3"
+  }
+}

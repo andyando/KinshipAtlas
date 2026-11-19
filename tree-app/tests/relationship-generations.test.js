@@ -80,13 +80,13 @@ function harness({ children = false, childIds = null, grandchildren = {}, greatG
   return { context, rows, paths, offspring, people };
 }
 
-test('relationship-map portrait uses the same saved hero crop and renders inside a circular frame', () => {
+test('relationship-map portrait uses the same saved hero crop and renders inside a square frame', () => {
   const sourceHasSharedCropRenderer = /loadHeroFrameState\(person\.id, primaryImage\.file\)[\s\S]*?createHeroFrameRenderer\(framing\)\.paintHero\(photo\)/.test(source);
-  const sourceUsesCircularPortraitFrame = /card-photo-frame[\s\S]*?photoFrame\.append\(photo\)[\s\S]*?button\.append\(photoFrame\)/.test(source);
+  const sourceUsesSquarePortraitFrame = /card-photo-frame[\s\S]*?photoFrame\.append\(photo\)[\s\S]*?button\.append\(photoFrame\)/.test(source);
   const styles = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
   assert.ok(sourceHasSharedCropRenderer, 'map portrait paints with the person record hero framing state');
-  assert.ok(sourceUsesCircularPortraitFrame, 'map portrait is contained in a circular crop frame');
-  assert.match(styles, /\.card-photo-frame\s*\{[^}]*border-radius:\s*50%/s, 'map portrait frame is circular');
+  assert.ok(sourceUsesSquarePortraitFrame, 'map portrait is contained in a square crop frame');
+  assert.match(styles, /\.card-photo-frame\s*\{[^}]*border-radius:\s*3px/s, 'map portrait frame is square');
 });
 
 test('grandchildren switch to compact cards only when more than seven are displayed', () => {
