@@ -1,0 +1,37 @@
+url        http://127.0.0.1:8823/index.html
+http       200
+load       15144ms
+title      "Kinship Atlas"
+bodyChars  880
+patchright c:\Users\agand\.vscode\extensions\danielsanmedium.dscodegpt-3.24.84\standalone\
+browser    pinned Chromium  C:\Users\agand\AppData\Local\ms-playwright\chromium-1248\chrome-win64\chrome.exe
+text       LOCAL FAMILY ARCHIVE Kinship Atlas VIEW Tree View Map View Pedigree View Reports Media ON THIS DEVICE No tree loaded Settings ▾ Help ▾ DIRECTORY Showing 0 / 0 people ⌕ / Birth country All countries De
+script     {
+ "title": "Kinship Atlas",
+ "url": "http://127.0.0.1:8823/index.html",
+ "files": [
+  "gedcomInput",
+  "importGedcomInput",
+  "mediaInput",
+  "mediaUploadInput",
+  "lifeEventMediaInput"
+ ],
+ "scripts": [
+  "/primary-data.js",
+  "/version.js",
+  "/release-check.js",
+  "/data/world-data.js",
+  "/map.js",
+  "/public-records.js",
+  "/face-scan.js",
+  "/app.js"
+ ],
+ "bodyStart": "LOCAL FAMILY ARCHIVE\nKinship Atlas\nVIEW\nTree View\nMap View\nPedigree View\nReports\nMedia\nON THIS DEVICE\nNo tree loaded\nSet",
+ "people": "0"
+}
+
+console errors/warnings (1):
+  [error] Failed to load resource: the server responded with a status of 404 (Not Found)
+
+requests failed (1):
+  HTTP 404 http://127.0.0.1:8823/launcher/kinship-atlas.ico

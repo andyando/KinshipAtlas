@@ -61,7 +61,7 @@ static class KinshipAtlasLauncher
         bool first = true;
         if (Directory.Exists(mediaDir))
         {
-            foreach (string file in Directory.GetFiles(mediaDir, "*", SearchOption.AllDirectories))
+            foreach (string file in MediaFiles(mediaDir))
             {
                 string ext = Path.GetExtension(file).ToLowerInvariant();
                 if (Array.IndexOf(MediaExtensions, ext) < 0) continue;
@@ -76,6 +76,29 @@ static class KinshipAtlasLauncher
         }
         sb.Append("\r\n  ]\r\n};\r\n");
         File.WriteAllText(output, sb.ToString(), new UTF8Encoding(false));
+    }
+
+    // Files in the media folder's person subfolders, plus any file left loose in the
+    // media folder root. Each GEDCOM FILE name is listed once, and a file that still
+    // has a copy in someone's folder is listed from there, so the single copy the
+    // app now writes is the one referenced.
+    static List<string> MediaFiles(string mediaDir)
+    {
+        var byName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var loose = new List<string>();
+        foreach (string folder in Directory.GetDirectories(mediaDir))
+        {
+            foreach (string file in Directory.GetFiles(folder, "*", SearchOption.AllDirectories))
+                byName[Path.GetFileName(file)] = file;
+        }
+        foreach (string file in Directory.GetFiles(mediaDir, "*", SearchOption.TopDirectoryOnly)) loose.Add(file);
+        var result = new List<string>();
+        foreach (string file in loose)
+        {
+            if (!byName.ContainsKey(Path.GetFileName(file))) result.Add(file);
+        }
+        result.AddRange(byName.Values);
+        return result;
     }
 
     // The first folder inside "Primary Media Library" is the default (editable) media library.
@@ -150,6 +173,15 @@ static class KinshipAtlasLauncher
         string ext = Path.GetExtension(fileName).ToLowerInvariant();
         if (fileName.Length == 0 || Array.IndexOf(MediaExtensions, ext) < 0) { SendJson(ctx, 400, "{\"error\":\"Only image and PDF files are accepted.\"}"); return; }
         if (ctx.Request.ContentLength64 > 100L * 1024 * 1024) { SendJson(ctx, 413, "{\"error\":\"File is too large.\"}"); return; }
+        // A person folder name puts the file in that person's own folder, created when missing.
+        string personFolder = SafeName(Uri.UnescapeDataString(ctx.Request.Headers["X-Media-Folder"] ?? ""));
+        string targetDir = mediaDir;
+        if (personFolder.Length != 0)
+        {
+            targetDir = Path.Combine(mediaDir, personFolder);
+            try { Directory.CreateDirectory(targetDir); }
+            catch { SendJson(ctx, 500, "{\"error\":\"The person folder could not be created.\"}"); return; }
+        }
         var ms = new MemoryStream();
         ctx.Request.InputStream.CopyTo(ms);
         string baseName = fileName.Substring(0, fileName.Length - ext.Length);
@@ -158,12 +190,12 @@ static class KinshipAtlasLauncher
             string candidate = i == 0 ? fileName : baseName + " (" + (i + 1) + ")" + ext;
             try
             {
-                using (var fs = new FileStream(Path.Combine(mediaDir, candidate), FileMode.CreateNew, FileAccess.Write))
+                using (var fs = new FileStream(Path.Combine(targetDir, candidate), FileMode.CreateNew, FileAccess.Write))
                     ms.WriteTo(fs);
-                SendJson(ctx, 200, "{\"name\":" + Js(candidate) + "}");
+                SendJson(ctx, 200, "{\"name\":" + Js(candidate) + ",\"folder\":" + Js(personFolder) + "}");
                 return;
             }
-            catch (IOException) { if (!File.Exists(Path.Combine(mediaDir, candidate))) break; }
+            catch (IOException) { if (!File.Exists(Path.Combine(targetDir, candidate))) break; }
         }
         SendJson(ctx, 500, "{\"error\":\"The file could not be written.\"}");
     }
@@ -344,7 +376,7 @@ static class KinshipAtlasLauncher
             string gedcom = null;
             try { gedcom = PrimaryGedcomPath(appDir); } catch { }
             SendJson(ctx, 200, "{\"available\":true,\"app\":" + Js(appDir) + ",\"folder\":" + Js(Path.GetFileName(mediaDir)) +
-                ",\"deletePaths\":true,\"saveGedcom\":true,\"gedcom\":" + Js(gedcom == null ? "" : Path.GetFileName(gedcom)) + "}");
+                ",\"deletePaths\":true,\"personFolders\":true,\"saveGedcom\":true,\"gedcom\":" + Js(gedcom == null ? "" : Path.GetFileName(gedcom)) + "}");
             return;
         }
         if (method == "POST" && path == "/api/exit")

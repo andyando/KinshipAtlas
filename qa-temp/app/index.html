@@ -1,0 +1,898 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Kinship Atlas</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="alternate icon" type="image/x-icon" href="launcher/kinship-atlas.ico">
+  <link rel="stylesheet" href="styles.css">
+  <script src="primary-data.js" defer></script>
+  <script src="version.js" defer></script>
+  <script src="release-check.js" defer></script>
+  <script src="data/world-data.js" defer></script>
+  <script src="map.js" defer></script>
+  <script src="public-records.js" defer></script>
+  <script src="face-scan.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <a class="brand" href="#" aria-label="Kinship Atlas home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <span><span class="brand-kicker">LOCAL FAMILY ARCHIVE</span><strong>Kinship Atlas</strong></span>
+      </a>
+      <label class="view-switch" for="viewSwitch">
+        <span class="view-switch-label">View</span>
+        <select id="viewSwitch" disabled>
+          <option value="tree">Tree View</option>
+          <option value="map">Map View</option>
+          <option value="pedigree">Pedigree View</option>
+          <option value="reports">Reports</option>
+          <option value="media">Media</option>
+        </select>
+      </label>
+      <button id="mapViewButton" class="button button-quiet" type="button" aria-pressed="false" disabled hidden>Map View</button>
+      <button id="reportsButton" class="button button-quiet" type="button" aria-pressed="false" disabled hidden>Reports</button>
+      <button id="mediaLibraryButton" class="button button-quiet media-library-nav-button" type="button" aria-pressed="false" disabled hidden>Media</button>
+    </div>
+    <div class="topbar-meta"><span class="privacy-indicator"><span class="privacy-dot"></span> ON THIS DEVICE</span><span class="topbar-divider"></span><button id="treeLabel" class="tree-label-button" type="button" title="Update defaults: choose the GEDCOM file and media folder that open automatically" disabled>No tree loaded</button></div>
+    <div class="topbar-actions">
+      <div id="primaryPersonBar" class="primary-person-bar" hidden>
+        <button id="primaryHomeButton" class="button button-quiet primary-home-button" type="button" title="Show the home person in Relationship View">
+          <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 9.5V20h13V9.5"/><path d="M10 20v-5.5h4V20"/></svg>
+          Home Person
+        </button>
+        <span class="primary-person-label"><span class="primary-person-kicker">PRIMARY PERSON</span><strong id="primaryPersonName"></strong></span>
+      </div>
+      <button id="saveGedcomButton" class="button button-quiet save-gedcom-button" type="button" hidden disabled>Saved</button>
+      <div class="settings-menu" id="settingsMenu">
+        <button id="settingsButton" class="button button-quiet" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="settingsPanel">
+          <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+          Settings <span class="menu-caret" aria-hidden="true">▾</span>
+        </button>
+        <div id="settingsPanel" class="settings-panel" role="menu" hidden>
+          <label id="openGedcomLabel" class="menu-item" for="gedcomInput" role="menuitem">
+            Open GEDCOM
+            <input id="gedcomInput" type="file" accept=".ged,.gedcom,text/plain">
+          </label>
+          <button id="importGedcomButton" class="menu-item" type="button" role="menuitem" disabled title="Add new people related to this tree from another GEDCOM file">Import new GEDCOM records</button>
+          <input id="importGedcomInput" type="file" accept=".ged,.gedcom,text/plain" hidden>
+          <button id="mediaButton" class="menu-item media-button" type="button" role="menuitem" disabled>Select Media Folder</button>
+          <input id="mediaInput" type="file" webkitdirectory directory multiple>
+          <input id="mediaUploadInput" type="file" accept="image/*,.pdf,application/pdf" multiple>
+          <button id="mediaLibraryMenuButton" class="menu-item" type="button" role="menuitem" disabled>Media library</button>
+          <button id="birthCountryMenuButton" class="menu-item" type="button" role="menuitem" disabled title="List people whose birth place does not identify a country, and fix them">People without a birth country</button>
+          <button id="duplicateFinderMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Find people who may have been entered more than once">Find duplicate people</button>
+          <button id="duplicateRelationMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Remove people connected more than once to the same parent or spouse">
+            <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M21 3 12 12"/><path d="M12 12 8 16"/><path d="M8 16 3.5 20.5"/><path d="M3.5 20.5c-1.4 1.4-1.4 3 0 3.9 1.4.9 3 .4 3.9-1l1.8-2.7-3-3z"/><path d="M6.2 17.7l3 3"/><path d="M9.2 14.7l3 3"/></svg>
+            Remove duplicate relationships
+          </button>
+          <button id="darkModeButton" class="menu-item" type="button" role="menuitem" title="Switch the site to dark colours">
+            <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20.5 14.2A8.6 8.6 0 0 1 9.8 3.5a8.6 8.6 0 1 0 10.7 10.7z"/></svg>
+            Dark mode
+          </button>
+          <button id="lightModeButton" class="menu-item" type="button" role="menuitem" title="Switch the site back to light colours" hidden>
+            <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M2.5 12h2.4M19.1 12h2.4M5.3 5.3l1.7 1.7M17 17l1.7 1.7M18.7 5.3L17 7M7 17l-1.7 1.7"/></svg>
+            Light mode
+          </button>
+          <button id="defaultsButton" class="menu-item" type="button" role="menuitem" title="Choose the GEDCOM file and media folder that open automatically">Update defaults</button>
+          <button id="updateAppButton" class="menu-item" type="button" role="menuitem">Check for application updates</button>
+          <button id="clearButton" class="menu-item" type="button" role="menuitem" disabled>Start Again</button>
+          <button id="exitButton" class="menu-item" type="button" role="menuitem">Exit Kinship Atlas</button>
+        </div>
+      </div>
+      <div class="settings-menu" id="helpMenu">
+        <button id="helpButton" class="button button-quiet" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="helpPanel">
+          <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 0 1 5 .8c0 1.8-2.5 2.2-2.5 4"/><path d="M12 17.2v.3"/></svg>
+          Help <span class="menu-caret" aria-hidden="true">▾</span>
+        </button>
+        <div id="helpPanel" class="settings-panel" role="menu" hidden>
+          <button class="menu-item" type="button" role="menuitem" data-help-topic="getting-started">Getting started</button>
+          <button class="menu-item" type="button" role="menuitem" data-help-topic="gedcom">Opening &amp; importing GEDCOM files</button>
+          <button class="menu-item" type="button" role="menuitem" data-help-topic="exploring">Exploring the family tree</button>
+          <button class="menu-item" type="button" role="menuitem" data-help-topic="editing">Editing people &amp; saving</button>
+          <button class="menu-item" type="button" role="menuitem" data-help-topic="media">Photos, documents &amp; media</button>
+          <button class="menu-item" type="button" role="menuitem" data-help-topic="maps-reports">Map View, Reports &amp; data checks</button>
+          <button class="menu-item" type="button" role="menuitem" data-help-topic="defaults">Defaults &amp; home person</button>
+          <hr class="menu-divider">
+          <button id="aboutMenuButton" class="menu-item" type="button" role="menuitem">About Kinship Atlas</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="app-shell">
+    <aside class="roster-panel" aria-label="People in tree">
+      <div class="panel-intro">
+        <div class="eyebrow">DIRECTORY <span class="eyebrow-rule"></span></div>
+        <div class="roster-count"><span>Showing</span><strong id="visibleCount">0</strong><span>/</span><strong id="peopleCount">0</strong><span>people</span></div>
+        <button id="clearSurnameFilter" class="roster-clear" type="button" hidden>Clear surname filter</button>
+      </div>
+      <label class="search-box" for="peopleSearch">
+        <span class="search-glyph" aria-hidden="true">⌕</span>
+        <input id="peopleSearch" type="search" placeholder="Find a person" autocomplete="off" disabled>
+        <kbd>/</kbd>
+      </label>
+      <section id="directoryFilterPanel" class="directory-filter-panel" aria-label="Directory filters">
+        <label class="directory-filter-field" for="birthCountryFilter">Birth country<select id="birthCountryFilter" disabled><option value="">All countries</option></select></label>
+        <label class="directory-filter-field" for="deathCountryFilter">Death country<select id="deathCountryFilter" disabled><option value="">All countries</option></select></label>
+        <label class="directory-filter-field directory-occupation-filter" for="occupationTypeFilter">Occupation Type<select id="occupationTypeFilter" disabled><option value="">All occupation types</option></select></label>
+        <div class="directory-year-filter">
+          <div class="directory-year-heading"><label for="birthYearMin">Birth year</label><output id="birthYearLabel">All years</output></div>
+          <div class="directory-year-sliders"><input id="birthYearMin" type="range" disabled aria-label="Earliest birth year"><input id="birthYearMax" type="range" disabled aria-label="Latest birth year"></div>
+        </div>
+        <div class="directory-year-filter">
+          <div class="directory-year-heading"><label for="deathYearMin">Death year</label><output id="deathYearLabel">All years</output></div>
+          <div class="directory-year-sliders"><input id="deathYearMin" type="range" disabled aria-label="Earliest death year"><input id="deathYearMax" type="range" disabled aria-label="Latest death year"></div>
+        </div>
+      </section>
+      <div id="peopleList" class="people-list">
+        <div class="list-empty">Open a GEDCOM to see people here.</div>
+      </div>
+      <div class="roster-foot"><span class="status-pip"></span><span id="loadStatus">WAITING FOR FILE</span></div>
+    </aside>
+
+    <main class="main-panel">
+      <div class="main-heading">
+        <div class="heading-copy">
+            <div class="eyebrow"><span id="viewEyebrow">RELATIONSHIP MAP</span> <span class="eyebrow-rule"></span><span id="generationLabel">FIVE GENERATIONS</span></div>
+          <h1 id="focusTitle">A family, in context.</h1>
+          <p id="focusSubtitle">Open a GEDCOM to explore recorded relationships.</p>
+        </div>
+        <div class="history-controls" aria-label="Navigation history">
+          <button id="backButton" class="icon-button" type="button" title="Back" aria-label="Back" disabled>←</button>
+          <button id="forwardButton" class="icon-button" type="button" title="Forward" aria-label="Forward" disabled>→</button>
+          <span class="history-divider"></span>
+          <button id="zoomOutButton" class="icon-button zoom-button" type="button" title="Zoom out" aria-label="Zoom out" disabled>−</button>
+          <span id="zoomLabel" class="zoom-label">100%</span>
+          <button id="zoomInButton" class="icon-button zoom-button" type="button" title="Zoom in" aria-label="Zoom in" disabled>+</button>
+          <span class="history-divider print-map-divider"></span>
+          <button id="printMapButton" class="icon-button print-map-button" type="button" title="Print relationship map (A4)" aria-label="Print relationship map" disabled>
+            <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v7H6z"/></svg>
+          </button>
+          <div class="relationship-options">
+            <label class="siblings-toggle">
+              <input id="showSiblingsInput" type="checkbox" role="switch" disabled>
+              <span>Show siblings</span>
+              <span class="siblings-toggle-state" aria-hidden="true"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+      <div id="graphViewport" class="graph-viewport">
+        <div id="mapView" hidden></div>
+        <section id="pedigreeView" class="pedigree-view" aria-labelledby="pedigreeTitle" hidden>
+          <div class="pedigree-heading">
+            <div>
+              <div class="eyebrow">PEDIGREE <span class="eyebrow-rule"></span><span id="pedigreeSummary"></span></div>
+              <h2 id="pedigreeTitle">Ancestral lines of <span id="pedigreePersonName"></span></h2>
+            </div>
+          </div>
+          <div id="pedigreeChart" class="pedigree-chart" aria-live="polite"></div>
+        </section>
+        <div id="treeCanvas" class="tree-canvas">
+          <div class="welcome-state">
+            <div class="welcome-art" aria-hidden="true">
+              <span class="orbit orbit-a"></span><span class="orbit orbit-b"></span>
+              <span class="welcome-node node-a"></span><span class="welcome-node node-b"></span>
+              <span class="welcome-node node-c"></span><span class="welcome-node node-d"></span>
+              <span class="welcome-node node-e"></span><span class="welcome-stem stem-a"></span>
+              <span class="welcome-stem stem-b"></span><span class="welcome-stem stem-c"></span>
+              <span class="welcome-stem stem-d"></span>
+            </div>
+            <div class="eyebrow">YOUR ARCHIVE, CONNECTED</div>
+            <h2>Start with a person.</h2>
+            <p>Choose a local GEDCOM file to open its family relationships in this tab.</p>
+            <div class="welcome-actions">
+              <label class="button button-primary welcome-button" for="gedcomInput"><span class="button-plus" aria-hidden="true">+</span> Open GEDCOM</label>
+              <span class="welcome-or">or</span>
+              <button class="button button-secondary" type="button" data-create-gedcom>Create new GEDCOM</button>
+            </div>
+            <span class="welcome-note">Your file is read locally and never uploaded. Saved edits are written back to the file on this device.</span>
+          </div>
+        </div>
+      </div>
+      <footer class="graph-footer"><span id="graphSummary">NO TREE LOADED</span><span class="graph-footer-right">SELECT A PERSON TO RECENTER</span></footer>
+    </main>
+
+    <aside class="details-panel" aria-label="Selected person details">
+      <div id="detailsContent" class="details-content">
+        <div class="details-empty">
+          <div class="details-emblem" aria-hidden="true">K</div>
+          <div class="eyebrow">PERSON RECORD</div>
+          <h2>No person selected</h2>
+          <p>Details recorded in the source tree will appear here.</p>
+        </div>
+      </div>
+    </aside>
+  </div>
+  <section id="mediaLibraryView" class="media-library-view" aria-labelledby="mediaLibraryTitle" hidden>
+    <div class="media-library-heading">
+      <div>
+        <div class="eyebrow">GEDCOM MEDIA <span class="eyebrow-rule"></span><span id="mediaLibraryFileName"></span></div>
+        <h1 id="mediaLibraryTitle">Attached media</h1>
+        <p id="mediaLibrarySummary">Images and documents linked anywhere in this tree.</p>
+      </div>
+      <button id="mediaLibraryBackButton" class="button button-secondary" type="button">Back to tree</button>
+    </div>
+    <div class="media-library-toolbar">
+      <label class="media-library-search" for="mediaLibrarySearch">Find media
+        <input id="mediaLibrarySearch" type="search" placeholder="Search filenames or people" autocomplete="off">
+      </label>
+      <label class="media-library-filter" for="mediaLibraryTypeFilter">Type
+        <select id="mediaLibraryTypeFilter"><option value="">All types</option></select>
+      </label>
+      <label class="media-library-filter" for="mediaLibrarySort">Sort by
+        <select id="mediaLibrarySort">
+          <option value="name-asc">Filename A–Z</option>
+          <option value="name-desc">Filename Z–A</option>
+          <option value="type-asc">Classification A–Z</option>
+          <option value="type-desc">Classification Z–A</option>
+        </select>
+      </label>
+      <span id="mediaLibraryCount" class="media-library-count"></span>
+      <div class="media-library-view-toggle" role="group" aria-label="Media layout">
+        <button id="mediaLibraryCardsButton" class="button button-secondary" type="button" aria-pressed="true" title="Show each item as a card">Cards</button>
+        <button id="mediaLibraryTableButton" class="button button-secondary" type="button" aria-pressed="false" title="Show the files as compact rows">Table</button>
+      </div>
+    </div>
+    <div class="media-library-bulk">
+      <button id="mediaLibrarySelectAllButton" class="button button-secondary" type="button">Select all matches</button>
+      <button id="mediaLibraryClearSelectionButton" class="button button-quiet" type="button">Clear selection</button>
+      <label class="media-library-filter" for="mediaLibraryBulkType">Classify selected as
+        <select id="mediaLibraryBulkType"><option value="">Choose a class…</option></select>
+      </label>
+      <button id="mediaLibraryBulkApplyButton" class="button button-primary" type="button" disabled>Apply classification</button>
+      <span id="mediaLibrarySelectionCount" class="media-library-count"></span>
+      <button id="mediaLibraryScanButton" class="button button-secondary" type="button"><svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><circle cx="9" cy="10" r=".7"/><circle cx="15" cy="10" r=".7"/><path d="M8.5 14.5c1.9 2 5.1 2 7 0"/></svg>Scan faces</button>
+      <button id="mediaLibraryProfileReviewButton" class="button button-secondary" type="button"><svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3a9 9 0 1 0 .2 18h1.1a2.1 2.1 0 0 0 1.5-3.6 2.1 2.1 0 0 1 1.5-3.6H19a3 3 0 0 0 3-3C22 6.3 17.5 3 12 3z"/><circle cx="7.5" cy="11" r="1.1"/><circle cx="11" cy="7.3" r="1.1"/><circle cx="15.8" cy="8.6" r="1.1"/></svg>Update profile images</button>
+    </div>
+    <nav class="media-library-pagination" aria-label="Media Library pages (above results)" hidden>
+      <button class="button button-secondary" type="button" data-media-page="-1" aria-controls="mediaLibraryContent">Previous</button>
+      <span class="media-library-page-status" tabindex="-1"></span>
+      <button class="button button-secondary" type="button" data-media-page="1" aria-controls="mediaLibraryContent">Next</button>
+    </nav>
+    <div id="mediaLibraryContent" class="media-library-content"></div>
+    <nav class="media-library-pagination" aria-label="Media Library pages (below results)" hidden>
+      <button class="button button-secondary" type="button" data-media-page="-1" aria-controls="mediaLibraryContent">Previous</button>
+      <span class="media-library-page-status"></span>
+      <button class="button button-secondary" type="button" data-media-page="1" aria-controls="mediaLibraryContent">Next</button>
+    </nav>
+  </section>
+  <section id="reportsView" class="reports-view" aria-labelledby="reportsTitle" hidden>
+    <div class="reports-heading">
+      <div>
+        <div class="eyebrow">REPORTS <span class="eyebrow-rule"></span><span id="reportsFileName"></span></div>
+        <h1 id="reportsTitle">Tree statistics</h1>
+        <p id="reportsSubtitle">A summary of the people recorded in this GEDCOM.</p>
+      </div>
+      <button id="printReportsButton" class="icon-button" type="button" title="Print reports (A4)" aria-label="Print reports">
+        <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v7H6z"/></svg>
+      </button>
+    </div>
+    <div id="reportsContent" class="reports-content"></div>
+  </section>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="printFooter" class="print-footer" aria-hidden="true"></div>
+  <dialog id="importGedcomDialog" class="app-dialog import-dialog" aria-labelledby="importGedcomTitle">
+    <section class="dialog-panel">
+      <h2 id="importGedcomTitle">Import new GEDCOM records</h2>
+      <p id="importGedcomFile" class="media-delete-name"></p>
+      <p id="importGedcomMessage"></p>
+      <ul id="importGedcomStats" class="import-stats"></ul>
+      <div id="importGedcomPeopleSection" hidden>
+        <h3 class="import-people-heading">People to add</h3>
+        <ul id="importGedcomPeople" class="import-people"></ul>
+      </div>
+      <div id="importGedcomMergeSection" class="import-merge-section" hidden>
+        <h3 class="import-people-heading">Merge extra details into matching people (optional)</h3>
+        <p class="dialog-hint">These people are already in your tree (same first name, last name and birth date), and the file has details for them that your tree does not. Tick each person whose details you want to add. Nothing already in your tree is changed or removed; where the file differs, your tree's value is kept.</p>
+        <label class="import-merge-all"><input id="importGedcomMergeAll" type="checkbox"> Select all</label>
+        <ul id="importGedcomMerges" class="import-merges"></ul>
+        <p id="importGedcomMergeTotal" class="import-merge-total" aria-live="polite"></p>
+      </div>
+      <p id="importGedcomHint" class="dialog-hint">People are matched on first name, last name and birth date. Imported people keep their life events and their relationships to each other and to matching people in this tree. Importing saves the added people to your GEDCOM file.</p>
+      <div class="dialog-actions">
+        <button id="confirmGedcomImport" class="dialog-button dialog-button-primary" type="button">Import</button>
+        <button id="cancelGedcomImport" class="dialog-button dialog-button-quiet" type="button" data-close-dialog="importGedcomDialog">Cancel</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="aboutDialog" class="app-dialog about-dialog" aria-labelledby="aboutTitle">
+    <section class="dialog-panel">
+      <div class="about-header">
+        <h2 id="aboutTitle">About Kinship Atlas</h2>
+        <button class="dialog-button dialog-button-primary" type="button" data-close-dialog="aboutDialog">Close</button>
+      </div>
+      <div class="about-content">
+        <p id="aboutVersion" class="about-version"></p>
+        <p>A local family archive for exploring GEDCOM relationships, places, and media. Your tree and media stay on this device.</p>
+        <p><strong>Search Public Records</strong> lets you search external genealogy, archival, library, museum and public-record collections directly from a person's profile — Open Archives, WikiTree, Europeana, Digital Public Library of America, Internet Archive and Find A Grave. Search every source at once, or one service at a time; each match links to the original record so it can be verified and cited.</p>
+        <h3 class="about-history-title">Version history</h3>
+        <div id="aboutHistory" class="about-history"></div>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="helpDialog" class="app-dialog help-dialog" aria-labelledby="helpTitle">
+    <section class="dialog-panel help-dialog-panel">
+      <h2 id="helpTitle">Kinship Atlas help</h2>
+      <div class="help-layout">
+        <nav class="help-nav" aria-label="Help topics">
+          <button type="button" data-help-nav="getting-started">Getting started</button>
+          <button type="button" data-help-nav="gedcom">Opening &amp; importing GEDCOM files</button>
+          <button type="button" data-help-nav="exploring">Exploring the family tree</button>
+          <button type="button" data-help-nav="editing">Editing people &amp; saving</button>
+          <button type="button" data-help-nav="public-records">Search Public Records</button>
+          <button type="button" data-help-nav="media">Photos, documents &amp; media</button>
+          <button type="button" data-help-nav="maps-reports">Map View, Reports &amp; data checks</button>
+          <button type="button" data-help-nav="defaults">Defaults &amp; home person</button>
+        </nav>
+        <div id="helpBody" class="help-body" tabindex="-1">
+          <article class="help-article" data-help-article="getting-started" hidden>
+            <h3>Getting started</h3>
+            <p>Kinship Atlas shows a family tree from a GEDCOM file as an interactive relationship map, with each person's life events, places and media. Everything happens on this device: your file is read locally and is not uploaded.</p>
+            <h4>First steps</h4>
+            <ol>
+              <li><strong>Open a tree.</strong> On the welcome page, choose <strong>Open GEDCOM</strong> and pick a <code>.ged</code> file exported from your family tree program. To start from scratch, choose <strong>Create new GEDCOM</strong> and enter the first person.</li>
+              <li><strong>Link your media (optional).</strong> After a tree opens you are asked for a media folder so photos and documents referenced in the GEDCOM can be shown. You can skip this and do it later from <strong>Settings &gt; Select Media Folder</strong>.</li>
+              <li><strong>Choose a person.</strong> Use the directory on the left, or press <kbd>/</kbd> to jump to the <strong>Find a person</strong> search box. You can search by first and last name without entering middle names; each search word must appear in the recorded name.</li>
+              <li><strong>Explore.</strong> Click any card in the relationship map to recentre on that person. Their record appears on the right.</li>
+              <li><strong>Make it yours.</strong> Use <strong>Set as primary person</strong> in a record to add a <strong>Home Person</strong> button, and <strong>Settings &gt; Update defaults</strong> to open your tree automatically next time.</li>
+            </ol>
+            <h4>Finding your way around</h4>
+            <ul>
+              <li><strong>Top bar:</strong> use the <strong>View</strong> selector to switch between <strong>Tree View</strong>, <strong>Map View</strong>, <strong>Pedigree View</strong>, <strong>Reports</strong> and <strong>Media</strong>. The name of the open GEDCOM file is shown in the middle; click it to change your defaults. <strong>Save to GEDCOM</strong> appears there only when changes are waiting to be saved.</li>
+              <li><strong>Left:</strong> the directory of everyone in the tree, with search and filters.</li>
+              <li><strong>Centre:</strong> the relationship map for the selected person.</li>
+              <li><strong>Right:</strong> the person record, with actions for editing, printing and media. Recognized countries from the recorded birth and death places appear beside the hero image; the death country is omitted when it matches the birth country. Missing or unrecognized countries are not guessed.</li>
+            </ul>
+            <h4>Privacy</h4>
+            <p>Nothing leaves this device unless you choose a feature that says so: <strong>Search Public Records</strong> (in a person record) sends the person's name and years to the public record services you pick, and <strong>Suggest countries with GeoNames</strong> (in the birth country list) asks GeoNames for country suggestions. Search Public Records runs your query directly in your browser against each service and does not pass your tree through Kinship Atlas servers.</p>
+          </article>
+          <article class="help-article" data-help-article="gedcom" hidden>
+            <h3>Opening &amp; importing GEDCOM files</h3>
+            <p>A GEDCOM (<code>.ged</code>) file is the standard text format that family tree programs, such as RootsMagic, use to export a tree. Kinship Atlas opens files up to 100&nbsp;MB.</p>
+            <h4>Open a GEDCOM</h4>
+            <ol>
+              <li>Choose <strong>Open GEDCOM</strong> on the welcome page or in the <strong>Settings</strong> menu.</li>
+              <li>Select the file. The directory fills with everyone in the tree and the first person is shown.</li>
+              <li>When asked, link a media folder, or cancel and do it later.</li>
+            </ol>
+            <p>In browsers with local file access (such as Edge or Chrome), the app keeps permission to write back to the file you opened, so your edits can be saved into it. Otherwise, saving asks where to save, or downloads a copy.</p>
+            <h4>Open a different tree</h4>
+            <p><strong>Open GEDCOM</strong> is removed from the menu while a tree is open. Choose <strong>Settings &gt; Start Again</strong> to close the current tree, then open the other file. Start Again does not delete any GEDCOM or media files, but <strong>any changes that are not yet saved are discarded</strong>, so save pending changes with <strong>Save to GEDCOM</strong> first when that button is visible.</p>
+            <h4>Create a new GEDCOM</h4>
+            <p>On the welcome page, choose <strong>Create new GEDCOM</strong>, enter a file name and the first person (birth details are optional), then choose <strong>Create</strong>. The new tree opens straight away.</p>
+            <h4>Import new people from another GEDCOM</h4>
+            <p>Use this to add relatives from someone else's export, or from another program, without starting again.</p>
+            <ol>
+              <li>With your tree open, choose <strong>Settings &gt; Import new GEDCOM records</strong> and select the other file.</li>
+              <li>Nothing changes yet. A preview shows how many people in the file are:
+                <ul>
+                  <li><strong>new and related to this tree</strong>: these will be added;</li>
+                  <li><strong>already in this tree</strong>: same first name, last name and birth date;</li>
+                  <li><strong>already in this tree, with extra details that can be merged</strong>: see below;</li>
+                  <li><strong>new but not related to this tree</strong>: not imported;</li>
+                  <li><strong>without a birth date</strong>: not imported, because they cannot be matched.</li>
+                </ul>
+              </li>
+              <li>Check the <strong>People to add</strong> list, then choose <strong>Import … &amp; save</strong>, or <strong>Cancel</strong> to leave your tree untouched.</li>
+            </ol>
+            <p>Imported people keep their life events and their relationships to each other and to the matching people in your tree. The additions are then saved to your GEDCOM file.</p>
+            <h4>Merge extra details into matching people (optional)</h4>
+            <p>If someone in the file matches a person in your tree but the file has more about them, such as extra life events, a birth place, sources, notes or media, the preview lists them under <strong>Merge extra details into matching people</strong>. Each entry shows the person in the file, the person in your tree it matches, and how many additional records would be added (life events and other details).</p>
+            <ol>
+              <li>Choose <strong>Show what will be added</strong> on an entry to see each record. Any value that is different in the file, such as another death date, is listed as kept from your tree.</li>
+              <li>Tick each person to merge, or tick <strong>Select all</strong>. Nobody is ticked to start with, and unticked people are not changed.</li>
+              <li>Choose <strong>… merge … &amp; save</strong>. If the file only has extra details, and nobody new, the button reads <strong>Merge … &amp; save</strong>.</li>
+            </ol>
+            <p>Merging only adds what your tree is missing. It never changes or removes anything already in your tree; where the file differs, your tree's value is kept. Family links in the file are not merged this way. Life events, sources and media that already exist in your tree are recognised and are not added twice.</p>
+            <h4>How people are matched</h4>
+            <ul>
+              <li>A person in the import file counts as already in your tree when their first name, last name and birth date exactly match someone in it.</li>
+              <li>A new person is only imported if they are linked, directly or through other new people, to someone who matches exactly <em>one</em> person in your tree. If two people in your tree share a name and birth date, neither can be used as a link point, and extra details cannot be merged into them.</li>
+              <li>If nobody new is related and there is nothing to merge, the preview says <strong>No related people found</strong> or <strong>Nothing new to import</strong>, and nothing is changed.</li>
+            </ul>
+            <p class="help-note">A name-and-date match is not proof that two records are the same person. Review newly imported people, merged details and their links against your sources.</p>
+          </article>
+          <article class="help-article" data-help-article="exploring" hidden>
+            <h3>Exploring the family tree</h3>
+            <h4>Display views</h4>
+            <p>Choose a view from the <strong>View</strong> selector in the top bar:</p>
+            <ul>
+              <li><strong>Tree View</strong> shows the relationship map around the selected person. The directory and person record stay visible.</li>
+              <li><strong>Map View</strong> plots people using places recorded in the GEDCOM. Click a pin to open that person.</li>
+              <li><strong>Pedigree View</strong> shows the selected person and up to four generations of recorded ancestors. Click an ancestor to follow that line; use the zoom buttons to resize the chart or the printer button to print it on A4.</li>
+              <li><strong>Reports</strong> shows tree statistics and occupation summaries; <strong>Media</strong> opens the library of attached files.</li>
+            </ul>
+            <h4>The directory</h4>
+            <ul>
+              <li>Type in <strong>Find a person</strong> (shortcut <kbd>/</kbd>) to search by name.</li>
+              <li>Narrow the list with <strong>Birth country</strong>, <strong>Death country</strong> and <strong>Occupation Type</strong>, and the <strong>Birth year</strong> and <strong>Death year</strong> sliders. The filters combine with each other and with the search.</li>
+              <li>People are grouped by surname. Expand or collapse a surname to browse it, or tick <strong>Show only</strong> next to it to list just that family.</li>
+            </ul>
+            <h4>The relationship map</h4>
+            <ul>
+              <li>The selected person is shown with their partners, and above and below them are their recorded ancestors and descendants. Click any card to recentre the map on that person.</li>
+              <li><strong>Show siblings</strong> (on by default) adds the selected person's recorded siblings outside the couple on the selected person's side, keeping couples together.</li>
+              <li>Use <strong>←</strong> and <strong>→</strong> to step back and forward through the people you have viewed, <strong>−</strong> and <strong>+</strong> to zoom, and the printer button to print the map on A4.</li>
+              <li><strong>Home Person</strong> in the top bar returns to your primary person from any view.</li>
+            </ul>
+            <h4>The person record</h4>
+            <p>The panel on the right lists the person's recorded life events, relationships, source references and attached media. Click a relative's name to move to them. The map and record show what the GEDCOM says; they do not independently verify it.</p>
+            <p>Siblings include people linked to the same parent family or sharing a recorded parent across separate family records. Missing parents are not inferred, and separate family records are not merged.</p>
+          </article>
+          <article class="help-article" data-help-article="editing" hidden>
+            <h3>Editing people &amp; saving</h3>
+            <p>The buttons at the top of a person record let you change the tree:</p>
+            <ul>
+              <li><strong>Edit person details:</strong> name, sex, and birth and death dates and places.</li>
+              <li><strong>Add Life Event:</strong> record another event, such as a residence, marriage, occupation, military service, burial or an event of your own.</li>
+              <li><strong>Add relative:</strong> create a new person linked as a parent, child, sibling or partner. You are asked to confirm if the name matches someone already in the tree.</li>
+              <li><strong>Parent not identified:</strong> click to create a new parent or select an existing person. The missing parent role and family are preselected; adding a parent to that family links them to all its children.</li>
+              <li><strong>✎ next to a relative:</strong> edit the relationship (for example, parent role or marriage details) or delete it.</li>
+              <li><strong>Set as primary person:</strong> adds the <strong>Home Person</strong> button and shows how others are related to this person.</li>
+              <li><strong>Print record:</strong> prints the record on A4, without attached media.</li>
+              <li><strong>Search Public Records:</strong> opens a panel that searches Open Archives, WikiTree, Europeana, Digital Public Library of America, Internet Archive and Find A Grave for this person. Search one service or all of them at once; each result links to the original record.</li>
+              <li><strong>Delete person:</strong> removes the person and all links to them from the GEDCOM.</li>
+            </ul>
+            <h4>Dates</h4>
+            <p>Day and month are optional: type <code>1883</code> for a year, <code>MAR 1883</code> for a month and year, or <code>12 MAR 1883</code> for a full date. GEDCOM qualifiers such as <code>ABT 1883</code> are also supported. Use the calendar for an exact date; partial dates are saved without adding an unknown day or month.</p>
+            <h4>Saving</h4>
+            <ul>
+              <li>Edits are written back to your GEDCOM file automatically whenever the browser allows it. Records and tags you did not edit are preserved.</li>
+              <li>If the browser needs your permission, or a place to save, the top bar shows <strong>Save to GEDCOM</strong>. Click it to finish saving; the button disappears when the file is up to date.</li>
+              <li>Unsaved changes are kept in this browser tab, and you are warned before closing a tab that has them.</li>
+              <li>When <strong>Kinship Atlas.exe</strong> saves the GEDCOM in its Primary GEDCOM folder, the previous version is kept in <strong>Primary GEDCOM\Backups</strong>.</li>
+            </ul>
+          </article>
+          <article class="help-article" data-help-article="public-records" hidden>
+            <h3>Search Public Records</h3>
+            <p>Click <strong>Search Public Records</strong> in a person record to open a panel that queries external collections for that person. The dialog shows the person's full name and birth and death years; every service searches for those details.</p>
+            <h4>Supported services</h4>
+            <ul>
+              <li><strong>Open Archives</strong> — Dutch civil registration and church books.</li>
+              <li><strong>WikiTree</strong> — community-sourced shared family tree.</li>
+              <li><strong>Europeana</strong> — European cultural heritage collections.</li>
+              <li><strong>Digital Public Library of America</strong> — US archives, libraries and museums.</li>
+              <li><strong>Internet Archive</strong> — books, periodicals and archived records.</li>
+              <li><strong>Find A Grave</strong> — headstone and burial records.</li>
+            </ul>
+            <h4>How to search</h4>
+            <ul>
+              <li><strong>Search All Sources</strong> runs every service at once. Each service updates independently as it finishes, so a fast response is never held up by a slow one.</li>
+              <li>To search a single service, use its own <strong>Search</strong> button. You can run several individually without re-opening the dialog.</li>
+              <li>Status is shown per service: <strong>Ready</strong>, <strong>Searching…</strong> with a spinner, <strong>Results found</strong> with a count, <strong>No matching results found.</strong> when a service answered successfully but had nothing, and an error message when the service could not be reached.</li>
+              <li>Each match shows the record title, the service it came from, a short description and a <strong>View Source</strong> link that opens the original record in a new browser tab without leaving Kinship Atlas.</li>
+              <li>Find A Grave has no public search API, so its card always shows one entry that opens that service's own search page with the name and years already filled in.</li>
+              <li>An empty result is not an error: it only means that service has nothing matching this person. Failures do happen from time to time when a service is busy or unreachable; try that service again later.</li>
+            </ul>
+          </article>
+          <article class="help-article" data-help-article="media" hidden>
+            <h3>Photos, documents &amp; media</h3>
+            <h4>Link a media folder</h4>
+            <ol>
+              <li>Choose <strong>Settings &gt; Select Media Folder</strong> (shown as <strong>Change media folder</strong> once one is linked).</li>
+              <li>Choose <strong>Link existing folder</strong>, or <strong>Create new media folder</strong> to make one named after your GEDCOM.</li>
+              <li>When the browser asks to let the site edit files, choose <strong>Allow</strong>. This is needed to add files to the folder, and the app only uses the folder you pick.</li>
+            </ol>
+            <p>Files referenced in the GEDCOM are matched to files in the folder, and a person's primary image appears on their card.</p>
+            <h4>Add or remove media for a person</h4>
+            <ul>
+              <li>In a person record, choose <strong>Add photo or PDF</strong>. The files are copied into the media folder (renamed if a file with the same name exists) and appear under <strong>Attached media</strong>.</li>
+              <li>The trash icon on a media item unlinks it from that person. The file itself stays in the folder.</li>
+              <li>Hero photos use a square crop on the person record, Relationship Map and Pedigree. Reframe photo shows the full-width square crop; at 100% it cannot pan because the image already fills the frame.</li>
+            </ul>
+            <h4>The media library</h4>
+            <p>Choose <strong>Media</strong> in the top bar, or <strong>Settings &gt; Media library</strong>, to review every file referenced in the tree. Search by filename or person, filter by type, preview files, classify them, see who they are linked to, and choose card images. Files that are missing from the folder are listed but cannot be previewed until they are found. Deleting a file here removes it permanently, along with its GEDCOM links.</p>
+            <p>The library displays up to 60 items per page. Use <strong>Previous</strong> and <strong>Next</strong> to browse. Search, filters and sorting apply to the full library. Checked items stay selected as you change pages, and <strong>Select all matches</strong> selects matching items across all pages.</p>
+            <p><strong>Review profile card images</strong> finds people with attached Portrait-classified media whose current card image is not a Portrait, and suggests the first attached portrait. Select any combination or use Select all / Deselect all, then update the chosen profile cards.</p>
+            <h4>Find faces</h4>
+            <p>Use the search and type filters first, then choose <strong>Scan faces</strong>. Kinship Atlas scans matching image files across all pages, entirely on this device, and shows progress while it works. When the scan finishes, review the images where a face was detected and apply the <strong>Portrait</strong> label to one image or to all checked images. Scanning does not change any classifications by itself.</p>
+          </article>
+          <article class="help-article" data-help-article="maps-reports" hidden>
+            <h3>Map View, Reports &amp; data checks</h3>
+            <h4>Map View</h4>
+            <p>The <strong>Bloodline only</strong> slider, beside the family-tree icon, hides everyone except the primary person and blood relatives, within your current Directory filters. It is off by default on app startup and disabled until a primary person is set. Clearing the primary person turns it off. Map counts and the unplaced-person list follow this filter; the Directory is unchanged.</p>
+            <p>Below it, the icon sliders for <strong>Mother's side</strong>, <strong>Father's side</strong> and <strong>Descendants</strong> also start off. Turn on one or more to show only those groups combined. Relatives on both parent sides match either parent slider; the gold primary person and descendants are included using <strong>Descendants</strong>. With all three off, only the existing Bloodline only setting applies. Side filters work whether Bloodline only is on or off. Clearing the primary person resets and disables all four sliders.</p>
+            <p><strong>Map View</strong> plots people on a world map using the places recorded in the tree. Click a pin to open that person. Choose <strong>Relationship View</strong> to return to the map of relationships.</p>
+            <p>When a primary person is set, <strong>blue</strong> marks the father's side, <strong>pink</strong> the mother's side, <strong>purple</strong> relatives on both sides, <strong>gold</strong> the primary person and their descendants, and <strong>green</strong> everyone else. The bottom legend includes matching colour swatches. Each side includes that parent's ancestors and their descendants, so full siblings normally belong to both sides; the primary person and their descendants always use gold. Father/mother sides follow GEDCOM husband/wife parent roles, not guesses from names or sex. Missing parent links are not inferred.</p>
+            <p>Spouses are not included merely through marriage. Unspecified parent relationships are presumed biological; explicit adopted, foster, sealing and other non-birth pedigree links are excluded. This is a relationship inference from GEDCOM links, not proof of biological ancestry. Mixed clusters have coloured segments proportional to the number of people in each category, with category counts in their labels and badges in the person list. A gold outline indicates selection without replacing the bloodline colour. Directory filters limit visible people, not the relationships used for this calculation.</p>
+            <h4>Reports</h4>
+            <p><strong>Reports</strong> summarises the tree, including the most popular occupations, media coverage, and how many people have a birth or death country recorded. The death country count only includes people with a dated death, so people who may still be living are left out. Use the printer button to print the reports on A4.</p>
+            <p>Occupation categories are worked out from the wording in the GEDCOM, which is left unchanged. Hover over a bar to see how each description was grouped.</p>
+            <h4>People without a birth country</h4>
+            <ol>
+              <li>Choose <strong>Settings &gt; People without a birth country</strong> to list everyone whose birth place is blank or has no recognised country.</li>
+              <li>Type a corrected birth place for one or more people. Each row previews the detected country as you type.</li>
+              <li>Choose <strong>Save changes</strong>. The places are written to the GEDCOM and the list refreshes to show who still needs a country.</li>
+            </ol>
+            <p><strong>Suggest countries with GeoNames</strong> can look up existing birth places and offer countries to add with one click. It needs a free GeoNames account and your consent each time, and it sends only the place text. GeoNames uses modern country names, so check historical places before accepting.</p>
+          </article>
+          <article class="help-article" data-help-article="defaults" hidden>
+            <h3>Defaults &amp; home person</h3>
+            <h4>Open your tree automatically</h4>
+            <ol>
+              <li>Choose <strong>Settings &gt; Update defaults</strong>, or click the GEDCOM file name in the top bar.</li>
+              <li>Choose the GEDCOM file and, optionally, the media folder to open at start-up.</li>
+              <li>Choose <strong>Save default</strong>. The choice is stored in <strong>kinship-defaults.json</strong> next to the app, and the browser remembers access to the file and folder.</li>
+            </ol>
+            <p>This needs a browser with local file access, such as Edge or Chrome. <strong>Clear default</strong> stops opening a tree automatically.</p>
+            <h4>Primary person and Home Person shortcut</h4>
+            <ul>
+              <li><strong>Primary person</strong> (<strong>Set as primary person</strong> in a record) adds the <strong>Home Person</strong> button to the top bar, shows how others are related to that person, and is the reference for bloodline highlighting and filtering on the World Map.</li>
+              <li>The separate starred <strong>Home person</strong> record option has been removed. Previously saved startup-person preferences still apply when opening the default tree; setting a primary person does not change those preferences.</li>
+              <li>When a primary person is set, the welcome page offers <strong>Go to Home/Default Person in Tree</strong>.</li>
+            </ul>
+            <h4>Other Settings options</h4>
+            <ul>
+              <li><strong>Open GEDCOM</strong> and <strong>Import new GEDCOM records</strong> open a tree or preview related people to add from another file.</li>
+              <li><strong>Select Media Folder</strong> links a folder for GEDCOM media; <strong>Media library</strong> reviews and manages attached files.</li>
+              <li><strong>People without a birth country</strong> helps find and correct places; <strong>Find duplicate people</strong> lists possible duplicate records to review; <strong>Remove duplicate relationships</strong> lets you select repeated links to the same parent or spouse for removal. Deleting a duplicate link keeps the original connection.</li>
+              <li><strong>Dark mode</strong> and <strong>Light mode</strong> change the app's appearance.</li>
+              <li><strong>Check for application updates</strong> checks for a newer published release. <strong>Start Again</strong> closes the current tree so you can open another one; unsaved edits are discarded. <strong>Exit Kinship Atlas</strong> saves preferences and stops the local helper, asking first if there are unsaved GEDCOM changes.</li>
+            </ul>
+            <h4>Finishing a session</h4>
+            <p><strong>Settings &gt; Exit Kinship Atlas</strong> saves your preferences and stops the local helper. If there are unsaved GEDCOM changes, you are asked before exiting.</p>
+            <h4>Updating the application</h4>
+            <p><strong>Settings &gt; Check for application updates</strong> checks published stable GitHub releases without writing local files. Download the Windows setup executable, its Sigstore bundle and SHA256SUMS from the release page. Follow the verification instructions in the README, save your GEDCOM and exit the app and helper, then run setup and select the folder containing index.html. Setup replaces only packaged application files, including the launcher; it does not delete files or include your GEDCOM, media or preferences. Keep personal media outside application asset folders such as flags and data. Sigstore is not Windows Authenticode signing and does not guarantee antivirus acceptance.</p>
+          </article>
+        </div>
+      </div>
+      <div class="dialog-actions">
+        <button class="dialog-button dialog-button-primary" type="button" data-close-dialog="helpDialog">Close</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="updateDialog" class="app-dialog" aria-labelledby="updateDialogTitle">
+    <section class="dialog-panel">
+      <h2 id="updateDialogTitle">Application update available</h2>
+      <p id="updateDialogSummary" role="status" aria-live="polite"></p>
+      <p id="updateDialogNotes" class="dialog-hint" hidden></p>
+      <p class="dialog-hint">Download and verify the installer, checksum and Sigstore bundle from GitHub. Save your GEDCOM and exit the app before running setup. Select the application folder containing index.html. Sigstore is not a Windows-trusted signature.</p>
+      <p class="dialog-hint">If setup does not complete, manually apply the verified release to your installation folder. Replace application files only; preserve your GEDCOM, media, primary-data.js, kinship-defaults.json and kinship-selections.json. Do not bypass an antivirus warning.</p>
+      <div class="dialog-actions">
+        <a id="installAppUpdate" class="dialog-button dialog-button-primary" target="_blank" rel="noopener noreferrer">Open release downloads</a>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="updateDialog">Cancel</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="unlinkMediaDialog" class="app-dialog" aria-labelledby="unlinkMediaTitle">
+    <section class="dialog-panel">
+      <h2 id="unlinkMediaTitle">Remove media from this person?</h2>
+      <p>This media will be <strong>de-linked from the person's record</strong>, but the file will <strong>not be deleted</strong> from the source media folder.</p>
+      <div class="dialog-actions">
+        <button id="confirmUnlinkMedia" class="dialog-button dialog-button-primary" type="button">Proceed</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="unlinkMediaDialog">Cancel</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="defaultsDialog" class="app-dialog" aria-labelledby="defaultsTitle">
+    <form id="defaultsForm" class="dialog-panel new-gedcom-panel" method="dialog">
+      <h2 id="defaultsTitle">Default GEDCOM and media folder</h2>
+      <p>The app opens these automatically at start-up. The details are saved in <strong>kinship-defaults.json</strong> and the browser remembers access to the file and folder. Nothing is uploaded.</p>
+      <div class="new-gedcom-fields">
+        <div class="new-gedcom-field">GEDCOM file
+          <div class="defaults-row"><span id="defaultsGedcomName" class="defaults-name">None selected</span><button id="defaultsPickGedcom" class="dialog-button" type="button">Choose file…</button></div>
+          <input id="defaultsGedcomPath" type="text" maxlength="500" placeholder="Full path, for your records (optional)" aria-label="GEDCOM full path">
+        </div>
+        <div class="new-gedcom-field">Media folder (optional)
+          <div class="defaults-row"><span id="defaultsMediaName" class="defaults-name">None selected</span><button id="defaultsPickMedia" class="dialog-button" type="button">Choose folder…</button><button id="defaultsRemoveMedia" class="dialog-button dialog-button-quiet" type="button" hidden>Remove</button></div>
+          <input id="defaultsMediaPath" type="text" maxlength="500" placeholder="Full path, for your records (optional)" aria-label="Media folder full path">
+        </div>
+      </div>
+      <p class="dialog-hint">Browsers do not reveal full paths, so type them if you want them recorded. They are not used to open the files.</p>
+      <p id="defaultsError" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button id="defaultsSave" class="dialog-button dialog-button-primary" type="button">Save default</button>
+        <button id="defaultsClear" class="dialog-button dialog-button-quiet" type="button">Clear default</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="defaultsDialog">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="mediaFolderDialog" class="app-dialog" aria-labelledby="mediaFolderTitle">
+    <section class="dialog-panel">
+      <h2 id="mediaFolderTitle">Link media folder</h2>
+      <p>Choose an existing folder or create <strong id="newMediaFolderName">a GEDCOM media folder</strong> inside a parent folder you select.</p>
+      <p class="dialog-hint">Your browser will then ask "Allow this site to edit files?" This is a standard browser security prompt. Choose <strong>Allow</strong> so photos and PDFs can be saved into the folder. The app only uses the folder you pick.</p>
+      <div class="dialog-actions">
+        <button id="linkExistingMediaFolder" class="dialog-button" type="button">Link existing folder</button>
+        <button id="createMediaFolder" class="dialog-button dialog-button-primary" type="button">Create new media folder</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="mediaFolderDialog">Cancel</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="researchDialog" class="app-dialog public-records-dialog" aria-labelledby="researchDialogTitle" aria-describedby="researchDialogSubtitle">
+    <section class="dialog-panel public-records-panel">
+      <header class="public-records-head">
+        <div>
+          <h2 id="researchDialogTitle">Search Public Records</h2>
+          <p id="researchDialogSubtitle" class="public-records-subtitle">Search genealogy, archive, museum, and historical collections</p>
+        </div>
+        <button type="button" class="icon-button public-records-close" data-close-dialog="researchDialog" aria-label="Close Search Public Records">✕</button>
+      </header>
+      <div class="public-records-person">
+        <div id="publicRecordsPersonName" class="public-records-name"></div>
+        <div id="publicRecordsPersonDates" class="public-records-dates"></div>
+      </div>
+      <div class="public-records-actions">
+        <button id="searchAllPublicRecords" class="dialog-button dialog-button-primary" type="button">Search All Sources</button>
+        <span class="public-record-search-indicator" aria-live="polite"></span>
+        <span class="public-records-actions-hint">Each service searches independently and in parallel.</span>
+      </div>
+      <div id="publicRecordsProviders" class="public-records-providers"></div>
+    </section>
+  </dialog>
+  <dialog id="newGedcomDialog" class="app-dialog" aria-labelledby="newGedcomTitle">
+    <form id="createGedcomForm" class="dialog-panel new-gedcom-panel">
+      <h2 id="newGedcomTitle">Create a GEDCOM starter</h2>
+      <p id="newGedcomIntro">Enter the first person. The app creates a GEDCOM file and an empty media folder beside it, then opens it here.</p>
+      <div class="new-gedcom-fields">
+        <label class="new-gedcom-field" for="newGedcomFileName">File name<input id="newGedcomFileName" type="text" value="Family Tree" required maxlength="80"></label>
+        <label class="new-gedcom-field" for="newGedcomGivenName">Given name(s)<input id="newGedcomGivenName" type="text" required maxlength="120" autocomplete="given-name"></label>
+        <label class="new-gedcom-field" for="newGedcomSurname">Surname<input id="newGedcomSurname" type="text" maxlength="120" autocomplete="family-name"></label>
+        <label class="new-gedcom-field" for="newGedcomSex">Sex<select id="newGedcomSex"><option value="">Not recorded</option><option value="F">Female</option><option value="M">Male</option></select></label>
+        <label class="new-gedcom-field" for="newGedcomBirthDate">Birth date (day and month optional)<input id="newGedcomBirthDate" type="text" maxlength="40" placeholder="1883, MAR 1883 or 14 MAR 1883"><input id="newGedcomBirthDatePicker" type="date" aria-label="Choose exact birth date for new tree"></label>
+        <label class="new-gedcom-field" for="newGedcomBirthPlace">Birth place<input id="newGedcomBirthPlace" type="text" maxlength="200"></label>
+      </div>
+      <div id="newGedcomNotice" class="dialog-notice" hidden></div>
+      <p id="newGedcomError" class="dialog-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="dialog-button dialog-button-primary" type="submit">Create</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="newGedcomDialog">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="personEditorDialog" class="app-dialog person-editor-dialog" aria-labelledby="personEditorTitle">
+    <form id="personEditorForm" class="dialog-panel person-editor-panel">
+      <h2 id="personEditorTitle">Edit GEDCOM fields</h2>
+      <p>Every field in this person record is listed by GEDCOM level, tag, and value. Custom tags are preserved.</p>
+    <div class="gedcom-field-heading" aria-hidden="true"><span>Level</span><span>Tag</span><span>Value</span><span></span></div>
+      <div id="personFieldsEditor" class="person-fields-editor"></div>
+      <button id="addGedcomFieldButton" class="dialog-button" type="button">Add field</button>
+      <p id="personEditorError" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="dialog-button dialog-button-primary" type="submit">Save to GEDCOM</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="personEditorDialog">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="lifeEventDialog" class="app-dialog" aria-labelledby="lifeEventTitle">
+    <form id="lifeEventForm" class="dialog-panel new-gedcom-panel">
+      <h2 id="lifeEventTitle">Add life event</h2>
+      <p id="lifeEventIntro">Choose the kind of event, then enter a GEDCOM date such as ABT 1883, or use the calendar for an exact date.</p>
+      <div class="new-gedcom-fields">
+        <label class="new-gedcom-field" for="lifeEventType">Event type<select id="lifeEventType"></select></label>
+        <label id="lifeEventCustomTypeField" class="new-gedcom-field" for="lifeEventCustomType" hidden>Event name<input id="lifeEventCustomType" type="text" maxlength="90" placeholder="e.g. Census, Probate" autocomplete="off"></label>
+        <label id="lifeEventSpouseField" class="new-gedcom-field life-event-wide" for="lifeEventSpouse" hidden>Spouse<select id="lifeEventSpouse"></select></label>
+        <label id="lifeEventNewSpouseGivenField" class="new-gedcom-field" for="lifeEventNewSpouseGiven" hidden>New spouse given name(s)<input id="lifeEventNewSpouseGiven" type="text" maxlength="120" autocomplete="off"></label>
+        <label id="lifeEventNewSpouseSurnameField" class="new-gedcom-field" for="lifeEventNewSpouseSurname" hidden>New spouse surname<input id="lifeEventNewSpouseSurname" type="text" maxlength="120" autocomplete="off"></label>
+        <label class="new-gedcom-field" for="lifeEventDate">Date (day and month optional)<input id="lifeEventDate" type="text" maxlength="40" placeholder="1883, MAR 1883 or 14 MAR 1883"><input id="lifeEventDatePicker" type="date" aria-label="Choose exact event date"></label>
+        <label class="new-gedcom-field" for="lifeEventPlace">Place<input id="lifeEventPlace" type="text" maxlength="200" autocomplete="off"></label>
+        <label id="lifeEventMarriageTypeField" class="new-gedcom-field life-event-wide" for="lifeEventMarriageType" hidden>Marriage type<input id="lifeEventMarriageType" type="text" maxlength="60" list="lifeEventMarriageTypes" placeholder="e.g. Religious, Civil" autocomplete="off"><datalist id="lifeEventMarriageTypes"><option value="Religious"><option value="Civil"><option value="Common law"><option value="Registered partnership"><option value="Same-sex marriage"></datalist></label>
+        <label id="lifeEventDescriptionField" class="new-gedcom-field life-event-wide" for="lifeEventDescription"><span id="lifeEventDescriptionLabel">Notes</span><input id="lifeEventDescription" type="text" maxlength="250" autocomplete="off"></label>
+                <div id="lifeEventSourceField" class="life-event-sources life-event-wide">
+                  <div class="life-event-media-head">
+                    <span id="lifeEventSourceHeading">Sources</span>
+                    <button id="lifeEventSourceAdd" class="dialog-button dialog-button-quiet life-event-media-add" type="button">Add source</button>
+                  </div>
+                  <div id="lifeEventSourceList" class="life-event-source-list" role="group" aria-labelledby="lifeEventSourceHeading"></div>
+                </div>
+                <div id="lifeEventMediaField" class="life-event-media life-event-wide">
+                  <div class="life-event-media-head">
+                    <span id="lifeEventMediaHeading">Media</span>
+                    <button id="lifeEventMediaAdd" class="dialog-button dialog-button-quiet life-event-media-add" type="button">Upload photo or PDF</button>
+                    <input id="lifeEventMediaInput" type="file" accept="image/*,.pdf,application/pdf" multiple tabindex="-1" aria-hidden="true">
+                  </div>
+                  <label class="new-gedcom-field" for="lifeEventExistingMedia">Link media already attached to this person<select id="lifeEventExistingMedia"></select></label>
+                  <button id="lifeEventLinkMedia" class="dialog-button dialog-button-quiet" type="button">Link selected media</button>
+                  <p class="life-event-media-hint">The same file can be linked to multiple life events. Existing files are not copied or uploaded again.</p>
+                  <div id="lifeEventMediaList" class="life-event-media-list" aria-labelledby="lifeEventMediaHeading"></div>
+                  <p id="lifeEventMediaHint" class="life-event-media-hint" hidden></p>
+                </div>
+              </div>
+      <p id="lifeEventError" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="dialog-button dialog-button-primary" type="submit">Save to GEDCOM</button>
+        <button id="lifeEventDelete" class="dialog-button" type="button" hidden>Delete event</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="lifeEventDialog">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="eventMediaRemoveDialog" class="app-dialog" aria-labelledby="eventMediaRemoveTitle">
+    <section class="dialog-panel">
+      <h2 id="eventMediaRemoveTitle">Remove media from this event?</h2>
+      <p id="eventMediaRemoveName" class="media-delete-name"></p>
+      <div class="media-delete-options">
+        <button id="eventMediaUnlink" class="media-delete-option" type="button">
+          <strong>Delink from this event only</strong>
+          <span>The link is removed from this life event. The file stays in the media folder and other links to it are kept.</span>
+        </button>
+        <button id="eventMediaDeleteFile" class="media-delete-option media-delete-option-danger" type="button">
+          <strong>Delete the file permanently…</strong>
+          <span id="eventMediaDeleteFileDetail">Deletes the image or PDF from the media folder and removes every link to it in this tree.</span>
+        </button>
+      </div>
+      <div class="dialog-actions">
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="eventMediaRemoveDialog">Cancel</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="eventMediaDeleteConfirmDialog" class="app-dialog" aria-labelledby="eventMediaDeleteConfirmTitle">
+    <section class="dialog-panel">
+      <h2 id="eventMediaDeleteConfirmTitle">Permanently delete this file?</h2>
+      <p id="eventMediaDeleteConfirmName" class="media-delete-name"></p>
+      <p id="eventMediaDeleteConfirmText" class="media-delete-warning"></p>
+      <div class="dialog-actions">
+        <button id="confirmEventMediaDelete" class="dialog-button dialog-button-danger" type="button">Delete permanently</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="eventMediaDeleteConfirmDialog">Cancel</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="mediaLibraryDeleteDialog" class="app-dialog" aria-labelledby="mediaLibraryDeleteTitle">
+    <section class="dialog-panel">
+      <h2 id="mediaLibraryDeleteTitle">Permanently delete this media?</h2>
+      <p id="mediaLibraryDeleteName" class="media-delete-name"></p>
+      <p id="mediaLibraryDeleteText" class="media-delete-warning"></p>
+      <div class="dialog-actions">
+        <button id="confirmMediaLibraryDelete" class="dialog-button dialog-button-danger" type="button">Delete permanently</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="mediaLibraryDeleteDialog">Cancel</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="personDeleteDialog" class="app-dialog" aria-labelledby="personDeleteTitle">
+    <section class="dialog-panel">
+      <h2 id="personDeleteTitle">Delete this person?</h2>
+      <p id="personDeleteName" class="media-delete-name"></p>
+      <p class="person-delete-intro">Deleting removes this person's record and every link to them from the GEDCOM file:</p>
+      <ul id="personDeleteSummary" class="person-delete-summary"></ul>
+      <p id="personDeleteKept" class="person-delete-kept"></p>
+      <div class="dialog-actions">
+        <button id="personDeleteContinue" class="dialog-button dialog-button-danger" type="button">Delete person…</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="personDeleteDialog">Cancel</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="personDeleteConfirmDialog" class="app-dialog" aria-labelledby="personDeleteConfirmTitle">
+    <section class="dialog-panel">
+      <h2 id="personDeleteConfirmTitle">Are you sure?</h2>
+      <p id="personDeleteConfirmName" class="media-delete-name"></p>
+      <p id="personDeleteConfirmText" class="media-delete-warning"></p>
+      <div class="dialog-actions">
+        <button id="confirmPersonDelete" class="dialog-button dialog-button-danger" type="button">Yes, delete and save</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="personDeleteConfirmDialog">Cancel</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="personSummaryDialog" class="app-dialog" aria-labelledby="personSummaryTitle">
+    <form id="personSummaryForm" class="dialog-panel new-gedcom-panel">
+      <h2 id="personSummaryTitle">Edit person details</h2>
+      <p>Update the name, sex, and life dates shown in this Person Record. Enter GEDCOM dates such as ABT 1883, or use the calendar for an exact date.</p>
+      <div class="new-gedcom-fields">
+        <label class="new-gedcom-field" for="personSummaryGivenName">Given name(s)<input id="personSummaryGivenName" type="text" maxlength="120" autocomplete="given-name"></label>
+        <label class="new-gedcom-field" for="personSummarySurname">Surname<input id="personSummarySurname" type="text" maxlength="120" autocomplete="family-name"></label>
+        <label class="new-gedcom-field" for="personSummarySex">Sex<select id="personSummarySex"><option value="">Not recorded</option><option value="F">Female / F</option><option value="M">Male / M</option><option value="X">Other / X</option><option value="U">Unknown / U</option></select></label>
+        <label class="new-gedcom-field" for="personSummaryBirthDate">Birth date (day and month optional)<input id="personSummaryBirthDate" type="text" maxlength="40" placeholder="1883, MAR 1883 or 14 MAR 1883"><input id="personSummaryBirthDatePicker" type="date" aria-label="Choose exact birth date"></label>
+        <label class="new-gedcom-field" for="personSummaryBirthPlace">Birth location<input id="personSummaryBirthPlace" type="text" maxlength="200" autocomplete="off"></label>
+        <label class="new-gedcom-field" for="personSummaryDeathDate">Death date (day and month optional)<input id="personSummaryDeathDate" type="text" maxlength="40" placeholder="1883, MAR 1883 or 14 MAR 1883"><input id="personSummaryDeathDatePicker" type="date" aria-label="Choose exact death date"></label>
+        <label class="new-gedcom-field" for="personSummaryDeathPlace">Death location<input id="personSummaryDeathPlace" type="text" maxlength="200" autocomplete="off"></label>
+      </div>
+      <p id="personSummaryError" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="dialog-button dialog-button-primary" type="submit">Save to GEDCOM</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="personSummaryDialog">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="birthCountryDialog" class="app-dialog birth-country-dialog" aria-labelledby="birthCountryTitle">
+    <form id="birthCountryForm" class="dialog-panel new-gedcom-panel">
+      <h2 id="birthCountryTitle">People without a birth country</h2>
+      <p id="birthCountrySummary"></p>
+      <label class="birth-country-search" for="birthCountrySearch"><span class="search-glyph" aria-hidden="true">⌕</span><input id="birthCountrySearch" type="search" placeholder="Filter by name or place" autocomplete="off"></label>
+      <details id="geonamesPanel" class="geonames-panel">
+        <summary>Suggest countries with GeoNames</summary>
+        <p class="geonames-note">Looks up each listed birth location on GeoNames.org and suggests a country to append. Only the birth location text is sent (over HTTPS), not names, dates, or other details. GeoNames uses modern country names, so check historical places (for example in Prussia) before accepting. Accepted suggestions are written only when you click Save changes.</p>
+        <div class="geonames-controls">
+          <label class="new-gedcom-field" for="geonamesUsername">GeoNames username<input id="geonamesUsername" type="text" maxlength="80" autocomplete="off" spellcheck="false" placeholder="Your registered username"></label>
+          <button id="geonamesLookup" class="dialog-button" type="button" disabled>Suggest countries</button>
+        </div>
+        <label class="research-consent" for="geonamesConsent"><input id="geonamesConsent" type="checkbox"> I agree to send the birth locations currently listed to GeoNames.org for this lookup.</label>
+        <p id="geonamesStatus" class="geonames-status" role="status"></p>
+      </details>
+      <div id="birthCountryList" class="birth-country-list" aria-live="polite"></div>
+      <p id="birthCountryError" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <span id="birthCountryPending" class="birth-country-pending"></span>
+        <button id="saveBirthCountries" class="dialog-button dialog-button-primary" type="submit" disabled>Save changes</button>
+        <button id="closeBirthCountries" class="dialog-button dialog-button-quiet" type="button">Close</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="duplicateRelationDialog" class="app-dialog duplicate-finder-dialog" aria-labelledby="duplicateRelationTitle">
+    <section class="dialog-panel">
+      <h2 id="duplicateRelationTitle">Remove duplicate relationships</h2>
+      <p id="duplicateRelationSummary">Checking every family record for people linked more than once.</p>
+      <label class="duplicate-finder-toolbar-label">
+        <input id="duplicateRelationSelectAll" type="checkbox"> Select all for deletion
+      </label>
+      <div id="duplicateRelationList" class="duplicate-finder-list" aria-live="polite"></div>
+      <div class="dialog-actions">
+        <span id="duplicateRelationSelected" class="duplicate-finder-selected"></span>
+        <button id="deleteDuplicateRelationsButton" class="dialog-button dialog-button-danger" type="button" disabled>Delete selected duplicate links</button>
+        <button id="closeDuplicateRelations" class="dialog-button dialog-button-quiet" type="button">Close</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="duplicateFinderDialog" class="app-dialog duplicate-finder-dialog" aria-labelledby="duplicateFinderTitle">
+    <section class="dialog-panel">
+      <h2 id="duplicateFinderTitle">Find duplicate people</h2>
+      <p id="duplicateFinderSummary">Scoring each person against every other one to find potential duplicates.</p>
+      <label class="duplicate-finder-threshold">
+        Minimum score
+        <input id="duplicateThreshold" type="range" min="30" max="95" value="60">
+        <output id="duplicateThresholdLabel">60</output>
+      </label>
+      <div id="duplicateFinderList" class="duplicate-finder-list" aria-live="polite"></div>
+      <div class="dialog-actions">
+        <span id="duplicateFinderSelected" class="duplicate-finder-selected"></span>
+        <button id="deleteDuplicatesButton" class="dialog-button dialog-button-danger" type="button" disabled>Delete selected duplicates</button>
+        <button id="closeDuplicateFinder" class="dialog-button dialog-button-quiet" type="button">Close</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="addRelativeDialog" class="app-dialog" aria-labelledby="addRelativeTitle">
+    <form id="addRelativeForm" class="dialog-panel new-gedcom-panel">
+      <h2 id="addRelativeTitle">Add a relative</h2>
+      <p>Create a new relative, or choose <strong>Select existing person</strong> when adding a parent or partner/spouse. Search by name or GEDCOM ID, then select the matching record (dates and IDs distinguish people with the same name). For a parent, choose a family with a vacant role or create a separate parent family. Existing people are linked without changing their recorded details.</p>
+      <div class="new-gedcom-fields">
+        <label class="new-gedcom-field" for="relativeType">Relationship<select id="relativeType"><option value="PARENT">Parent</option><option value="CHILD">Child</option><option value="SIBLING">Sibling</option><option value="PARTNER">Partner</option></select></label>
+        <label class="new-gedcom-field" for="relativeParentRole">Parent role<select id="relativeParentRole"><option value="HUSB">Father / HUSB</option><option value="WIFE">Mother / WIFE</option></select></label>
+        <label id="relativeModeField" class="new-gedcom-field" for="relativeMode">Person<select id="relativeMode"><option value="NEW">Create new person</option><option value="EXISTING">Select existing person</option></select></label>
+        <div id="relativeExistingFields" hidden>
+          <label class="new-gedcom-field" for="relativeSearch">Search existing people<input id="relativeSearch" type="search" placeholder="Name or GEDCOM ID"></label>
+          <label class="new-gedcom-field" for="relativeExistingPerson">Select person<select id="relativeExistingPerson" size="6" aria-describedby="relativeSearchCount"></select></label>
+          <p id="relativeSearchCount" role="status"></p>
+        </div>
+        <label id="relativeFamilyField" class="new-gedcom-field" for="relativeFamily">Parent family (applies to all children in that family)<select id="relativeFamily"></select></label>
+        <label class="new-gedcom-field" for="relativeGivenName">Given name(s)<input id="relativeGivenName" type="text" required maxlength="120"></label>
+        <label class="new-gedcom-field" for="relativeSurname">Surname<input id="relativeSurname" type="text" maxlength="120"></label>
+        <label class="new-gedcom-field" for="relativeSex">Sex<select id="relativeSex"><option value="">Not recorded</option><option value="F">Female</option><option value="M">Male</option></select></label>
+        <label class="new-gedcom-field" for="relativeBirthDate">Birth date (day and month optional)<input id="relativeBirthDate" type="text" maxlength="40" placeholder="1883, MAR 1883 or 14 MAR 1883"><input id="relativeBirthDatePicker" type="date" aria-label="Choose exact relative birth date"></label>
+        <label class="new-gedcom-field" for="relativeBirthPlace">Birth place<input id="relativeBirthPlace" type="text" maxlength="200"></label>
+        <label class="new-gedcom-field" for="relativeDeathDate">Death date (day and month optional)<input id="relativeDeathDate" type="text" maxlength="40" placeholder="1883, MAR 1883 or 14 MAR 1883"><input id="relativeDeathDatePicker" type="date" aria-label="Choose exact relative death date"></label>
+        <label class="new-gedcom-field" for="relativeDeathPlace">Death place<input id="relativeDeathPlace" type="text" maxlength="200"></label>
+      </div>
+      <p id="relativeError" class="form-error" role="alert" hidden></p>
+      <p id="relativeDuplicateWarning" class="form-error" role="alert" hidden>A person with this name already exists. Confirm below only if this is a distinct individual.</p>
+      <label id="relativeDuplicateConfirmationLabel" class="research-consent" hidden><input id="relativeDuplicateConfirmed" type="checkbox"> This is a different person with the same name.</label>
+      <div class="dialog-actions">
+        <button class="dialog-button dialog-button-primary" type="submit">Add &amp; save to GEDCOM</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="addRelativeDialog">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="relationshipDialog" class="app-dialog" aria-labelledby="relationshipTitle">
+    <form id="relationshipForm" class="dialog-panel new-gedcom-panel">
+      <h2 id="relationshipTitle">Edit relationship</h2>
+      <p id="relationshipSummary"></p>
+      <div class="new-gedcom-fields">
+        <label class="new-gedcom-field" id="relationshipRoleField" for="relationshipRole">Parent role<select id="relationshipRole"><option value="HUSB">Father / HUSB</option><option value="WIFE">Mother / WIFE</option></select></label>
+        <label class="new-gedcom-field" id="relationshipPediField" for="relationshipPedi">Relationship to parents<select id="relationshipPedi"><option value="">Not specified</option><option value="birth">Birth</option><option value="adopted">Adopted</option><option value="foster">Foster</option><option value="sealing">Sealing</option></select></label>
+        <label class="new-gedcom-field" id="relationshipDateField" for="relationshipDate">Marriage date<input id="relationshipDate" type="text" maxlength="60" placeholder="e.g. 15 JUN 1920"></label>
+        <label class="new-gedcom-field" id="relationshipPlaceField" for="relationshipPlace">Marriage place<input id="relationshipPlace" type="text" maxlength="200"></label>
+        <label class="new-gedcom-field" id="relationshipMarriageTypeField" for="relationshipMarriageType">Marriage type<input id="relationshipMarriageType" type="text" maxlength="60"         list="lifeEventMarriageTypes"></label>
+      </div>
+      <p id="relationshipError" class="form-error" role="alert" hidden></p>
+      <p id="relationshipDeleteWarning" class="form-error" hidden></p>
+      <div class="dialog-actions">
+        <button id="relationshipDelete" class="dialog-button dialog-button-quiet" type="button">Delete relationship</button>
+        <button class="dialog-button dialog-button-primary" type="submit">Save to GEDCOM</button>
+        <button class="dialog-button dialog-button-quiet" type="button" data-close-dialog="relationshipDialog">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>

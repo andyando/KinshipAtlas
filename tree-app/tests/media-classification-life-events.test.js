@@ -37,7 +37,7 @@ test('large Media Library renders only the current page and keeps matching selec
   let cards;
   const elements = {
     mediaLibraryView: { querySelectorAll: () => [pager], querySelector: () => pager },
-    mediaLibraryContent: { replaceChildren: (content) => { cards = content.children || []; } }
+    mediaLibraryContent: { classList: { toggle() {} }, replaceChildren: (content) => { cards = content.children || []; } }
   };
   const context = vm.createContext({
     state, elements, clearTimeout,

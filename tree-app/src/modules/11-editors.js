@@ -621,7 +621,7 @@
       const failed = [];
       for (const entry of waiting) {
         try {
-          entry.savedName = await storeMediaFile(entry.file, mode, directoryHandle);
+          entry.savedName = await storeMediaFile(entry.file, mode, directoryHandle, pending.personId);
         } catch {
           failed.push(entry.file.name);
         }
@@ -702,7 +702,7 @@
     pending.saving = true;
     try {
       const mediaNames = await uploadLifeEventMedia();
-      if (mediaNames && state.pendingLifeEvent === pending) saveLifeEvent(false, mediaNames);
+      if (mediaNames && state.pendingLifeEvent === pending) await saveLifeEvent(false, mediaNames);
     } finally {
       pending.saving = false;
     }
@@ -853,7 +853,7 @@
     fields.dialog.showModal();
   }
 
-  function saveMarriage(deleteEvent, config, mediaNames = [], citations = { lines: [], newSources: [], changed: false }) {
+  async function saveMarriage(deleteEvent, config, mediaNames = [], citations = { lines: [], newSources: [], changed: false }) {
     const pending = state.pendingLifeEvent;
     const fields = lifeEventFields();
     const tag = config.tag;
@@ -931,6 +931,8 @@
           xref: spouseId, tag: 'INDI',
           lines: [`0 @${spouseId}@ INDI`, `1 NAME ${newGiven}${newSurname ? ` /${newSurname}/` : ''}`, `2 GIVN ${newGiven}`, ...(newSurname ? [`2 SURN ${newSurname}`] : [])]
         });
+        // New people get their media subfolder immediately as well.
+        await ensurePersonMediaFolders();
       }
       const spouseRecord = findRecord('INDI', spouseId);
       if (!spouseRecord) return showError('The spouse record could not be found.');
@@ -1002,7 +1004,7 @@
     if (value) lines.splice(insertAt < 0 ? lifeEventBlockEnd(lines, start) : insertAt, 0, `2 NOTE ${value}`);
   }
 
-  function saveLifeEvent(deleteEvent = false, mediaNames = []) {
+  async function saveLifeEvent(deleteEvent = false, mediaNames = []) {
     const pending = state.pendingLifeEvent;
     const fields = lifeEventFields();
     const personRecord = state.gedcomRecords.find((record) => record.tag === 'INDI' && record.xref === pending?.personId);
@@ -1015,7 +1017,7 @@
     if (deleteEvent) mediaNames = [];
     const citations = deleteEvent ? { lines: [], newSources: [], changed: false } : collectLifeEventCitations();
     if (citations.error) return showError(citations.error);
-    if (config.family) return saveMarriage(deleteEvent, config, mediaNames, citations);
+    if (config.family) return await saveMarriage(deleteEvent, config, mediaNames, citations);
     const date = clean(fields.date.value);
     const place = clean(fields.place.value);
     const description = clean(fields.desc.value);

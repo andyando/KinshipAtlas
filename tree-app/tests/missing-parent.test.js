@@ -67,6 +67,7 @@ function harness() {
   };
   const context = vm.createContext({
     state, elements,
+    ensurePersonMediaFolders: async () => 0,
     document: { querySelector: (selector) => field(selector.slice(1)), getElementById: field, createElement: node },
     makeButton: (label, className) => Object.assign(node('button'), { textContent: label, className }),
     personName: (id) => people.get(id)?.name,
@@ -135,9 +136,11 @@ test('clicking a missing parent opens its family and retains it when selecting a
   assert.equal(h.field('relativeFamily').value, 'F2');
   assert.equal(h.field('relativeExistingFields').hidden, false);
   h.field('relativeExistingPerson').value = 'D';
-  assert.equal(h.context.createRelativeRecord(), true);
-  assert.ok(h.state.gedcomRecords.find((record) => record.xref === 'F2').lines.includes('1 WIFE @D@'));
-  assert.equal(h.state.gedcomRecords.filter((record) => record.tag === 'INDI').length, 4);
+  return Promise.resolve(h.context.createRelativeRecord()).then((created) => {
+    assert.equal(created, true);
+    assert.ok(h.state.gedcomRecords.find((record) => record.xref === 'F2').lines.includes('1 WIFE @D@'));
+    assert.equal(h.state.gedcomRecords.filter((record) => record.tag === 'INDI').length, 4);
+  });
 });
 
 test('creating a missing parent fills the chosen family without losing its children or other parent', () => {
@@ -145,13 +148,15 @@ test('creating a missing parent fills the chosen family without losing its child
   h.context.openRelativeEditor('PARENT', 'WIFE', 'F1');
   assert.equal(h.field('relativeFamilyField').hidden, false);
   h.field('relativeGivenName').value = 'Madeup';
-  assert.equal(h.context.createRelativeRecord(), true);
-  const family = h.state.gedcomRecords.find((record) => record.xref === 'F1');
-  assert.deepEqual(family.lines, ['0 @F1@ FAM', '1 HUSB @C@', '1 CHIL @A@', '1 CHIL @D@', '1 WIFE @INEW@']);
-  assert.ok(h.state.gedcomRecords.find((record) => record.xref === 'INEW').lines.includes('1 FAMS @F1@'));
-  assert.equal(h.state.gedcomRecords.find((record) => record.xref === 'A').lines.filter((line) => line === '1 FAMC @F1@').length, 1);
-  assert.equal(h.state.gedcomRecords.filter((record) => record.tag === 'FAM').length, 2);
-  assert.equal(h.refreshedId(), 'INEW');
+  return Promise.resolve(h.context.createRelativeRecord()).then((created) => {
+    assert.equal(created, true);
+    const family = h.state.gedcomRecords.find((record) => record.xref === 'F1');
+    assert.deepEqual(family.lines, ['0 @F1@ FAM', '1 HUSB @C@', '1 CHIL @A@', '1 CHIL @D@', '1 WIFE @INEW@']);
+    assert.ok(h.state.gedcomRecords.find((record) => record.xref === 'INEW').lines.includes('1 FAMS @F1@'));
+    assert.equal(h.state.gedcomRecords.find((record) => record.xref === 'A').lines.filter((line) => line === '1 FAMC @F1@').length, 1);
+    assert.equal(h.state.gedcomRecords.filter((record) => record.tag === 'FAM').length, 2);
+    assert.equal(h.refreshedId(), 'INEW');
+  });
 });
 
 test('new parents can still use a separate family and occupied slots fail without mutations', () => {
@@ -160,10 +165,14 @@ test('new parents can still use a separate family and occupied slots fail withou
   h.field('relativeGivenName').value = 'Madeup';
   h.state.families.get('F1').wifeId = 'D';
   const before = JSON.stringify(h.state.gedcomRecords);
-  assert.equal(h.context.createRelativeRecord(), false);
-  assert.equal(JSON.stringify(h.state.gedcomRecords), before);
-  assert.equal(h.field('relativeError').hidden, false);
-  h.field('relativeFamily').value = '';
-  assert.equal(h.context.createRelativeRecord(), true);
-  assert.ok(h.state.gedcomRecords.find((record) => record.xref === 'FNEW').lines.includes('1 WIFE @INEW@'));
+  return Promise.resolve(h.context.createRelativeRecord()).then((blocked) => {
+    assert.equal(blocked, false);
+    assert.equal(JSON.stringify(h.state.gedcomRecords), before);
+    assert.equal(h.field('relativeError').hidden, false);
+    h.field('relativeFamily').value = '';
+    return h.context.createRelativeRecord();
+  }).then((created) => {
+    assert.equal(created, true);
+    assert.ok(h.state.gedcomRecords.find((record) => record.xref === 'FNEW').lines.includes('1 WIFE @INEW@'));
+  });
 });

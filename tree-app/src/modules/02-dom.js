@@ -42,6 +42,7 @@
     reportsButton: document.querySelector('#reportsButton'), reportsView: document.querySelector('#reportsView'),
     mediaLibraryButton: document.querySelector('#mediaLibraryButton'), mediaLibraryView: document.querySelector('#mediaLibraryView'),
     mediaLibraryContent: document.querySelector('#mediaLibraryContent'),
+    mediaLibraryCardsButton: document.querySelector('#mediaLibraryCardsButton'), mediaLibraryTableButton: document.querySelector('#mediaLibraryTableButton'),
     reportsContent: document.querySelector('#reportsContent'), appShell: document.querySelector('.app-shell'),
     treeLabel: document.querySelector('#treeLabel'), peopleCount: document.querySelector('#peopleCount'),
     visibleCount: document.querySelector('#visibleCount'), clearSurnameFilter: document.querySelector('#clearSurnameFilter'),

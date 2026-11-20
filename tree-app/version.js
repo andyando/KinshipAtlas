@@ -12,7 +12,8 @@ window.KINSHIP_VERSION = {
       changes: [
         'Kept the local media helper running while the browser is idle or the computer is asleep, so card and media preferences remain saveable.',
         'Made Exit Kinship Atlas close normally only after attempting to save preferences, with a confirmation option when the helper is unavailable.',
-        'Limited the Media Library to 60 items per page to improve scrolling in large libraries, while keeping search and filters across all pages.'
+        'Limited the Media Library to 60 items per page to improve scrolling in large libraries, while keeping search and filters across all pages.',
+        'Removed the idle Saved indicator from the top bar; Save to GEDCOM now appears only when there are changes to save.'
       ]
     },
     {

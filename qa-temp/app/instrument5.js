@@ -1,0 +1,13 @@
+﻿const fs = require('fs');
+let src = fs.readFileSync('app.js', 'utf8');
+const needle = "elements.mediaUploadInput.addEventListener('change', (event) => {";
+const i = src.indexOf(needle);
+src = src.slice(0, i + needle.length) + "\n    console.log('QA change ' + (event.target.files || []).length);" + src.slice(i + needle.length);
+const needle2 = "  async function saveUploadedMedia(files) {";
+const j = src.indexOf(needle2);
+src = src.slice(0, j + needle2.length) + "\n    console.log('QA save ' + files.length + ' pending=' + state.pendingUploadPersonId + ' mode=' + mediaSaveMode());" + src.slice(j + needle2.length);
+const needle3 = "    if (!person) return;";
+const k = src.indexOf(needle3, j);
+src = src.slice(0, k + needle3.length) + "\n    console.log('QA person ' + !!person);" + src.slice(k + needle3.length);
+fs.writeFileSync('app.js', src);
+console.log('ok');

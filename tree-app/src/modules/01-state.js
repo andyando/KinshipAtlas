@@ -73,6 +73,8 @@
     mediaFaceAnalysis: null,
     mediaFaceScanRunning: false,
     mediaLibrarySort: 'name-asc',
-    mediaLibrarySelected: new Set()
+    mediaLibrarySelected: new Set(),
+    mediaLibraryView: 'cards',
+    mediaPersonFolders: new Map()
   };
 

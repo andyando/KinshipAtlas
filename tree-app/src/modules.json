@@ -1,6 +1,6 @@
 {
   "eol": "lf",
-  "totalLines": 9917,
+  "totalLines": 11138,
   "modules": [
     {
       "file": "00-header.js",
@@ -12,99 +12,99 @@
     {
       "file": "01-state.js",
       "from": 27,
-      "to": 100,
-      "lines": 74,
+      "to": 106,
+      "lines": 80,
       "name": "Constants and application state"
     },
     {
       "file": "02-dom.js",
-      "from": 101,
-      "to": 171,
-      "lines": 71,
+      "from": 107,
+      "to": 178,
+      "lines": 72,
       "name": "Cached DOM elements"
     },
     {
       "file": "03-gedcom-primitives.js",
-      "from": 172,
-      "to": 311,
+      "from": 179,
+      "to": 318,
       "lines": 140,
       "name": "GEDCOM primitives (parsing, serialising, record helpers)"
     },
     {
       "file": "04-session.js",
-      "from": 312,
-      "to": 393,
+      "from": 319,
+      "to": 400,
       "lines": 82,
       "name": "Session persistence (IndexedDB)"
     },
     {
       "file": "05-gedcom-parse.js",
-      "from": 394,
-      "to": 598,
+      "from": 401,
+      "to": 605,
       "lines": 205,
       "name": "GEDCOM parsing"
     },
     {
       "file": "06-kinship.js",
-      "from": 599,
-      "to": 846,
+      "from": 606,
+      "to": 853,
       "lines": 248,
       "name": "Kinship graph and relationship terms"
     },
     {
       "file": "07-public-records.js",
-      "from": 847,
-      "to": 1051,
-      "lines": 205,
+      "from": 854,
+      "to": 1097,
+      "lines": 244,
       "name": "Search Public Records (multi-provider external lookups)"
     },
     {
       "file": "08-media.js",
-      "from": 1052,
-      "to": 1227,
-      "lines": 176,
+      "from": 1098,
+      "to": 1308,
+      "lines": 211,
       "name": "Media handling (index, storage, resolution)"
     },
     {
       "file": "09-selections.js",
-      "from": 1228,
-      "to": 1884,
-      "lines": 657,
+      "from": 1309,
+      "to": 2101,
+      "lines": 793,
       "name": "Selections and per-tree storage keys"
     },
     {
       "file": "10-rendering.js",
-      "from": 1885,
-      "to": 4998,
-      "lines": 3114,
+      "from": 2102,
+      "to": 6047,
+      "lines": 3946,
       "name": "Rendering (tree, roster, details, media library, reports)"
     },
     {
       "file": "11-editors.js",
-      "from": 4999,
-      "to": 6127,
-      "lines": 1129,
+      "from": 6048,
+      "to": 7178,
+      "lines": 1131,
       "name": "Editors and dialogs (person, life events, relationships, deletion)"
     },
     {
       "file": "12-directory.js",
-      "from": 6128,
-      "to": 6986,
-      "lines": 859,
+      "from": 7179,
+      "to": 8118,
+      "lines": 940,
       "name": "Directory, duplicate finder and birth-country suggestions"
     },
     {
       "file": "13-import.js",
-      "from": 6987,
-      "to": 9044,
-      "lines": 2058,
+      "from": 8119,
+      "to": 10268,
+      "lines": 2150,
       "name": "GEDCOM import, merging and saving"
     },
     {
       "file": "14-map-print.js",
-      "from": 9045,
-      "to": 9917,
-      "lines": 873,
+      "from": 10269,
+      "to": 11138,
+      "lines": 870,
       "name": "Map, print, defaults, about/help and startup wiring"
     }
   ]

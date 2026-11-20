@@ -19,7 +19,7 @@ function harness() {
     addRecordBeforeTrailer: (record) => state.gedcomRecords.push(record)
   });
   const start = source.indexOf('  function linkExistingRelative(');
-  const end = source.indexOf('  function createRelativeRecord(', start);
+  const end = source.indexOf('  async function createRelativeRecord(', start);
   vm.runInContext(source.slice(start, end), context);
   const searchStart = source.indexOf('  function existingRelativeCandidates(');
   const searchEnd = source.indexOf('  function syncExistingRelativeChoices(', searchStart);

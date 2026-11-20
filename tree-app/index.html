@@ -234,9 +234,12 @@
         </select>
       </label>
       <span id="mediaLibraryCount" class="media-library-count"></span>
+      <div class="media-library-view-toggle" role="group" aria-label="Media layout">
+        <button id="mediaLibraryCardsButton" class="button button-secondary" type="button" aria-pressed="true" title="Show each item as a card">Cards</button>
+        <button id="mediaLibraryTableButton" class="button button-secondary" type="button" aria-pressed="false" title="Show the files as compact rows">Table</button>
+      </div>
     </div>
     <div class="media-library-bulk">
-      <button id="mediaLibraryScanButton" class="button button-secondary" type="button"><svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><circle cx="9" cy="10" r=".7"/><circle cx="15" cy="10" r=".7"/><path d="M8.5 14.5c1.9 2 5.1 2 7 0"/></svg>Scan faces</button>
       <button id="mediaLibrarySelectAllButton" class="button button-secondary" type="button">Select all matches</button>
       <button id="mediaLibraryClearSelectionButton" class="button button-quiet" type="button">Clear selection</button>
       <label class="media-library-filter" for="mediaLibraryBulkType">Classify selected as
@@ -244,7 +247,8 @@
       </label>
       <button id="mediaLibraryBulkApplyButton" class="button button-primary" type="button" disabled>Apply classification</button>
       <span id="mediaLibrarySelectionCount" class="media-library-count"></span>
-      <button id="mediaLibraryProfileReviewButton" class="button button-secondary" type="button">Review profile card images</button>
+      <button id="mediaLibraryScanButton" class="button button-secondary" type="button"><svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><circle cx="9" cy="10" r=".7"/><circle cx="15" cy="10" r=".7"/><path d="M8.5 14.5c1.9 2 5.1 2 7 0"/></svg>Scan faces</button>
+      <button id="mediaLibraryProfileReviewButton" class="button button-secondary" type="button"><svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3a9 9 0 1 0 .2 18h1.1a2.1 2.1 0 0 0 1.5-3.6 2.1 2.1 0 0 1 1.5-3.6H19a3 3 0 0 0 3-3C22 6.3 17.5 3 12 3z"/><circle cx="7.5" cy="11" r="1.1"/><circle cx="11" cy="7.3" r="1.1"/><circle cx="15.8" cy="8.6" r="1.1"/></svg>Update profile images</button>
     </div>
     <nav class="media-library-pagination" aria-label="Media Library pages (above results)" hidden>
       <button class="button button-secondary" type="button" data-media-page="-1" aria-controls="mediaLibraryContent">Previous</button>
@@ -340,7 +344,7 @@
             </ol>
             <h4>Finding your way around</h4>
             <ul>
-              <li><strong>Top bar:</strong> use the <strong>View</strong> selector to switch between <strong>Tree View</strong>, <strong>Map View</strong>, <strong>Pedigree View</strong>, <strong>Reports</strong> and <strong>Media</strong>. The name of the open GEDCOM file is shown in the middle; click it to change your defaults. The <strong>Saved</strong> / <strong>Save to GEDCOM</strong> indicator shows whether your edits are in the file.</li>
+              <li><strong>Top bar:</strong> use the <strong>View</strong> selector to switch between <strong>Tree View</strong>, <strong>Map View</strong>, <strong>Pedigree View</strong>, <strong>Reports</strong> and <strong>Media</strong>. The name of the open GEDCOM file is shown in the middle; click it to change your defaults. <strong>Save to GEDCOM</strong> appears there only when changes are waiting to be saved.</li>
               <li><strong>Left:</strong> the directory of everyone in the tree, with search and filters.</li>
               <li><strong>Centre:</strong> the relationship map for the selected person.</li>
               <li><strong>Right:</strong> the person record, with actions for editing, printing and media. Recognized countries from the recorded birth and death places appear beside the hero image; the death country is omitted when it matches the birth country. Missing or unrecognized countries are not guessed.</li>
@@ -359,7 +363,7 @@
             </ol>
             <p>In browsers with local file access (such as Edge or Chrome), the app keeps permission to write back to the file you opened, so your edits can be saved into it. Otherwise, saving asks where to save, or downloads a copy.</p>
             <h4>Open a different tree</h4>
-            <p><strong>Open GEDCOM</strong> is removed from the menu while a tree is open. Choose <strong>Settings &gt; Start Again</strong> to close the current tree, then open the other file. Start Again does not delete any GEDCOM or media files, but <strong>any changes that are not yet saved are discarded</strong>, so check that the top bar says <strong>Saved</strong> first.</p>
+            <p><strong>Open GEDCOM</strong> is removed from the menu while a tree is open. Choose <strong>Settings &gt; Start Again</strong> to close the current tree, then open the other file. Start Again does not delete any GEDCOM or media files, but <strong>any changes that are not yet saved are discarded</strong>, so save pending changes with <strong>Save to GEDCOM</strong> first when that button is visible.</p>
             <h4>Create a new GEDCOM</h4>
             <p>On the welcome page, choose <strong>Create new GEDCOM</strong>, enter a file name and the first person (birth details are optional), then choose <strong>Create</strong>. The new tree opens straight away.</p>
             <h4>Import new people from another GEDCOM</h4>
@@ -440,7 +444,7 @@
             <h4>Saving</h4>
             <ul>
               <li>Edits are written back to your GEDCOM file automatically whenever the browser allows it. Records and tags you did not edit are preserved.</li>
-              <li>If the browser needs your permission, or a place to save, the top bar shows <strong>Save to GEDCOM</strong>. Click it to finish saving. It changes to <strong>Saved</strong> when the file is up to date.</li>
+              <li>If the browser needs your permission, or a place to save, the top bar shows <strong>Save to GEDCOM</strong>. Click it to finish saving; the button disappears when the file is up to date.</li>
               <li>Unsaved changes are kept in this browser tab, and you are warned before closing a tab that has them.</li>
               <li>When <strong>Kinship Atlas.exe</strong> saves the GEDCOM in its Primary GEDCOM folder, the previous version is kept in <strong>Primary GEDCOM\Backups</strong>.</li>
             </ul>

@@ -9,6 +9,7 @@
     state.mediaRelativePaths = new WeakMap();
     state.mediaDirectoryHandle = null;
     state.rememberedMediaDirectoryHandle = null;
+    state.mediaPersonFolders.clear();
     elements.mediaInput.value = '';
     elements.mediaButton.disabled = false;
     syncMediaButton();
@@ -124,13 +125,13 @@
 
   function syncGedcomSaveUi() {
     const button = document.querySelector('#saveGedcomButton');
-    const label = state.gedcomSaving ? 'Saving…' : state.gedcomDirty ? 'Save to GEDCOM' : 'Saved';
+    const label = state.gedcomSaving ? 'Saving…' : 'Save to GEDCOM';
     if (button) {
-      button.hidden = !state.fileName;
-      button.disabled = state.gedcomSaving || !state.gedcomDirty;
+      button.hidden = !state.fileName || (!state.gedcomDirty && !state.gedcomSaving);
+      button.disabled = state.gedcomSaving;
       button.classList.toggle('is-dirty', state.gedcomDirty && !state.gedcomSaving);
-      setButtonContent(button, state.gedcomDirty || state.gedcomSaving ? 'save' : 'saved', label);
-      button.title = state.gedcomDirty ? `Write the unsaved changes to ${state.fileName}` : `All changes are saved to ${state.fileName}`;
+      setButtonContent(button, 'save', label);
+      button.title = state.gedcomSaving ? `Saving changes to ${state.fileName}` : `Write the unsaved changes to ${state.fileName}`;
     }
     for (const recordButton of document.querySelectorAll('[data-save-gedcom]')) {
       recordButton.hidden = !state.gedcomDirty;
@@ -2448,10 +2449,234 @@
       return;
     }
     const fragment = document.createDocumentFragment();
-    for (const entry of entries.slice(start, start + mediaLibraryPageSize)) {
-      fragment.append(createMediaLibraryCard(entry));
+    const tableMode = state.mediaLibraryView === 'table';
+    elements.mediaLibraryContent.classList.toggle('is-table', tableMode);
+    if (tableMode) {
+      const table = createMediaLibraryTable();
+      const body = table.querySelector('tbody');
+      for (const entry of entries.slice(start, start + mediaLibraryPageSize)) body.append(createMediaLibraryRow(entry));
+      fragment.append(table);
+    } else {
+      for (const entry of entries.slice(start, start + mediaLibraryPageSize)) {
+        fragment.append(createMediaLibraryCard(entry));
+      }
     }
     elements.mediaLibraryContent.replaceChildren(fragment);
+  }
+
+  function syncMediaLibraryViewButtons() {
+    const tableMode = state.mediaLibraryView === 'table';
+    const cardsButton = document.querySelector('#mediaLibraryCardsButton');
+    const tableButton = document.querySelector('#mediaLibraryTableButton');
+    if (cardsButton) cardsButton.setAttribute('aria-pressed', String(!tableMode));
+    if (tableButton) tableButton.setAttribute('aria-pressed', String(tableMode));
+  }
+
+  function setMediaLibraryView(view) {
+    state.mediaLibraryView = view === 'table' ? 'table' : 'cards';
+    syncMediaLibraryViewButtons();
+    renderMediaLibrary();
+  }
+
+  // Keeps a row's select box and the shared selection controls in step.
+  function toggleMediaLibrarySelection(entry, checked) {
+    if (checked) state.mediaLibrarySelected.add(entry.key);
+    else state.mediaLibrarySelected.delete(entry.key);
+    const selectionCount = document.querySelector('#mediaLibrarySelectionCount');
+    if (selectionCount) selectionCount.textContent = state.mediaLibrarySelected.size ? `${state.mediaLibrarySelected.size} selected` : '';
+    const bulkApply = document.querySelector('#mediaLibraryBulkApplyButton');
+    if (bulkApply) bulkApply.disabled = !state.mediaLibrarySelected.size || !document.querySelector('#mediaLibraryBulkType').value;
+  }
+
+  // One small thumbnail per file — the same 56px square the person record's hero
+  // image uses — so the table keeps the picture without the card's height.
+  function mediaLibraryThumbnail(entry) {
+    if (entry.file && isImageFile(entry.file)) {
+      const url = mediaUrl(entry.file);
+      const link = document.createElement('a');
+      link.className = 'media-library-row-thumb-link';
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.setAttribute('aria-label', `View ${entry.file.name}`);
+      const image = document.createElement('img');
+      image.className = 'media-library-row-thumb';
+      image.loading = 'lazy';
+      image.decoding = 'async';
+      image.src = url;
+      image.alt = entry.file.name;
+      link.append(image);
+      return link;
+    }
+    const placeholder = document.createElement('span');
+    placeholder.className = 'media-library-row-thumb is-document';
+    placeholder.textContent = entry.file ? 'PDF' : '—';
+    placeholder.title = entry.file ? 'Document' : 'File not found';
+    return placeholder;
+  }
+
+  function createMediaLibraryTable() {
+    const table = document.createElement('table');
+    table.className = 'media-library-table';
+    table.innerHTML = `
+      <thead>
+        <tr>
+          <th scope="col" class="media-library-col-select"><span class="sr-only">Select</span></th>
+          <th scope="col" class="media-library-col-thumb"><span class="sr-only">Preview</span></th>
+          <th scope="col">File</th>
+          <th scope="col">Classification</th>
+          <th scope="col">Linked people</th>
+          <th scope="col">Faces</th>
+          <th scope="col">Card image</th>
+          <th scope="col">Actions</th>
+        </tr>
+      </thead>
+      <tbody></tbody>`;
+    return table;
+  }
+
+  function createMediaLibraryRow(entry) {
+    const row = document.createElement('tr');
+    row.className = 'media-library-row';
+    row.dataset.mediaKey = entry.key;
+    const analysis = mediaEntryAnalysis(entry);
+
+    const selectCell = document.createElement('td');
+    selectCell.className = 'media-library-col-select';
+    const selectBox = document.createElement('input');
+    selectBox.type = 'checkbox';
+    selectBox.className = 'media-library-select';
+    selectBox.checked = state.mediaLibrarySelected.has(entry.key);
+    selectBox.setAttribute('aria-label', `Select ${entry.file?.name || entry.path}`);
+    selectBox.addEventListener('change', () => {
+      toggleMediaLibrarySelection(entry, selectBox.checked);
+      row.classList.toggle('is-selected', selectBox.checked);
+    });
+    row.classList.toggle('is-selected', selectBox.checked);
+    selectCell.append(selectBox);
+
+    const thumbCell = document.createElement('td');
+    thumbCell.className = 'media-library-col-thumb';
+    thumbCell.append(mediaLibraryThumbnail(entry));
+
+    const fileCell = document.createElement('td');
+    fileCell.className = 'media-library-row-file';
+    const heading = document.createElement('strong');
+    heading.textContent = entry.file?.name || entry.path.split(/[\\/]/).pop() || entry.path;
+    heading.title = entry.path;
+    const pathLabel = document.createElement('span');
+    pathLabel.className = 'media-library-path';
+    pathLabel.textContent = entry.path;
+    fileCell.append(heading, pathLabel);
+
+    const typeCell = document.createElement('td');
+    const typeSelect = document.createElement('select');
+    typeSelect.className = 'media-library-type-select';
+    typeSelect.dataset.mediaTypeKey = entry.key;
+    typeSelect.setAttribute('aria-label', `Classify ${entry.file?.name || entry.path}`);
+    const currentType = state.mediaTypes.get(entry.key) || 'unclassified';
+    for (const [value, label] of mediaTypeOptions) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      option.selected = value === currentType;
+      typeSelect.append(option);
+    }
+    typeSelect.addEventListener('change', () => {
+      state.mediaTypes.set(entry.key, typeSelect.value);
+      const saved = saveMediaTypes();
+      if (state.mediaLibrarySelected.has(entry.key)) {
+        const bulkType = document.querySelector('#mediaLibraryBulkType');
+        if (bulkType) bulkType.value = typeSelect.value;
+      }
+      if (!saved) showToast('Classification saved for this tab only; browser storage is unavailable.');
+    });
+    typeCell.append(typeSelect);
+
+    const linkedCell = document.createElement('td');
+    linkedCell.className = 'media-library-row-links';
+    if (entry.people.size) {
+      for (const { person } of [...entry.people.values()].sort((a, b) => a.person.name.localeCompare(b.person.name))) {
+        const personLink = makeButton(person.name, 'media-library-person');
+        personLink.dataset.mediaPerson = person.id;
+        personLink.addEventListener('click', () => {
+          setMediaLibraryMode(false);
+          setFocus(person.id);
+        });
+        linkedCell.append(personLink);
+      }
+    } else {
+      const none = document.createElement('span');
+      none.className = 'media-library-unlinked';
+      none.textContent = 'Not linked';
+      linkedCell.append(none);
+    }
+
+    const faceCell = document.createElement('td');
+    faceCell.className = 'media-library-row-faces';
+    if (analysis) {
+      const faceBadge = document.createElement('span');
+      faceBadge.className = `media-library-badge${analysis.hasFace ? ' is-face' : ' is-noface'}`;
+      faceBadge.textContent = analysis.hasFace
+        ? (analysis.faceCount === 1 ? '1 face' : `${analysis.faceCount} faces`)
+        : 'No faces';
+      faceBadge.title = analysis.hasFace ? `${analysis.classification} · portrait score ${Math.round((analysis.portraitScore || 0) * 100)}%` : 'Face scan found no faces';
+      faceCell.append(faceBadge);
+    } else {
+      faceCell.textContent = '—';
+    }
+
+    const primaryCell = document.createElement('td');
+    primaryCell.className = 'media-library-row-primary';
+    const linkedPrimary = [...entry.people.entries()].find(([personId]) => {
+      const selected = state.primaryMedia.get(personId);
+      return selected && (entry.file ? resolveMediaFile(selected) === entry.file : normalizeMediaPath(selected) === entry.key);
+    });
+    if (linkedPrimary) {
+      const badge = document.createElement('span');
+      badge.className = 'media-library-primary-badge';
+      badge.textContent = state.people.get(linkedPrimary[0])?.name || 'Primary';
+      badge.title = 'Already this person\'s card image';
+      primaryCell.append(badge);
+    } else {
+      primaryCell.textContent = '—';
+    }
+
+    const actionCell = document.createElement('td');
+    actionCell.className = 'media-library-row-actions';
+    if (entry.file && isImageFile(entry.file) && entry.people.size) {
+      const primaryPerson = document.createElement('select');
+      primaryPerson.className = 'media-library-primary-person';
+      primaryPerson.setAttribute('aria-label', 'Person to assign this card image to');
+      for (const { person } of entry.people.values()) {
+        const option = document.createElement('option');
+        option.value = person.id;
+        option.textContent = person.name;
+        primaryPerson.append(option);
+      }
+      const setPrimary = makeButton('Set as card image', 'media-library-primary-action');
+      setPrimary.addEventListener('click', () => {
+        const personId = primaryPerson.value;
+        const path = entry.people.get(personId)?.path;
+        if (!path) return;
+        state.primaryMedia.set(personId, path);
+        const saved = savePrimaryMedia();
+        render();
+        renderMediaLibrary();
+        showToast(saved ? `${entry.file.name} is now ${state.people.get(personId)?.name}'s primary card image.` : 'Primary card image selected for this tab; browser storage is unavailable.');
+      });
+      actionCell.append(primaryPerson, setPrimary);
+    }
+    const deleteButton = makeButton('Delete', 'media-library-delete');
+    deleteButton.disabled = !canDeleteMediaFile(entry.file);
+    deleteButton.title = deleteButton.disabled
+      ? entry.file ? 'Select a writable media folder or use the local helper to delete files.' : 'The file is unavailable in the linked media folder.'
+      : 'Permanently delete this file and remove its links from the GEDCOM.';
+    deleteButton.addEventListener('click', () => openMediaLibraryDeleteDialog(entry));
+    actionCell.append(deleteButton);
+
+    row.append(selectCell, thumbCell, fileCell, typeCell, linkedCell, faceCell, primaryCell, actionCell);
+    return row;
   }
 
   function changeMediaLibraryPage(offset) {
@@ -2474,13 +2699,8 @@
     selectBox.checked = state.mediaLibrarySelected.has(entry.key);
     selectBox.setAttribute('aria-label', `Select ${entry.file?.name || entry.path}`);
     selectBox.addEventListener('change', () => {
-      if (selectBox.checked) state.mediaLibrarySelected.add(entry.key);
-      else state.mediaLibrarySelected.delete(entry.key);
+      toggleMediaLibrarySelection(entry, selectBox.checked);
       card.classList.toggle('is-selected', selectBox.checked);
-      const selectionCount = document.querySelector('#mediaLibrarySelectionCount');
-      if (selectionCount) selectionCount.textContent = state.mediaLibrarySelected.size ? `${state.mediaLibrarySelected.size} selected` : '';
-      const bulkApply = document.querySelector('#mediaLibraryBulkApplyButton');
-      if (bulkApply) bulkApply.disabled = !state.mediaLibrarySelected.size || !document.querySelector('#mediaLibraryBulkType').value;
     });
     card.classList.toggle('is-selected', selectBox.checked);
     const preview = document.createElement('div');

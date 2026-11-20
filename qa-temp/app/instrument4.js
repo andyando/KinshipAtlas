@@ -1,0 +1,10 @@
+﻿const fs = require('fs');
+let src = fs.readFileSync('app.js', 'utf8');
+const marker = "  async function saveUploadedMedia(files) {";
+const i = src.indexOf(marker);
+src = src.slice(0, i + marker.length) + "\n    console.error('QA saveUploadedMedia entered ' + files.length + ' pending=' + state.pendingUploadPersonId + ' mode=' + mediaSaveMode());" + src.slice(i + marker.length);
+const marker2 = "    if (!person) return;";
+const j = src.indexOf(marker2, i);
+src = src.slice(0, j + marker2.length) + "\n    console.error('QA person ' + !!person);" + src.slice(j + marker2.length);
+fs.writeFileSync('app.js', src);
+console.log('instrumented');

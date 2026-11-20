@@ -503,7 +503,7 @@
     return personId;
   }
 
-  function createRelativeRecord() {
+  async function createRelativeRecord() {
     const selected = state.people.get(state.selectedId);
     if (!selected) return false;
     if (['PARENT', 'PARTNER'].includes(elements.relativeType.value)
@@ -618,7 +618,10 @@
     }
     addRecordBeforeTrailer({ xref: personId, tag: 'INDI', lines: newPersonLines });
     if (addFamilyRecord) addRecordBeforeTrailer({ xref: familyId, tag: 'FAM', lines: familyLines });
+    // The new person gets their media subfolder straight away, so photo and PDF
+    // uploads already have somewhere to land.
     refreshAfterGedcomMutation(personId);
+    await ensurePersonMediaFolders();
     elements.addRelativeDialog.close();
     elements.addRelativeForm.reset();
     elements.relativeParentRoleField.hidden = false;
@@ -1052,6 +1055,11 @@
       syncGedcomSaveUi();
       await persistActiveSession();
       showToast(`Loaded ${parsed.people.size.toLocaleString()} individuals. Edits are saved back to ${file.name}.`);
+      // Every person gets a folder of their own in the media folder when one is open.
+      if (state.mediaDirectoryHandle) {
+        state.mediaPersonFolders.clear();
+        ensurePersonMediaFolders({ quiet: true }).then((created) => { if (created) render(); });
+      }
       return true;
     } catch (error) {
       elements.loadStatus.textContent = 'IMPORT FAILED';
@@ -1200,6 +1208,7 @@
       state.mediaDirectoryHandle = mediaHandle;
       syncMediaButton();
       await indexMediaDirectory(mediaHandle);
+      await ensurePersonMediaFolders({ quiet: true });
       render();
     } else if (helperFolder) {
       state.mediaHelper = { folder: helperFolder };
@@ -1627,6 +1636,20 @@
   });
   document.querySelector('#mediaLibraryScanButton').addEventListener('click', () => { scanMediaFaces(); });
   document.querySelector('#mediaLibraryProfileReviewButton').addEventListener('click', openProfileImageReview);
+  // Card and table are two views of the same filtered, sorted page of files.
+  const viewStyleKey = 'kinship-atlas:media-library-view:v1';
+  try { if (localStorage.getItem(viewStyleKey) === 'table') state.mediaLibraryView = 'table'; } catch { }
+  syncMediaLibraryViewButtons();
+  elements.mediaLibraryCardsButton.addEventListener('click', () => {
+    setMediaLibraryView('cards');
+    try { localStorage.setItem(viewStyleKey, 'cards'); } catch { }
+    elements.mediaLibraryCardsButton.focus();
+  });
+  elements.mediaLibraryTableButton.addEventListener('click', () => {
+    setMediaLibraryView('table');
+    try { localStorage.setItem(viewStyleKey, 'table'); } catch { }
+    elements.mediaLibraryTableButton.focus();
+  });
   document.querySelector('#printReportsButton').addEventListener('click', printReports);
   elements.reportsContent.addEventListener('click', (event) => {
     const more = event.target.closest('[data-report-more]');
@@ -1804,7 +1827,10 @@
     if (button) setFocus(button.dataset.personId);
   });
   elements.mediaUploadInput.addEventListener('change', (event) => {
-    saveUploadedMedia([...(event.target.files || [])]);
+    saveUploadedMedia([...(event.target.files || [])]).catch((error) => {
+      console.error('The media upload stopped unexpectedly.', error);
+      showToast('The media files could not be saved.');
+    });
     elements.mediaUploadInput.accept = 'image/*,.pdf,application/pdf';
   });
   elements.mediaUploadInput.addEventListener('cancel', () => {
@@ -2029,7 +2055,7 @@
       lifeEvent.remove.textContent = 'Click again to confirm delete';
       return;
     }
-    saveLifeEvent(true);
+    saveLifeEvent(true).catch(() => {});
   });
   lifeEvent.dialog.addEventListener('close', () => {
     state.pendingLifeEvent = null;
@@ -2049,9 +2075,9 @@
   elements.personEditorDialog.addEventListener('close', () => {
     state.pendingEditPersonId = null;
   });
-  elements.addRelativeForm.addEventListener('submit', (event) => {
+  elements.addRelativeForm.addEventListener('submit', async (event) => {
     event.preventDefault();
-    if (!createRelativeRecord() && document.querySelector('#relativeDuplicateWarning').hidden
+    if (!await createRelativeRecord() && document.querySelector('#relativeDuplicateWarning').hidden
       && document.querySelector('#relativeError').hidden) {
       showToast('Enter a given name and ensure a person record is selected.');
     }

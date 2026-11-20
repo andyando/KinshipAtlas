@@ -125,9 +125,14 @@
   function addFileToMediaIndex(file, relativePath) {
     if (!state.mediaIndex) state.mediaIndex = { byName: new Map() };
     state.mediaRelativePaths.set(file, relativePath);
-    const key = normalizeMediaPath(file.name);
-    if (!state.mediaIndex.byName.has(key)) state.mediaIndex.byName.set(key, []);
-    state.mediaIndex.byName.get(key).push(file);
+    // Index the bare name and the relative path, so a file saved in a person's
+    // folder is found both as "<folder>/<file>" and by its file name.
+    for (const key of new Set([file.name, relativePath])) {
+      const normalized = normalizeMediaPath(key);
+      if (!normalized) continue;
+      if (!state.mediaIndex.byName.has(normalized)) state.mediaIndex.byName.set(normalized, []);
+      state.mediaIndex.byName.get(normalized).push(file);
+    }
   }
 
   function indexMediaDirectory(directoryHandle) {
@@ -171,6 +176,7 @@
       state.rememberedMediaDirectoryHandle = null;
       syncMediaButton();
       await indexMediaDirectory(directoryHandle);
+      await ensurePersonMediaFolders({ quiet: true });
       render();
       return true;
     } catch {
@@ -197,9 +203,89 @@
     throw new Error('Could not find an unused filename for this media item.');
   }
 
+  // The person folder a file sits in, relative to the media folder ("" at its root).
+  function mediaRelativeFolder(file) {
+    const segments = String(state.mediaRelativePaths.get(file) || '').split('/').filter(Boolean);
+    return segments.length > 1 ? segments.slice(0, -1).join('/') : '';
+  }
+
   function mediaFolderName() {
     const baseName = state.fileName.replace(/\.[^.]+$/, '').trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[. ]+$/, '');
     return `${baseName || 'Family Tree'}_Media`;
+  }
+
+  // Every person gets their own folder inside the media folder, named the way the
+  // Primary Media Library names its person folders: "Given Surname (1800-1900) [I12]".
+  // Years are left out when neither birth nor death is recorded.
+  function mediaPersonFolderName(personId) {
+    const person = state.people.get(personId);
+    if (!person) return '';
+    const birthYear = person.events.find((event) => event.type === 'BIRT')?.date?.match(/\d{4}/)?.[0] || '';
+    const deathYear = person.events.find((event) => event.type === 'DEAT')?.date?.match(/\d{4}/)?.[0] || '';
+    const years = birthYear || deathYear ? ` (${birthYear || 'unknown'}-${deathYear || 'unknown'})` : '';
+    const base = `${person.name || person.id}${years} [${person.id}]`.replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').trim().replace(/[. ]+$/, '');
+    return base.slice(0, 150).replace(/[. ]+$/, '');
+  }
+
+  // Returns the person's folder inside the given directory, creating it when missing.
+  async function mediaPersonDirectory(directoryHandle, personId) {
+    const name = mediaPersonFolderName(personId);
+    if (!name) throw new Error('No person folder name could be made.');
+    return directoryHandle.getDirectoryHandle(name, { create: true });
+  }
+
+  // The person whose folder a file belongs to: one folder in the media folder
+  // named after the person, then one linked person, preferring the owner when
+  // a file is linked to several people.
+  function mediaFolderOwnerId(path) {
+    const file = resolveMediaFile(path);
+    if (!file) return '';
+    const segments = String(state.mediaRelativePaths.get(file) || '').split('/').filter(Boolean);
+    if (segments.length === 2) {
+      const folderName = segments[0].toLocaleLowerCase();
+      for (const person of state.people.values()) {
+        if (mediaPersonFolderName(person.id).toLocaleLowerCase() === folderName) return person.id;
+      }
+    }
+    for (const person of state.people.values()) {
+      if (person.mediaPaths.some((item) => resolveMediaFile(item) === file)) return person.id;
+    }
+    for (const family of state.families.values()) {
+      for (const event of [family.marriage, family.divorce]) {
+        if (!event?.mediaPaths.some((item) => resolveMediaFile(item) === file)) continue;
+        if (state.people.has(family.husbandId)) return family.husbandId;
+        if (state.people.has(family.wifeId)) return family.wifeId;
+      }
+    }
+    return '';
+  }
+
+  // Makes sure every person has their folder in the media folder. With quiet set
+  // (the check run when a folder or GEDCOM is opened) the result is not announced.
+  async function ensurePersonMediaFolders({ quiet = false } = {}) {
+    const directoryHandle = state.mediaDirectoryHandle;
+    if (!directoryHandle || !state.people.size) return 0;
+    let created = 0;
+    try {
+      for (const personId of state.people.keys()) {
+        const name = mediaPersonFolderName(personId);
+        if (!name || state.mediaPersonFolders.get(name)) continue;
+        try {
+          await directoryHandle.getDirectoryHandle(name);
+        } catch {
+          await directoryHandle.getDirectoryHandle(name, { create: true });
+          created += 1;
+        }
+        state.mediaPersonFolders.set(name, true);
+      }
+    } catch (error) {
+      console.warn('Person media folders could not be checked.', error);
+      state.mediaPersonFolders.clear();
+      if (!quiet) showToast('Some person folders could not be created in the media folder.');
+      return created;
+    }
+    if (created && !quiet) showToast(`Created ${created} person folder${created === 1 ? '' : 's'} in the media folder.`);
+    return created;
   }
 
   function syncMediaButton() {
@@ -224,6 +310,7 @@
       state.rememberedMediaDirectoryHandle = null;
       syncMediaButton();
       await indexMediaDirectory(directoryHandle);
+      await ensurePersonMediaFolders({ quiet: true });
       render();
       await persistActiveSession();
       showToast(createNew ? `Media folder ready: ${mediaFolderName()}.` : 'Media folder selected for this tab.');
@@ -245,6 +332,7 @@
         state.rememberedMediaDirectoryHandle = null;
         syncMediaButton();
         await indexMediaDirectory(handle);
+        await ensurePersonMediaFolders({ quiet: true });
         render();
         await persistActiveSession();
         showToast('Media folder access restored.');
@@ -269,6 +357,7 @@
       const info = response.ok ? await response.json() : null;
       state.mediaHelper = info?.available ? {
         folder: info.folder, deletePaths: info.deletePaths === true,
+        personFolders: info.personFolders === true,
         saveGedcom: info.saveGedcom === true, gedcomName: typeof info.gedcom === 'string' ? info.gedcom : ''
       } : null;
     } catch {
@@ -276,14 +365,21 @@
     }
   }
 
-  async function uploadToMediaHelper(file) {
+  // Uploads one file to the chosen folder with the helper. With a person id the
+  // file is written into that person's own folder and the folder is returned, so
+  // the link records the folder as well as the file name.
+  async function uploadToMediaHelper(file, personId) {
     const response = await fetch('/api/media', {
       method: 'POST',
-      headers: { 'X-File-Name': encodeURIComponent(file.name), 'Content-Type': 'application/octet-stream' },
+      headers: {
+        'X-File-Name': encodeURIComponent(file.name), 'Content-Type': 'application/octet-stream',
+        'X-Media-Folder': encodeURIComponent(personId ? mediaPersonFolderName(personId) : '')
+      },
       body: file
     });
     if (!response.ok) throw new Error('Upload failed.');
-    return (await response.json()).name;
+    const saved = await response.json();
+    return { name: saved.name, folder: typeof saved.folder === 'string' ? saved.folder : '' };
   }
 
   async function loadHelperMedia() {
@@ -318,23 +414,28 @@
     return isImageFile(file) || file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
   }
 
-  // Writes one file to the selected media folder or the local helper and returns the saved file name.
-  async function storeMediaFile(file, mode, directoryHandle) {
+  // Writes one file into the person's own folder in the selected media folder (or
+  // through the local helper) and returns the path to reference. The file lives in
+  // that folder only once, so the reference is "<person folder>/<file>".
+  async function storeMediaFile(file, mode, directoryHandle, personId) {
     if (mode === 'folder') {
-      const fileName = await uniqueMediaFileName(directoryHandle, file.name);
-      const fileHandle = await directoryHandle.getFileHandle(fileName, { create: true });
+      const personDirectory = await mediaPersonDirectory(directoryHandle, personId);
+      const fileName = await uniqueMediaFileName(personDirectory, file.name);
+      const fileHandle = await personDirectory.getFileHandle(fileName, { create: true });
       const writable = await fileHandle.createWritable();
       await writable.write(file);
       await writable.close();
-      addFileToMediaIndex(await fileHandle.getFile(), fileName);
-      return fileName;
+      const reference = `${personDirectory.name}/${fileName}`;
+      addFileToMediaIndex(await fileHandle.getFile(), reference);
+      return reference;
     }
     if (mode === 'helper') {
-      const fileName = await uploadToMediaHelper(file);
-      const helperFile = new File([file], fileName, { type: file.type });
+      const saved = await uploadToMediaHelper(file, personId);
+      const helperFile = new File([file], saved.name, { type: file.type });
       helperMediaFiles.add(helperFile);
-      addFileToMediaIndex(helperFile, fileName);
-      return fileName;
+      const reference = saved.folder ? `${saved.folder}/${saved.name}` : saved.name;
+      addFileToMediaIndex(helperFile, reference);
+      return reference;
     }
     throw new Error('No media folder is available.');
   }
@@ -363,18 +464,19 @@
         continue;
       }
       try {
-        const fileName = await storeMediaFile(file, mode, directoryHandle);
-        addedPaths.add(fileName);
-        if (!person.mediaPaths.includes(fileName)) person.mediaPaths.push(fileName);
+        const mediaPath = await storeMediaFile(file, mode, directoryHandle, person.id);
+        addedPaths.add(mediaPath);
+        if (!person.mediaPaths.includes(mediaPath)) person.mediaPaths.push(mediaPath);
         const paths = state.additionalMedia.get(person.id) || [];
-        if (!paths.includes(fileName)) paths.push(fileName);
+        if (!paths.includes(mediaPath)) paths.push(mediaPath);
         state.additionalMedia.set(person.id, paths);
         if (replacePortrait) {
-          state.primaryMedia.set(person.id, fileName);
-          state.mediaTypes.set(fileName, 'portrait');
+          state.primaryMedia.set(person.id, mediaPath);
+          state.mediaTypes.set(mediaPath, 'portrait');
         }
         savedCount += 1;
-      } catch {
+      } catch (error) {
+        console.warn('A media file could not be saved.', error);
         failedCount += 1;
       }
     }
@@ -398,8 +500,8 @@
       await persistActiveSession();
       const linkStatus = linked && primarySaved && typesSaved ? 'Person links and portrait selection saved in this browser.' : 'Some media preferences will last only for this tab because browser storage is unavailable.';
       const destination = mode === 'folder'
-        ? 'saved to the selected folder'
-        : `saved to the helper's media folder (${state.mediaHelper.folder})`;
+        ? `saved to ${person.name}'s folder in the media folder`
+        : `saved to ${person.name}'s folder in the helper's media folder (${state.mediaHelper.folder})`;
       showToast(replacePortrait
         ? `${savedCount} replacement portrait saved and set as the hero image. It was attached to ${person.name} and classified as Portrait. ${destination}. ${linkStatus}${failedCount ? ` ${failedCount} item${failedCount === 1 ? '' : 's'} could not be saved.` : ''}`
         : `${savedCount} media item${savedCount === 1 ? '' : 's'} ${destination}. ${linkStatus}${failedCount ? ` ${failedCount} item${failedCount === 1 ? '' : 's'} could not be saved.` : ''}`);
@@ -507,8 +609,9 @@
     return true;
   }
 
-  // In helper mode a file is deletable when the helper served it, or when it sits directly in a picked folder
-  // with the same name as the helper's folder (the helper also checks the file size before deleting).
+  // In helper mode a file is deletable when the helper served it, or when it sits in a picked folder
+  // with the same name as the helper's folder, either directly in it or one person folder down
+  // (the helper also checks the file size before deleting).
   function canDeleteMediaFile(file) {
     const mode = mediaSaveMode();
     if (!file) return false;
@@ -518,7 +621,12 @@
     // Primary Media Library files are listed by the launcher, which can delete them by their path in the library.
     if (file.kinshipUrl && state.mediaHelper.deletePaths) return true;
     const segments = String(file.webkitRelativePath || '').split('/').filter(Boolean);
-    return segments.length === 2 && segments[0] === state.mediaHelper.folder;
+    if (segments[0] === state.mediaHelper.folder) {
+      if (segments.length === 2) return true;
+      if (segments.length === 3 && state.mediaHelper.personFolders) return true;
+    }
+    const relative = String(state.mediaRelativePaths.get(file) || '').split('/').filter(Boolean);
+    return state.mediaHelper.personFolders && relative.length === 2;
   }
 
   function mediaFileUsage(file) {
@@ -540,7 +648,7 @@
     } else {
       const request = file.kinshipUrl
         ? { name: file.name, path: state.mediaRelativePaths.get(file) || file.name }
-        : { name: file.name, size: file.size };
+        : { name: file.name, folder: mediaRelativeFolder(file), size: file.size };
       const response = await fetch('/api/media-delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -621,7 +729,10 @@
       try { localStorage.setItem(storageKey, folderPath); } catch { }
     }
     const normalized = folderPath.replaceAll('\\', '/').replace(/^file:\/+/i, '').replace(/\/*$/, '/');
-    const opened = window.open(`file:///${encodeURI(normalized)}`, '_blank');
+    // New media lives in the person's own subfolder, so open that folder when known.
+    const ownerId = mediaFolderOwnerId(mediaPath);
+    const personFolder = state.mediaDirectoryHandle && ownerId ? mediaPersonFolderName(ownerId) : '';
+    const opened = window.open(`file:///${encodeURI(normalized)}${personFolder ? encodeURIComponent(personFolder) + '/' : ''}`, '_blank');
     if (!opened) showToast('The browser blocked the new tab. Allow pop-ups for this page and try again.');
   }
 
@@ -636,7 +747,7 @@
       const response = await fetch('/api/reveal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: file.name })
+        body: JSON.stringify({ name: file.name, path: state.mediaRelativePaths.get(file) || file.name, folder: mediaRelativeFolder(file) })
       });
       if (!response.ok) throw new Error('not found');
     } catch {
