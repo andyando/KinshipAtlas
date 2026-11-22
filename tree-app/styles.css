@@ -56,6 +56,8 @@ button { color: inherit; }
 .tree-label-button:hover:not(:disabled) { color: #fff; text-decoration-color: currentColor; }
 .tree-label-button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .tree-label-button:disabled { text-decoration: none; cursor: default; }
+.media-folder-link { max-width: 18ch; }
+.media-folder-link::before { content: '\1F4C1\00A0'; }
 .privacy-indicator { display: inline-flex; align-items: center; gap: 7px; color: #d4e5dc; font-size: 10px; font-weight: 700; letter-spacing: 1.1px; }
 .privacy-dot, .status-pip { width: 7px; height: 7px; display: inline-block; flex: 0 0 auto; border-radius: 50%; background: #83c6a9; box-shadow: 0 0 0 3px rgba(131, 198, 169, .14); }
 .topbar-divider, .history-divider { width: 1px; height: 20px; background: rgba(224, 238, 230, .2); }
@@ -1132,6 +1134,77 @@ a.life-event-media-thumb:hover, a.life-event-media-thumb:focus-visible { border-
 .duplicate-finder-dialog {
   width: min(860px, calc(100vw - 28px));
   max-height: min(92vh, 860px);
+}
+/* Organise media files: a scrolling plan with the actions kept in view. */
+.media-organise-dialog {
+  width: min(920px, calc(100vw - 28px));
+  max-height: min(92vh, 860px);
+}
+.media-organise-dialog[open] {
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.media-organise-dialog .dialog-panel {
+  display: flex; flex-direction: column;
+  min-height: 0; max-height: inherit; padding-bottom: 16px;
+}
+.media-organise-archive {
+  display: flex; align-items: center; gap: 8px; margin: 4px 0 10px;
+  font-size: 13px; color: var(--ink-soft); flex-shrink: 0;
+}
+.media-organise-archive input {
+  width: 180px; padding: 4px 6px; font: inherit; color: var(--ink);
+  border: 1px solid var(--line-strong); border-radius: 5px; background: transparent;
+}
+.media-organise-list {
+  flex: 1 1 auto; min-height: 120px; overflow-y: auto;
+  padding: 6px 2px; overscroll-behavior: contain;
+  font-size: 13px;
+}
+.media-organise-list h4 {
+  margin: 10px 0 4px; font-size: 13px; color: var(--ink);
+}
+.media-organise-line {
+  margin: 2px 0; color: var(--ink-soft); overflow-wrap: anywhere;
+}
+.media-organise-line.is-warning { color: #9a4b12; }
+.media-organise-line.is-replace { color: #8a3b12; }
+.media-organise-line.is-more { font-style: italic; }
+:root[data-theme="dark"] .media-organise-archive input { background: #101817; color: var(--ink); border-color: var(--line-strong); }
+:root[data-theme="dark"] .media-organise-line.is-warning { color: #e6b58a; }
+:root[data-theme="dark"] .media-organise-line.is-replace { color: #e0a678; }
+.duplicate-media-group {
+  border: 1px solid var(--line); border-radius: 7px;
+  padding: 8px 10px; margin: 8px 0 10px;
+}
+.duplicate-media-group h4 { margin: 0 0 6px; font-size: 13px; color: var(--ink); }
+.duplicate-media-group.is-protected h4 { color: var(--ink-soft); }
+.duplicate-media-row {
+  display: grid; grid-template-columns: auto 44px minmax(0, 1fr) auto;
+  align-items: center; gap: 8px; padding: 4px 0;
+}
+.duplicate-media-row.is-keeper { opacity: .8; }
+.duplicate-media-thumb {
+  width: 44px; height: 44px; object-fit: cover; border-radius: 4px;
+  border: 1px solid var(--line); background: #f2f4f3; display: block;
+}
+.duplicate-media-name { overflow-wrap: anywhere; color: var(--ink); }
+.duplicate-media-name a { color: var(--green); text-decoration: none; }
+.duplicate-media-name a:hover { text-decoration: underline; }
+.duplicate-media-detail { font-size: 12px; color: var(--ink-soft); }
+.duplicate-media-keep { font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
+.media-organise-pending { font-size: 13px; color: var(--ink-soft); margin-right: auto; }
+.media-organise-status {
+  margin: 6px 0 0; min-height: 1.2em; font-size: 13px; color: var(--ink); flex-shrink: 0;
+  display: flex; align-items: center; gap: 6px;
+}
+/* The spinning wheel while a check or an organise run is working. */
+.media-organise-spinner {
+  margin-right: 0; color: var(--green);
+}
+.media-organise-list.is-busy { opacity: .55; transition: opacity .2s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .media-organise-spinner { animation-duration: 2s; }
 }
 .duplicate-finder-dialog[open] {
   display: flex; flex-direction: column;

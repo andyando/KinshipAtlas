@@ -1,10 +1,11 @@
-'use strict';
+﻿'use strict';
 // Local helper for browsers without folder-write access (e.g. Brave).
 // Usage: node server.js "<media folder>" [port]
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFile } = require('node:child_process');
+const { planFor, applyPlan, findDuplicates, applyDuplicates } = require('./helpers/media-organise-fs.js');
 
 let mediaDir = path.resolve(process.argv[2] || process.env.MEDIA_DIR || '');
 const port = Number(process.argv[3] || process.env.PORT || 8765);
@@ -27,7 +28,7 @@ const types = {
 const uploadExtensions = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.bmp', '.pdf']);
 
 function send(response, status, body, contentType = 'application/json') {
-  response.writeHead(status, { 'Content-Type': contentType, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+  response.writeHead(status, { 'Content-Type': contentType, 'Cache-Control': 'no-store, no-cache, must-revalidate', 'Pragma': 'no-cache', 'X-Content-Type-Options': 'nosniff' });
   response.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
 }
 
@@ -47,12 +48,62 @@ function safeFolder(name) {
   return safeName(decodeURIComponent(String(name || '')));
 }
 
+// Opens the system file manager at the media folder, or with one file or folder
+// inside it selected: POST {"path":"<relative path>"}.
+function revealInExplorer(request, response) {
+  const chunks = [];
+  request.on('data', (chunk) => { if (chunks.length < 64) chunks.push(chunk); });
+  request.on('end', () => {
+    let body = {};
+    try {
+      body = JSON.parse(Buffer.concat(chunks).toString('utf8')) || {};
+    } catch {
+      return send(response, 400, { error: 'Invalid request.' });
+    }
+    const relative = String(body.path || '').replace(/\\/g, '/');
+    const segments = relative.split('/').filter(Boolean);
+    if (!segments.every((segment) => segment === safeName(segment))) return send(response, 400, { error: 'Invalid path.' });
+    const target = segments.length ? path.resolve(mediaDir, ...segments) : mediaDir;
+    const root = path.resolve(mediaDir) + path.sep;
+    if (segments.length && !target.startsWith(root)) return send(response, 400, { error: 'Invalid path.' });
+    const existing = fs.existsSync(target) ? target : mediaDir;
+    const [command, args] = process.platform === 'win32'
+      ? ['explorer.exe', [fs.statSync(existing).isDirectory() ? existing : `/select,${existing}`]]
+      : process.platform === 'darwin' ? ['open', [fs.statSync(existing).isDirectory() ? existing : '-R', existing]]
+        : ['xdg-open', [fs.statSync(existing).isDirectory() ? existing : path.dirname(existing)]];
+    execFile(command, args, () => { });
+    send(response, 200, { ok: true });
+  });
+}
+
 function serveFile(response, root, relative) {
   const target = path.resolve(root, relative);
   if (!target.startsWith(root + path.sep) || path.basename(target) === 'server.js') return send(response, 404, { error: 'Not found' });
   fs.readFile(target, (error, data) => {
     if (error) return send(response, 404, { error: 'Not found' });
     send(response, 200, data, types[path.extname(target).toLowerCase()] || 'application/octet-stream');
+  });
+}
+
+// A media file for the page. The page asks for the file with a version of its
+// own ("?v=..."), so after a move or a delete the browser fetches the file
+// again instead of showing a cached image from the old path.
+function serveMediaFile(response, relative, version) {
+  const target = path.resolve(mediaDir, relative);
+  if (!target.startsWith(mediaDir + path.sep)) return send(response, 404, { error: 'Not found' });
+  fs.readFile(target, (error, data) => {
+    if (error) {
+      response.writeHead(404, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+      return response.end(JSON.stringify({ error: 'Not found' }));
+    }
+    const headers = {
+      'Content-Type': types[path.extname(target).toLowerCase()] || 'application/octet-stream',
+      'Cache-Control': version ? 'public, max-age=31536000, immutable' : 'no-store, no-cache, must-revalidate',
+      'X-Content-Type-Options': 'nosniff'
+    };
+    if (version) headers.ETag = `"${version}"`;
+    response.writeHead(200, headers);
+    response.end(data);
   });
 }
 
@@ -223,10 +274,100 @@ function deleteFile(request, response) {
   });
 }
 
+// Plans, or plans and applies, the media folder organisation for the browser.
+// The browser sends the GEDCOM records it has open and its card image choices;
+// the reply lists the plan, and for an apply also the GEDCOM text to save and
+// the files that changed.
+function receiveMediaOrganise(request, response) {
+  const chunks = [];
+  let size = 0;
+  request.on('data', (chunk) => {
+    size += chunk.length;
+    if (size > 200 * 1024 * 1024) {
+      send(response, 413, { error: 'Request is too large.' });
+      request.destroy();
+      return;
+    }
+    chunks.push(chunk);
+  });
+  request.on('end', () => {
+    if (response.writableEnded) return;
+    let body;
+    try {
+      body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    } catch {
+      return send(response, 400, { error: 'Invalid request.' });
+    }
+    if (!body || !Array.isArray(body.records)) return send(response, 400, { error: 'Invalid request.' });
+    let planned;
+    try {
+      planned = planFor(mediaDir, body);
+    } catch {
+      return send(response, 500, { error: 'The media folder could not be read.' });
+    }
+    const { state, plan } = planned;
+    if (body.apply !== true) {
+      return send(response, 200, {
+        ok: true, plan: { counts: plan.counts, actions: plan.actions, warnings: plan.warnings }, gedcomText: state.gedcomText
+      });
+    }
+    try {
+      const result = applyPlan(mediaDir, state, plan);
+      return send(response, 200, {
+        ok: true,
+        plan: { counts: plan.counts, actions: plan.actions, warnings: plan.warnings },
+        moves: result.moves,
+        renames: result.renames,
+        summary: result.counts,
+        unsupported: state.unsupported,
+        gedcomText: result.gedcomText
+      });
+    } catch {
+      return send(response, 500, { error: 'The media folder could not be organised. Some files may already have moved.' });
+    }
+  });
+}
+
+// Finds exact duplicate images and PDFs, or removes/archives the ones the user
+// picked. The browser sends its GEDCOM records, card image choices and, for a
+// removal, which files to keep and which to drop.
+function receiveDuplicates(request, response) {
+  const chunks = [];
+  let size = 0;
+  request.on('data', (chunk) => {
+    size += chunk.length;
+    if (size > 200 * 1024 * 1024) {
+      send(response, 413, { error: 'Request is too large.' });
+      request.destroy();
+      return;
+    }
+    chunks.push(chunk);
+  });
+  request.on('end', async () => {
+    if (response.writableEnded) return;
+    let body;
+    try {
+      body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    } catch {
+      return send(response, 400, { error: 'Invalid request.' });
+    }
+    if (!body || !Array.isArray(body.records)) return send(response, 400, { error: 'Invalid request.' });
+    try {
+      if (body.apply === true) {
+        const result = await applyDuplicates(mediaDir, body);
+        return send(response, 200, { ok: true, ...result });
+      }
+      return send(response, 200, { ok: true, ...(await findDuplicates(mediaDir, body)) });
+    } catch (error) {
+      return send(response, 500, { error: error?.message || 'The media folder could not be checked for duplicates.' });
+    }
+  });
+}
+
 const server = http.createServer((request, response) => {
   if (!isLocalRequest(request)) return send(response, 403, { error: 'Forbidden' });
   const url = new URL(request.url, `http://${request.headers.host}`);
-  if (request.method === 'GET' && url.pathname === '/api/media-info') return send(response, 200, { available: true, folder: path.basename(mediaDir), personFolders: true });
+  if (request.method === 'GET' && url.pathname === '/api/media-info') return send(response, 200, { available: true, folder: path.basename(mediaDir), mediaPath: mediaDir, mediaFolder: path.basename(mediaDir), deletePaths: true, personFolders: true, organiseMedia: true, findDuplicates: true, reveal: true });
   if (request.method === 'POST' && url.pathname === '/api/exit') {
     send(response, 200, { ok: true });
     setTimeout(() => {
@@ -240,11 +381,14 @@ const server = http.createServer((request, response) => {
   if (request.method === 'POST' && url.pathname === '/api/selections') return receiveSelections(request, response);
   if (request.method === 'POST' && url.pathname === '/api/reveal') return revealFile(request, response);
   if (request.method === 'POST' && url.pathname === '/api/media-delete') return deleteFile(request, response);
+  if (request.method === 'POST' && url.pathname === '/api/media-organise') return receiveMediaOrganise(request, response);
+  if (request.method === 'POST' && url.pathname === '/api/duplicates') return receiveDuplicates(request, response);
+  if (request.method === 'POST' && url.pathname === '/api/reveal') return revealInExplorer(request, response);
   if (request.method === 'GET' && url.pathname.startsWith('/media/')) {
     // Any depth is accepted so files inside a person's folder can be previewed.
     const relative = decodeURIComponent(url.pathname.slice('/media/'.length));
     if (!relative || relative.split('/').some((segment) => !safeName(segment))) return send(response, 404, { error: 'Not found' });
-    return serveFile(response, mediaDir, relative);
+    return serveMediaFile(response, relative, url.searchParams.get('v') || '');
   }
   if (request.method === 'GET') return serveFile(response, appDir, decodeURIComponent(url.pathname === '/' ? 'index.html' : url.pathname.slice(1)));
   send(response, 405, { error: 'Method not allowed' });

@@ -7,6 +7,37 @@
 window.KINSHIP_VERSION = {
   releases: [
     {
+      version: '1.18.1',
+      date: '2026-11-22',
+      changes: [
+        'Added a Media Folder link beside the GEDCOM name: it opens this tree\'s media folder in File Explorer.',
+        'Organise media files now reads media paths from an older copy of the tree against the current media folder, so files are found instead of reported missing; the GEDCOM\'s own file line is no longer listed.',
+        'Find duplicate images now works in Kinship Atlas.exe: its helper compares files on disk and reports sizes and owners.',
+        'Kinship Atlas.exe sends the page the GEDCOM already loaded, so its organise and duplicate requests stay small and start promptly.'
+      ]
+    },
+    {
+      version: '1.18.0',
+      date: '2026-11-22',
+      changes: [
+        'Added Settings > Find duplicate images: lists files with identical contents (any file name), with thumbnails and links to open each file, and deletes or archives the copies you tick.',
+        'A duplicate group is left alone when any copy is a card image or attached to a life event; removed copies are unlinked from every person and event.',
+        'Media previews and the media library now refresh after files are moved or removed, instead of showing broken images until the page is reloaded.',
+        'Served media carries a version, so the browser never keeps an image from a file\'s old place.'
+      ]
+    },
+    {
+      version: '1.17.0',
+      date: '2026-11-22',
+      changes: [
+        'Added Settings > Organise media files: moves every image and PDF into its person folder, creates missing folders, copies files linked to several people, and archives files no person uses.',
+        'Added a Check media folder preview and an archive folder name, and pointed every GEDCOM file path at the file\'s new place when the tree is saved.',
+        'Included the same organiser in the local helper and a terminal command (helpers/media-organise-cli.mjs) for folders the browser cannot write to.',
+        'Left files already in their person\'s folder untouched, so running the check twice changes nothing.',
+        'Excluded the archive folder and unlinked files it holds from the media library.'
+      ]
+    },
+    {
       version: '1.16.2',
       date: '2026-11-20',
       changes: [

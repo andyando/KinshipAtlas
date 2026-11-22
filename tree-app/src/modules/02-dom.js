@@ -44,7 +44,7 @@
     mediaLibraryContent: document.querySelector('#mediaLibraryContent'),
     mediaLibraryCardsButton: document.querySelector('#mediaLibraryCardsButton'), mediaLibraryTableButton: document.querySelector('#mediaLibraryTableButton'),
     reportsContent: document.querySelector('#reportsContent'), appShell: document.querySelector('.app-shell'),
-    treeLabel: document.querySelector('#treeLabel'), peopleCount: document.querySelector('#peopleCount'),
+    treeLabel: document.querySelector('#treeLabel'), mediaFolderLink: document.querySelector('#mediaFolderLink'), peopleCount: document.querySelector('#peopleCount'),
     visibleCount: document.querySelector('#visibleCount'), clearSurnameFilter: document.querySelector('#clearSurnameFilter'),
     search: document.querySelector('#peopleSearch'), peopleList: document.querySelector('#peopleList'),
     birthCountryFilter: document.querySelector('#birthCountryFilter'),

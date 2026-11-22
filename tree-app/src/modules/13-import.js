@@ -1257,6 +1257,9 @@
     elements.mediaLibraryButton.disabled = false;
     const menuButton = document.querySelector('#mediaLibraryMenuButton');
     if (menuButton) menuButton.disabled = false;
+    // Picking the folder also lets entries be checked for duplicates.
+    const duplicateButton = document.querySelector('#duplicateMediaMenuButton');
+    if (duplicateButton) duplicateButton.disabled = false;
   }
 
   elements.mediaButton.addEventListener('click', showMediaFolderDialog);
@@ -1301,7 +1304,9 @@
     }
     state.folderMediaFiles = folderFiles;
     state.mediaIndex = { byName };
+    // The entries already known to be out of date are replaced by these picks.
     state.mediaLibraryCache = null;
+    state.mediaLibraryCacheKey = '';
     let references = 0;
     let matched = 0;
     for (const person of state.people.values()) {
@@ -1326,6 +1331,8 @@
     document.querySelector('#mediaLibraryMenuButton').disabled = true;
     document.querySelector('#birthCountryMenuButton').disabled = true;
     document.querySelector('#duplicateFinderMenuButton').disabled = true;
+    document.querySelector('#mediaOrganiseMenuButton').disabled = true;
+    document.querySelector('#duplicateMediaMenuButton').disabled = true;
     releaseMediaUrls(); state.mediaIndex = null; state.mediaFolderPicked = false;
     state.mediaRelativePaths = new WeakMap(); state.folderMediaFiles = new Map(); state.mediaDirectoryHandle = null; state.pendingUploadPersonId = null; state.pendingPortraitReplacement = null;
     syncMediaButton();

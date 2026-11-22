@@ -53,6 +53,8 @@
     document.querySelector('#birthCountryMenuButton').disabled = false;
     document.querySelector('#duplicateFinderMenuButton').disabled = false;
     document.querySelector('#duplicateRelationMenuButton').disabled = false;
+    document.querySelector('#mediaOrganiseMenuButton').disabled = false;
+    document.querySelector('#duplicateMediaMenuButton').disabled = false;
     elements.printMapButton.disabled = false;
     elements.showSiblings.disabled = false;
     document.querySelector('#openGedcomLabel').hidden = true;

@@ -36,10 +36,27 @@
     return file.type.startsWith('image/') || /\.(avif|bmp|gif|jpe?g|png|webp)$/i.test(file.name);
   }
 
+  // A media item's address, with a version of its own, so a file that moved or
+  // was replaced is fetched again rather than served from the browser's cache.
+  function versionedMediaUrl(url, file) {
+    if (!url) return url;
+    const version = file && (file.size || file.lastModified) ? `${file.size}-${file.lastModified}` : '';
+    if (!version || /[?&]v=/.test(url)) return url;
+    return `${url}${url.includes('?') ? '&' : '?'}v=${version}`;
+  }
+
   function mediaUrl(file) {
-    if (file.kinshipUrl) return file.kinshipUrl;
+    if (file.kinshipUrl) return versionedMediaUrl(file.kinshipUrl, file);
     if (!state.mediaUrls.has(file)) state.mediaUrls.set(file, URL.createObjectURL(file));
     return state.mediaUrls.get(file);
+  }
+
+  // Files that left the media folder (moved by "Organise media files" or deleted
+  // as duplicates) drop out of the index when the folder is re-read, because the
+  // index is rebuilt only from the files that are there now.
+  function pruneMediaIndex(byName, relativePaths) {
+    state.mediaIndex = { byName };
+    state.mediaRelativePaths = relativePaths;
   }
 
   function releaseMediaUrls() {
@@ -71,6 +88,38 @@
       for (const event of [family.marriage, family.divorce]) paths.push(...(event?.mediaPaths || []));
     }
     return [...new Set(paths)];
+  }
+
+  // Chooses the photo shown as a person's hero image when none has been picked in
+  // this app yet: an image inside the person's own media folder, preferring one
+  // classified as Portrait, then any image linked to the person. Only files
+  // linked to the person are returned, so a hero image always has a link it can
+  // fall back on when the person's media is replaced.
+  function heroImageForPerson(person) {
+    if (!person || !state.mediaIndex) return '';
+    const folderName = mediaPersonFolderName(person.id).toLocaleLowerCase();
+    const linked = [...new Set(mediaPathsForPerson(person.id))];
+    let best = '';
+    let bestRank = 0;
+    for (const path of linked) {
+      const file = resolveMediaFile(path);
+      if (!file || !isImageFile(file)) continue;
+      const inOwnFolder = String(state.mediaRelativePaths.get(file) || '').split('/')[0].toLocaleLowerCase() === folderName;
+      const portrait = state.mediaTypes.get(normalizeMediaPath(path)) === 'portrait';
+      const rank = (inOwnFolder ? 2 : 0) + (portrait ? 1 : 0);
+      if (rank > bestRank) {
+        best = path;
+        bestRank = rank;
+      }
+    }
+    return best;
+  }
+
+  // True when the hero image picked for a person is no longer one of their linked files.
+  function heroImageIsStale(personId) {
+    const current = state.primaryMedia.get(personId);
+    if (!current) return false;
+    return !state.mediaIndex || !mediaPathsForPerson(personId).includes(current);
   }
 
   function loadPrimaryMedia(storageKey, people) {

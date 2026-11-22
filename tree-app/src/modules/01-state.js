@@ -75,6 +75,7 @@
     mediaLibrarySort: 'name-asc',
     mediaLibrarySelected: new Set(),
     mediaLibraryView: 'cards',
-    mediaPersonFolders: new Map()
+    mediaPersonFolders: new Map(),
+    mediaOrganiseUidMap: new Map()
   };
 

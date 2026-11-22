@@ -17,6 +17,7 @@
  *  12. Directory, duplicate finder and birth-country suggestions
  *  13. GEDCOM import, merging and saving
  *  14. Map, print, defaults, about/help and startup wiring
+ *  15. Media folder organisation (person folders, archive, GEDCOM rewrite)
  *
  * Section banners below match this list. Functions within a section keep their historical
  * ordering because the automated test suite locates some helpers by exact source position.
@@ -101,7 +102,8 @@
     mediaLibrarySort: 'name-asc',
     mediaLibrarySelected: new Set(),
     mediaLibraryView: 'cards',
-    mediaPersonFolders: new Map()
+    mediaPersonFolders: new Map(),
+    mediaOrganiseUidMap: new Map()
   };
 
   // ---------------------------------------------------------------------------
@@ -150,7 +152,7 @@
     mediaLibraryContent: document.querySelector('#mediaLibraryContent'),
     mediaLibraryCardsButton: document.querySelector('#mediaLibraryCardsButton'), mediaLibraryTableButton: document.querySelector('#mediaLibraryTableButton'),
     reportsContent: document.querySelector('#reportsContent'), appShell: document.querySelector('.app-shell'),
-    treeLabel: document.querySelector('#treeLabel'), peopleCount: document.querySelector('#peopleCount'),
+    treeLabel: document.querySelector('#treeLabel'), mediaFolderLink: document.querySelector('#mediaFolderLink'), peopleCount: document.querySelector('#peopleCount'),
     visibleCount: document.querySelector('#visibleCount'), clearSurnameFilter: document.querySelector('#clearSurnameFilter'),
     search: document.querySelector('#peopleSearch'), peopleList: document.querySelector('#peopleList'),
     birthCountryFilter: document.querySelector('#birthCountryFilter'),
@@ -1133,10 +1135,27 @@
     return file.type.startsWith('image/') || /\.(avif|bmp|gif|jpe?g|png|webp)$/i.test(file.name);
   }
 
+  // A media item's address, with a version of its own, so a file that moved or
+  // was replaced is fetched again rather than served from the browser's cache.
+  function versionedMediaUrl(url, file) {
+    if (!url) return url;
+    const version = file && (file.size || file.lastModified) ? `${file.size}-${file.lastModified}` : '';
+    if (!version || /[?&]v=/.test(url)) return url;
+    return `${url}${url.includes('?') ? '&' : '?'}v=${version}`;
+  }
+
   function mediaUrl(file) {
-    if (file.kinshipUrl) return file.kinshipUrl;
+    if (file.kinshipUrl) return versionedMediaUrl(file.kinshipUrl, file);
     if (!state.mediaUrls.has(file)) state.mediaUrls.set(file, URL.createObjectURL(file));
     return state.mediaUrls.get(file);
+  }
+
+  // Files that left the media folder (moved by "Organise media files" or deleted
+  // as duplicates) drop out of the index when the folder is re-read, because the
+  // index is rebuilt only from the files that are there now.
+  function pruneMediaIndex(byName, relativePaths) {
+    state.mediaIndex = { byName };
+    state.mediaRelativePaths = relativePaths;
   }
 
   function releaseMediaUrls() {
@@ -1168,6 +1187,38 @@
       for (const event of [family.marriage, family.divorce]) paths.push(...(event?.mediaPaths || []));
     }
     return [...new Set(paths)];
+  }
+
+  // Chooses the photo shown as a person's hero image when none has been picked in
+  // this app yet: an image inside the person's own media folder, preferring one
+  // classified as Portrait, then any image linked to the person. Only files
+  // linked to the person are returned, so a hero image always has a link it can
+  // fall back on when the person's media is replaced.
+  function heroImageForPerson(person) {
+    if (!person || !state.mediaIndex) return '';
+    const folderName = mediaPersonFolderName(person.id).toLocaleLowerCase();
+    const linked = [...new Set(mediaPathsForPerson(person.id))];
+    let best = '';
+    let bestRank = 0;
+    for (const path of linked) {
+      const file = resolveMediaFile(path);
+      if (!file || !isImageFile(file)) continue;
+      const inOwnFolder = String(state.mediaRelativePaths.get(file) || '').split('/')[0].toLocaleLowerCase() === folderName;
+      const portrait = state.mediaTypes.get(normalizeMediaPath(path)) === 'portrait';
+      const rank = (inOwnFolder ? 2 : 0) + (portrait ? 1 : 0);
+      if (rank > bestRank) {
+        best = path;
+        bestRank = rank;
+      }
+    }
+    return best;
+  }
+
+  // True when the hero image picked for a person is no longer one of their linked files.
+  function heroImageIsStale(personId) {
+    const current = state.primaryMedia.get(personId);
+    if (!current) return false;
+    return !state.mediaIndex || !mediaPathsForPerson(personId).includes(current);
   }
 
   function loadPrimaryMedia(storageKey, people) {
@@ -1465,8 +1516,7 @@
       }
     }
     return visit(directoryHandle).then(() => {
-      state.mediaRelativePaths = relativePaths;
-      state.mediaIndex = { byName };
+      pruneMediaIndex(byName, relativePaths);
       state.mediaLibraryCache = null;
     });
   }
@@ -1665,9 +1715,14 @@
       const info = response.ok ? await response.json() : null;
       state.mediaHelper = info?.available ? {
         folder: info.folder, deletePaths: info.deletePaths === true,
-        personFolders: info.personFolders === true,
+        personFolders: info.personFolders === true, organiseMedia: info.organiseMedia === true,
+        findDuplicates: info.findDuplicates === true, reveal: info.reveal === true,
+      readsPrimaryGedcom: info.readsPrimaryGedcom === true,
+        mediaPath: typeof info.mediaPath === 'string' ? info.mediaPath : '',
+        gedcomPath: typeof info.gedcomPath === 'string' ? info.gedcomPath : '',
         saveGedcom: info.saveGedcom === true, gedcomName: typeof info.gedcom === 'string' ? info.gedcom : ''
       } : null;
+      if (state.mediaHelper) syncMediaFolderLink();
     } catch {
       state.mediaHelper = null;
     }
@@ -1711,6 +1766,40 @@
     }
     if (loaded) render();
   }
+
+  // Shows "Media Folder" beside the page source in the top bar whenever the
+  // media folder's real location is known. Clicking it opens File Explorer there.
+  function syncMediaFolderLink() {
+    const link = elements.mediaFolderLink;
+    if (!link) return;
+    const location = state.mediaHelper?.mediaPath || '';
+    link.hidden = !location;
+    link.disabled = !location;
+    if (location) link.title = `Open this tree's media folder in File Explorer: ${location}`;
+    else link.removeAttribute('title');
+  }
+
+  // Opens File Explorer at the media folder itself (not a person's folder
+  // inside it). A picked folder cannot be revealed from the page, so the local
+  // helper does it whenever it serves the tree.
+  async function openMediaFolderInExplorer() {
+    if (state.mediaHelper?.reveal) {
+      try {
+        const response = await fetch('/api/reveal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: '' }) });
+        if (!response.ok) throw new Error('not found');
+      } catch {
+        showToast('File Explorer could not be opened. Kinship Atlas.exe starts it, so it needs to be running.');
+      }
+      return;
+    }
+    if (state.mediaDirectoryHandle) {
+      openMediaFolderInTab('');
+      return;
+    }
+    showToast('Choose the media folder in this menu first to open it.');
+  }
+
+  if (elements.mediaFolderLink) elements.mediaFolderLink.addEventListener('click', openMediaFolderInExplorer);
 
   function mediaSaveMode() {
     if (state.mediaDirectoryHandle) return 'folder';
@@ -2154,6 +2243,8 @@
     document.querySelector('#birthCountryMenuButton').disabled = false;
     document.querySelector('#duplicateFinderMenuButton').disabled = false;
     document.querySelector('#duplicateRelationMenuButton').disabled = false;
+    document.querySelector('#mediaOrganiseMenuButton').disabled = false;
+    document.querySelector('#duplicateMediaMenuButton').disabled = false;
     elements.printMapButton.disabled = false;
     elements.showSiblings.disabled = false;
     document.querySelector('#openGedcomLabel').hidden = true;
@@ -9375,6 +9466,9 @@
     elements.mediaLibraryButton.disabled = false;
     const menuButton = document.querySelector('#mediaLibraryMenuButton');
     if (menuButton) menuButton.disabled = false;
+    // Picking the folder also lets entries be checked for duplicates.
+    const duplicateButton = document.querySelector('#duplicateMediaMenuButton');
+    if (duplicateButton) duplicateButton.disabled = false;
   }
 
   elements.mediaButton.addEventListener('click', showMediaFolderDialog);
@@ -9419,7 +9513,9 @@
     }
     state.folderMediaFiles = folderFiles;
     state.mediaIndex = { byName };
+    // The entries already known to be out of date are replaced by these picks.
     state.mediaLibraryCache = null;
+    state.mediaLibraryCacheKey = '';
     let references = 0;
     let matched = 0;
     for (const person of state.people.values()) {
@@ -9444,6 +9540,8 @@
     document.querySelector('#mediaLibraryMenuButton').disabled = true;
     document.querySelector('#birthCountryMenuButton').disabled = true;
     document.querySelector('#duplicateFinderMenuButton').disabled = true;
+    document.querySelector('#mediaOrganiseMenuButton').disabled = true;
+    document.querySelector('#duplicateMediaMenuButton').disabled = true;
     releaseMediaUrls(); state.mediaIndex = null; state.mediaFolderPicked = false;
     state.mediaRelativePaths = new WeakMap(); state.folderMediaFiles = new Map(); state.mediaDirectoryHandle = null; state.pendingUploadPersonId = null; state.pendingPortraitReplacement = null;
     syncMediaButton();
@@ -11134,5 +11232,882 @@
   applyTheme(preferredTheme(), { remember: false });
 
   // Syncing once at startup captures selections made before this feature (or while the helper was down).
-  probeMediaHelper().then(loadHelperSelections).then(restoreActiveSession).then(applyDefaultOnStartup).then(syncSelectionsToHelper).then(loadHelperMedia);
+  // The media helper is asked about first, so a saved session that re-reads the
+  // folder (and asks whether the helper can find duplicates) has its answer.
+  probeMediaHelper()
+    .then(() => loadHelperSelections())
+    .then(() => restoreActiveSession())
+    .then(() => applyDefaultOnStartup())
+    .then(() => probeMediaHelper())
+    .then(() => syncSelectionsToHelper())
+    .then(() => loadHelperMedia())
+    .then(() => syncMediaFolderLink());
+﻿  // ---------------------------------------------------------------------------
+  // 15. Media folder organisation (person folders, archive, GEDCOM rewrite)
+  // ---------------------------------------------------------------------------
+
+  // Every person's images and PDFs belong in that person's own subfolder of the
+  // media folder, named "Ada Allnutt (1864-unknown) [I455]". This section checks a
+  // media folder against the open GEDCOM and carries out what is needed:
+  //   * linked files move into their person's folder (creating it when missing),
+  //   * a file linked to several people is copied into each person's folder,
+  //   * a card image keeps its link and follows its file,
+  //   * files no person or event uses go to "Archive/<date>",
+  //   * every FILE line in the GEDCOM is pointed at the file's new place.
+  // The rules themselves live in helpers/media-organise.js, which server.js and
+  // the Windows launcher use too, so the plan is the same wherever it runs.
+
+  function mediaOrganiseHelpers() {
+    if (!globalThis.KinshipMediaOrganise) {
+      throw new Error('The media folder helper did not load. Reload the page and try again.');
+    }
+    return globalThis.KinshipMediaOrganise;
+  }
+
+  // Names and years for the plan, in the shape the shared core reads.
+  function mediaOrganisePersonDetails() {
+    return [...state.people.values()].map((person) => ({
+      id: person.id,
+      name: person.name || person.id,
+      birthYear: person.events.find((event) => event.type === 'BIRT')?.date?.match(/\d{4}/)?.[0] || '',
+      deathYear: person.events.find((event) => event.type === 'DEAT')?.date?.match(/\d{4}/)?.[0] || ''
+    }));
+  }
+
+  // Person folders the app itself creates, so a rename or a change of name does
+  // not make the organisation treat the app's own files as unlinked.
+  function mediaOrganiseSoftNamedFolders() {
+    const folders = new Map();
+    for (const personId of state.people.keys()) folders.set(mediaPersonFolderName(personId).toLocaleLowerCase(), personId);
+    return folders;
+  }
+
+  // Hero image choices saved for this tree, by person id. Hero frames are stored
+  // per person and file, so a person whose hero is only recorded as a frame is
+  // found too.
+  function savedHeroPicks() {
+    const picks = new Map();
+    const key = state.primaryMediaKey;
+    if (key) {
+      for (const [personId, path] of Object.entries(readSelection(key) || {})) {
+        if (typeof path === 'string' && path) picks.set(personId, path);
+      }
+    }
+    const framePrefix = 'kinship-atlas:hero-frame:';
+    const frameKeys = helperSelections ? Object.keys(helperSelections) : (() => {
+      const keys = [];
+      try { for (let index = 0; index < localStorage.length; index += 1) keys.push(localStorage.key(index)); } catch { }
+      return keys;
+    })();
+    for (const storageKey of frameKeys) {
+      if (!storageKey?.startsWith(framePrefix)) continue;
+      const personId = storageKey.slice(framePrefix.length).split('|')[0];
+      if (!state.people.has(personId) || picks.has(personId)) continue;
+      const fileName = readSelection(storageKey)?.file?.name;
+      if (typeof fileName === 'string' && fileName) picks.set(personId, fileName);
+    }
+    for (const [personId, path] of state.primaryMedia) if (!picks.has(personId)) picks.set(personId, path);
+    return picks;
+  }
+
+  // True when this tab has the media folder itself open for writing, so the
+  // files can be read and written here without the local helper.
+  function mediaOrganiseUsesFolder() {
+    return Boolean(state.mediaDirectoryHandle);
+  }
+
+  function mediaOrganiseRequest() {
+    const request = {
+      people: mediaOrganisePersonDetails(),
+      gedcomText: state.gedcomText || serializeGedcomRecords(state.gedcomRecords),
+      archiveFolder: mediaOrganiseElements().archive.value.trim() || 'Archive',
+      // GEDCOM paths from another copy of the tree are read against this folder.
+      mediaFolderName: mediaFolderNameForTree(),
+      heroPicks: Object.fromEntries(savedHeroPicks())
+    };
+    // Kinship Atlas.exe reads the tree from its own GEDCOM, so its requests stay
+    // small; other helpers are sent the records as well.
+    if (!state.mediaHelper?.readsPrimaryGedcom) request.records = state.gedcomRecords;
+    return request;
+  }
+
+  // The media folder's name for this tree: the folder open in the tab, or the
+  // one the local helper serves.
+  function mediaFolderNameForTree() {
+    return state.mediaDirectoryHandle?.name || state.mediaHelper?.mediaFolder || state.mediaHelper?.folder || '';
+  }
+
+  async function scanMediaOrganiseWithFolder() {
+    const core = mediaOrganiseHelpers();
+    const directoryHandle = state.mediaDirectoryHandle;
+    const files = [];
+    const walk = async (directory, prefix) => {
+      for await (const [name, entry] of directory.entries()) {
+        const relativePath = prefix ? `${prefix}/${name}` : name;
+        if (entry.kind === 'directory') { await walk(entry, relativePath); continue; }
+        if (!core.isMediaFile(name)) continue;
+        let size = 0;
+        try { size = (await entry.getFile()).size; } catch { size = 0; }
+        files.push({ relativePath, size });
+      }
+    };
+    await walk(directoryHandle, '');
+    const request = mediaOrganiseRequest();
+    const organised = core.computeMediaOrganiseState(request.records, request.people, files, {
+      gedcomText: request.gedcomText,
+      archiveFolder: request.archiveFolder,
+      mediaFolderName: request.mediaFolderName,
+      heroPicks: new Map(Object.entries(request.heroPicks)),
+      softNamedFolders: mediaOrganiseSoftNamedFolders()
+    });
+    return { organised, plan: core.planMediaOrganise(organised) };
+  }
+
+  async function scanMediaOrganiseWithHelper() {
+    const response = await fetch('/api/media-organise', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(mediaOrganiseRequest())
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || 'The local helper could not read the media folder.');
+    return body;
+  }
+
+  // Moves every file in the plan with the footer picker, one folder at a time.
+  // The GEDCOM text is rewritten as it goes; what was written is reported back.
+  async function applyMediaOrganiseWithFolder(plan) {
+    const core = mediaOrganiseHelpers();
+    const directoryHandle = state.mediaDirectoryHandle;
+    const summary = { moved: 0, copied: 0, replaced: 0, archived: 0, failed: 0, missing: 0 };
+    const renames = [];
+    let gedcomText = state.gedcomText || serializeGedcomRecords(state.gedcomRecords);
+    for (const action of plan.actions) {
+      const segments = action.toPath.split('/');
+      try {
+        let fromDirectory = directoryHandle;
+        for (const segment of action.fromPath.split('/').slice(0, -1)) fromDirectory = await fromDirectory.getDirectoryHandle(segment);
+        const fromSegments = action.fromPath.split('/');
+        const fromName = fromSegments.pop();
+        let fromParent = directoryHandle;
+        for (const segment of fromSegments) fromParent = await fromParent.getDirectoryHandle(segment);
+        let toDirectory = directoryHandle;
+        for (const segment of segments.slice(0, -1)) toDirectory = await toDirectory.getDirectoryHandle(segment, { create: true });
+        const source = await fromParent.getFileHandle(fromName);
+        await core.placeMediaFile(source, toDirectory, segments.at(-1));
+        // A move or archive takes the file away; a copy leaves it in place.
+        if (action.kind !== 'copy') await fromParent.removeEntry(fromName);
+        gedcomText = core.rewriteGedcomFile(gedcomText, action.fromPath, action.toPath);
+        renames.push({ from: action.fromPath, to: action.toPath });
+        summary[action.kind] += 1;
+      } catch (error) {
+        if (error?.name === 'NotFoundError') summary.missing += 1;
+        else summary.failed += 1;
+      }
+    }
+    return { gedcomText, renames, summary };
+  }
+
+  function splitName(relativePath) {
+    return String(relativePath || '').split('/').at(-1) || '';
+  }
+
+  async function applyMediaOrganiseWithHelper() {
+    const response = await fetch('/api/media-organise', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...mediaOrganiseRequest(), apply: true })
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || 'The local helper could not organise the media folder.');
+    return body;
+  }
+
+  // The dialog: "Check media folder" lists the plan, "Organise media files"
+  // carries it out.
+  let mediaOrganisePlanState = null;
+  let mediaOrganiseBusy = false;
+
+  // The dialog element, asked for once the module runs.
+  const mediaOrganiseDialogElement = () => document.querySelector('#mediaOrganiseDialog');
+
+  function mediaOrganiseElements() {
+    const dialog = mediaOrganiseDialogElement();
+    return {
+      dialog,
+      check: dialog.querySelector('#mediaOrganiseCheck'),
+      apply: dialog.querySelector('#mediaOrganiseApply'),
+      summary: dialog.querySelector('#mediaOrganiseSummary'),
+      archive: dialog.querySelector('#mediaOrganiseArchive'),
+      list: dialog.querySelector('#mediaOrganiseList'),
+      status: dialog.querySelector('#mediaOrganiseStatus')
+    };
+  }
+
+  function mediaOrganiseLine(text, className = '') {
+    const line = document.createElement('p');
+    line.className = `media-organise-line ${className}`.trim();
+    line.textContent = text;
+    return line;
+  }
+
+  function mediaOrganiseCount(count, singular) {
+    return `${count} ${singular}${count === 1 ? '' : 's'}`;
+  }
+
+  function openMediaOrganiseDialog() {
+    const ui = mediaOrganiseElements();
+    if (!ui.dialog || !ui.summary) return;
+    mediaOrganisePlanState = null;
+    ui.list.replaceChildren();
+    ui.archive.value = 'Archive';
+    ui.apply.disabled = true;
+    ui.status.textContent = '';
+    if (!state.gedcomRecords.length) ui.summary.textContent = 'Open a GEDCOM first.';
+    else if (!mediaOrganiseUsesFolder() && !state.mediaHelper?.organiseMedia) {
+      ui.summary.textContent = 'Choose or link a media folder in this menu first. The local helper can also do this when it is running.';
+    } else {
+      const where = mediaOrganiseUsesFolder() ? 'the media folder' : `"${state.mediaHelper.folder}"`;
+      ui.summary.textContent = `Check ${where} to see which files are outside their person's folder, then organise them.`;
+    }
+    showModalFocused(ui.dialog);
+  }
+
+  // A plan as the dialog shows it, whichever caller produced it.
+  function mediaOrganisePlanOf(source) {
+    if (!source) return { actions: [], placements: [], copies: [], archives: [], warnings: [], counts: {} };
+    const actions = source.actions || [];
+    const placements = source.placements || actions.filter((action) => action.kind === 'move' || action.kind === 'replace');
+    const copies = source.copies || actions.filter((action) => action.kind === 'copy');
+    const archives = source.archives || actions.filter((action) => action.kind === 'archive');
+    return { ...source, actions, placements, copies, archives, warnings: source.warnings || [] };
+  }
+
+  function renderMediaOrganisePlan(planState) {
+    const ui = mediaOrganiseElements();
+    const plan = mediaOrganisePlanOf(planState);
+    const parts = [];
+    const moved = plan.placements.filter((action) => action.kind === 'move').length;
+    const replaced = plan.placements.filter((action) => action.kind === 'replace').length;
+    if (moved) parts.push(`${mediaOrganiseCount(moved, 'file')} to move into person folders`);
+    if (replaced) parts.push(`${mediaOrganiseCount(replaced, 'same-named file')} to replace`);
+    if (plan.copies.length) parts.push(`${mediaOrganiseCount(plan.copies.length, 'shared file')} to copy`);
+    if (plan.archives.length) parts.push(`${mediaOrganiseCount(plan.archives.length, 'unlinked file')} to archive`);
+    const folders = new Set(plan.actions.map((action) => action.toFolder).filter(Boolean));
+    if (folders.size) parts.push(`${mediaOrganiseCount(folders.size, 'folder')} in use`);
+    ui.summary.textContent = parts.length
+      ? `${parts.join(' · ')}.`
+      : 'Every linked file is already stored in its person\'s folder.';
+    ui.list.replaceChildren();
+    const groups = [
+      ['Shared files (a copy is made for each person)', plan.copies],
+      ['Linked files moved into person folders', plan.placements],
+      ['Unlinked files moved to the archive folder', plan.archives]
+    ];
+    for (const [title, actions] of groups) {
+      if (!actions.length) continue;
+      const heading = document.createElement('h4');
+      heading.textContent = `${title} (${actions.length})`;
+      ui.list.append(heading);
+      const shown = actions.slice(0, 80);
+      for (const action of shown) {
+        ui.list.append(mediaOrganiseLine(`${action.fromPath} → ${action.toPath}`, action.kind === 'replace' ? 'is-replace' : ''));
+      }
+      if (actions.length > shown.length) ui.list.append(mediaOrganiseLine(`… and ${actions.length - shown.length} more.`, 'is-more'));
+    }
+    for (const warning of plan.warnings) {
+      ui.list.append(mediaOrganiseLine(warning.message, warning.kind === 'missing' || warning.kind === 'unsupported' ? 'is-warning' : ''));
+    }
+    ui.apply.disabled = !plan.actions.length;
+  }
+
+  // Shows what the dialog is doing in its status line. While it works a spin-
+  // ning wheel sits before the text, and the dialog is marked busy so the
+  // controls stay disabled for screen readers too. A plain string replaces it.
+  function setMediaOrganiseStatus(busyText) {
+    const ui = mediaOrganiseElements();
+    if (!busyText) {
+      ui.status.replaceChildren();
+      ui.status.setAttribute('aria-busy', 'false');
+      ui.dialog.setAttribute('aria-busy', 'false');
+      ui.list.classList.remove('is-busy');
+      return;
+    }
+    const spinner = document.createElement('span');
+    spinner.className = 'media-scan-spinner media-organise-spinner';
+    spinner.setAttribute('aria-hidden', 'true');
+    ui.status.replaceChildren(spinner, document.createTextNode(busyText));
+    ui.status.setAttribute('aria-busy', 'true');
+    ui.dialog.setAttribute('aria-busy', 'true');
+    ui.list.classList.add('is-busy');
+  }
+
+  async function checkMediaOrganise() {
+    const ui = mediaOrganiseElements();
+    if (mediaOrganiseBusy) return;
+    mediaOrganiseBusy = true;
+    ui.check.disabled = true;
+    ui.apply.disabled = true;
+    setMediaOrganiseStatus('Reading the media folder…');
+    try {
+      if (mediaOrganiseUsesFolder()) {
+        const scanned = await scanMediaOrganiseWithFolder();
+        mediaOrganisePlanState = scanned.plan;
+        renderMediaOrganisePlan(scanned.plan);
+      } else {
+        const body = await scanMediaOrganiseWithHelper();
+        mediaOrganisePlanState = mediaOrganisePlanOf(body.plan);
+        renderMediaOrganisePlan(mediaOrganisePlanState);
+      }
+      setMediaOrganiseStatus('');
+    } catch (error) {
+      ui.summary.textContent = error?.message || 'The media folder could not be read.';
+      ui.list.replaceChildren();
+      setMediaOrganiseStatus('');
+    } finally {
+      mediaOrganiseBusy = false;
+      ui.check.disabled = false;
+    }
+  }
+
+  async function applyMediaOrganise() {
+    const ui = mediaOrganiseElements();
+    if (!mediaOrganisePlanState || mediaOrganiseBusy) return;
+    const folderMode = mediaOrganiseUsesFolder();
+    mediaOrganiseBusy = true;
+    ui.apply.disabled = true;
+    ui.check.disabled = true;
+    setMediaOrganiseStatus('Organising media files…');
+    try {
+      const result = folderMode ? await applyMediaOrganiseWithFolder(mediaOrganisePlanState) : await applyMediaOrganiseWithHelper();
+      // The GEDCOM now points at the files' new places.
+      const nextText = result.gedcomText || '';
+      if (nextText && nextText !== (state.gedcomText || serializeGedcomRecords(state.gedcomRecords))) {
+        state.gedcomText = nextText;
+        state.gedcomRecords = splitGedcomRecords(nextText);
+        reparseGedcomRecords();
+        markGedcomDirty();
+      }
+      // Card images follow the files they were picked from.
+      applyMediaOrganiseHeroRenames(result.renames || []);
+      savePrimaryMedia();
+      saveAdditionalMedia();
+      // Re-read the media folder so previews, links and the Media Library show the new paths.
+      if (folderMode) await indexMediaDirectory(state.mediaDirectoryHandle);
+      // Card images and cached previews belong to the files' old places.
+      releaseMediaUrls();
+      state.mediaLibraryCache = null;
+      state.mediaLibraryCacheKey = '';
+      await persistActiveSession();
+      if (state.selectedId) setFocus(state.selectedId, true); else render();
+      setMediaOrganiseStatus('');
+      ui.status.textContent = mediaOrganiseResultLine(result.summary || {}, result.unsupported || []);
+      ui.list.replaceChildren();
+      ui.summary.textContent = 'The plan above has been carried out. Check again to see what is left.';
+      ui.apply.disabled = true;
+      mediaOrganisePlanState = null;
+      // The tree now differs from the file; saving it writes the new paths.
+      if (state.gedcomDirty) await saveGedcomFile({ interactive: true });
+    } catch (error) {
+      setMediaOrganiseStatus('');
+      ui.status.textContent = error?.message || 'The media folder could not be organised.';
+      ui.apply.disabled = false;
+    } finally {
+      mediaOrganiseBusy = false;
+      ui.check.disabled = false;
+    }
+  }
+
+  function mediaOrganiseResultLine(summary, unsupported = []) {
+    const parts = [];
+    if (summary.moved) parts.push(`${summary.moved} moved`);
+    if (summary.copied) parts.push(`${summary.copied} copied`);
+    if (summary.replaced) parts.push(`${summary.replaced} replaced`);
+    if (summary.archived) parts.push(`${summary.archived} archived`);
+    if (summary.missing) parts.push(`${summary.missing} missing`);
+    if (summary.failed) parts.push(`${summary.failed} failed`);
+    const done = parts.length ? `Done: ${parts.join(', ')}.` : 'Nothing needed moving.';
+    const left = unsupported.length ? ` ${mediaOrganiseCount(unsupported.length, 'FILE line')} outside the media folder were left unchanged.` : '';
+    return state.gedcomDirty ? `${done}${left} Save to GEDCOM keeps the new file paths.` : `${done}${left}`;
+  }
+
+  // Moves each hero image choice with its file: a full-path choice stays a full
+  // path, a file-name choice keeps the file name.
+  function applyMediaOrganiseHeroRenames(renames) {
+    const changes = new Map();
+    for (const { from, to } of renames) changes.set(normalizeMediaPath(from), to);
+    let fullPath = false;
+    for (const stored of state.primaryMedia.values()) if (stored.includes('/')) { fullPath = true; break; }
+    // Saved choices are usually file names, but accept a full path too.
+    if (!fullPath) {
+      try { for (const stored of Object.values(readSelection(state.primaryMediaKey) || {})) if (typeof stored === 'string' && stored.includes('/')) { fullPath = true; break; } } catch { }
+    }
+    let changed = false;
+    for (const [personId, stored] of [...state.primaryMedia]) {
+      const to = changes.get(normalizeMediaPath(stored));
+      if (!to || to === stored) continue;
+      state.primaryMedia.set(personId, fullPath ? to : splitName(to));
+      changed = true;
+    }
+    return changed;
+  }
+
+  const mediaOrganiseButton = document.querySelector('#mediaOrganiseMenuButton');
+  const mediaOrganiseDialog = mediaOrganiseDialogElement();
+  if (mediaOrganiseButton) mediaOrganiseButton.addEventListener('click', openMediaOrganiseDialog);
+  if (mediaOrganiseDialog) {
+    mediaOrganiseDialog.querySelector('#closeMediaOrganise').addEventListener('click', () => mediaOrganiseDialog.close());
+    mediaOrganiseDialog.querySelector('#mediaOrganiseCheck').addEventListener('click', checkMediaOrganise);
+    mediaOrganiseDialog.querySelector('#mediaOrganiseApply').addEventListener('click', applyMediaOrganise);
+  }
+
+  // ---------------------------------------------------------------------------
+  // 16. Duplicate media files (exact copies, removal and archiving)
+  // ---------------------------------------------------------------------------
+
+  // Two files are duplicates only when their contents are identical: the same
+  // bytes, whatever the files are called. A file used as a card image or attached
+  // to a life event is never offered, and neither are the other copies in its
+  // group. The groups come from helpers/media-organise.js, which the local helper
+  // uses too, so the list matches whatever does the reading.
+
+  const duplicateScanExtensions = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'pdf'];
+
+  function duplicateCore() {
+    if (!globalThis.KinshipMediaOrganise) {
+      throw new Error('The media folder helper did not load. Reload the page and try again.');
+    }
+    return globalThis.KinshipMediaOrganise;
+  }
+
+  // A shareable file address for the media folder: a directory of its own, or the
+  // local helper's /media/ route. Everything the helpers compare is sent there.
+  function duplicateRequest() {
+    const request = {
+      people: mediaOrganisePersonDetails(),
+      gedcomText: state.gedcomText || serializeGedcomRecords(state.gedcomRecords),
+      heroPicks: Object.fromEntries(savedHeroPicks())
+    };
+    // Kinship Atlas.exe reads the tree from its own GEDCOM, so its requests stay
+    // small; other helpers are sent the records as well.
+    if (!state.mediaHelper?.readsPrimaryGedcom) request.records = state.gedcomRecords;
+    return request;
+  }
+
+  // Chatty text for a file size.
+  function duplicateSize(bytes) {
+    const value = Number(bytes) || 0;
+    if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+    if (value >= 1024) return `${Math.round(value / 1024)} KB`;
+    return `${value} B`;
+  }
+
+  // The card image choices and the media on life events, for this tree. A group
+  // holding one of these is left alone, so a photo in use is never removed.
+  function duplicateLinkKeys(records) {
+    const core = duplicateCore();
+    const heroKeys = new Set();
+    for (const stored of savedHeroPicks().values()) {
+      const path = typeof stored === 'string' ? stored : stored?.path;
+      if (path) heroKeys.add(normalizeMediaPath(path));
+    }
+    const eventKeys = new Set();
+    for (const record of records) {
+      if (record.tag !== 'INDI' && record.tag !== 'FAM') continue;
+      let inEvent = false;
+      for (const line of record.lines || []) {
+        const match = /^(\d+)\s+(\S+)\s*(.*)$/.exec(line.replace(/\r$/, ''));
+        if (!match) continue;
+        const level = Number(match[1]);
+        const tag = match[2].toUpperCase();
+        if (level === 1) inEvent = core.EVENT_TAGS.has(tag);
+        if (inEvent && tag === 'FILE' && level >= 2 && match[3].trim()) eventKeys.add(normalizeMediaPath(match[3].trim()));
+      }
+    }
+    return { heroKeys, eventKeys };
+  }
+
+  // A web address for a file, for thumbnails and for opening a PDF: the object
+  // URL the media library already holds, or a copy fetched from the helper.
+  async function duplicatePreviewUrl(entry) {
+    if (!entry) return '';
+    if (entry.file?.kinshipUrl) return entry.file.kinshipUrl;
+    if (entry.file) return mediaUrl(entry.file);
+    if (entry.url) return entry.url;
+    const relative = entry.relativePath || '';
+    if (!relative) return '';
+    try {
+      const response = await fetch(`/media/${relative.split('/').map(encodeURIComponent).join('/')}`);
+      if (!response.ok) return '';
+      return URL.createObjectURL(await response.blob());
+    } catch {
+      return '';
+    }
+  }
+
+  // A small thumbnail for an image, and a "PDF" tile for a document.
+  function duplicateThumbnail(entry) {
+    if (/\.pdf$/i.test(entry.name || '')) {
+      const tile = document.createElement('span');
+      tile.className = 'duplicate-media-thumb is-pdf';
+      tile.textContent = 'PDF';
+      return tile;
+    }
+    const image = document.createElement('img');
+    image.className = 'duplicate-media-thumb';
+    image.alt = '';
+    image.loading = 'lazy';
+    duplicatePreviewUrl(entry).then((url) => { if (url) image.src = url; });
+    return image;
+  }
+
+  // Groups of identical files, grouped here when the folder is open in this tab,
+  // or by the local helper when it is the one holding the folder.
+  async function findDuplicateMedia() {
+    if (!state.people.size) throw new Error('Open a GEDCOM first.');
+    if (!state.mediaDirectoryHandle && !state.mediaHelper?.findDuplicates) {
+      throw new Error('Choose or link a media folder in this menu first. The local helper can also do this when it is running.');
+    }
+    const core = duplicateCore();
+    const { heroKeys, eventKeys } = duplicateLinkKeys(state.gedcomRecords);
+    if (state.mediaDirectoryHandle) {
+      // The folder is open here: read and hash its files in this tab.
+      const files = [];
+      const entries = new Map();
+      const walk = async (directory, prefix) => {
+        for await (const [name, handle] of directory.entries()) {
+          const relativePath = prefix ? `${prefix}/${name}` : name;
+          if (handle.kind === 'directory') { await walk(handle, relativePath); continue; }
+          if (!core.isMediaFile(name)) continue;
+          const file = await handle.getFile();
+          const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+          const hash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+          const key = normalizeMediaPath(relativePath);
+          files.push({ relativePath, name, size: file.size, hash, key });
+          entries.set(key, file);
+        }
+      };
+      await walk(state.mediaDirectoryHandle, '');
+      return core.groupDuplicates(files, { heroKeys: [...heroKeys], eventKeys: [...eventKeys] }).map((group) => ({
+        hash: group.hash,
+        bytes: group.bytes,
+        protected: group.protected,
+        files: group.files.map((file) => ({
+          relativePath: file.relativePath,
+          name: file.name,
+          size: file.size,
+          keeper: file.relativePath === group.keeper.relativePath,
+          file: entries.get(file.key)
+        }))
+      }));
+    }
+    const response = await fetch('/api/duplicates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(duplicateRequest())
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || 'The local helper could not check the media folder for duplicates.');
+    return (body.groups || []).map((group) => ({
+      hash: group.hash,
+      bytes: group.bytes,
+      protected: group.protected,
+      files: (group.files || []).map((file) => ({
+        relativePath: file.relativePath,
+        name: file.name,
+        size: file.size,
+        keeper: file.keeper,
+        owners: (file.owners || []).map((id) => state.people.get(id)?.name).filter(Boolean)
+      }))
+    }));
+  }
+
+  // The tick box key for one copy.
+  function duplicateKey(group, file) {
+    return `${group.hash}|${file.relativePath}`;
+  }
+
+  // Removes the ticked copies: deleted outright, or copied into the archive
+  // folder first, with their GEDCOM links dropped. The kept copy is untouched.
+  async function removeDuplicateMedia(groups, selected, mode) {
+    const core = duplicateCore();
+    const work = groups.map((group) => ({ group, files: group.files.filter((file) => selected.has(duplicateKey(group, file))) }))
+      .filter((item) => item.files.length);
+    if (!work.length) return { removed: [], failed: [] };
+    if (work.some((item) => item.files.some((file) => file.keeper))) {
+      throw new Error('The copy that is kept cannot be removed. Clear its tick and try again.');
+    }
+    const archiveFolder = duplicateElements().archive.value.trim() || 'Archive';
+    let gedcomText = state.gedcomText || serializeGedcomRecords(state.gedcomRecords);
+    const removed = [];
+    const failed = [];
+    if (state.mediaDirectoryHandle) {
+      // The folder is open here: copy and delete the files in this tab.
+      const directoryHandle = state.mediaDirectoryHandle;
+      const stamp = new Date().toISOString().slice(0, 10);
+      for (const { files } of work) {
+        for (const file of files) {
+          try {
+            const segments = file.relativePath.split('/');
+            let parent = directoryHandle;
+            for (const segment of segments.slice(0, -1)) parent = await parent.getDirectoryHandle(segment);
+            const handle = await parent.getFileHandle(segments.at(-1));
+            if (mode === 'archive') {
+              let archive = directoryHandle;
+              for (const segment of `${archiveFolder}/${stamp}`.split('/')) archive = await archive.getDirectoryHandle(segment, { create: true });
+              const taken = new Set();
+              for (const name of await Array.fromAsync(archive.keys())) taken.add(name.toLocaleLowerCase());
+              const name = taken.has(segments.at(-1).toLocaleLowerCase()) ? core.uniqueName(segments.at(-1), taken) : segments.at(-1);
+              await core.placeMediaFile(handle, archive, name);
+            }
+            await parent.removeEntry(segments.at(-1));
+            gedcomText = core.removeGedcomFileReferences(gedcomText, file.relativePath);
+            removed.push({ file: file.relativePath, action: mode });
+          } catch (error) {
+            failed.push({ file: file.relativePath, error: error?.message || 'The file could not be removed.' });
+          }
+        }
+      }
+      return { gedcomText, removed, failed };
+    }
+    for (const { group, files } of work) {
+      const response = await fetch('/api/duplicates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...duplicateRequest(),
+          apply: true,
+          mode,
+          archiveFolder,
+          keep: group.files.find((file) => file.keeper)?.relativePath || '',
+          files: files.map((file) => file.relativePath),
+          gedcomText
+        })
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        for (const file of files) failed.push({ file: file.relativePath, error: body.error || 'The local helper could not remove the file.' });
+        continue;
+      }
+      gedcomText = body.gedcomText || gedcomText;
+      removed.push(...(body.removed || []));
+      failed.push(...(body.failed || []));
+    }
+    return { gedcomText, removed, failed };
+  }
+
+  // The dialog -----------------------------------------------------------------
+
+  let duplicateGroups = [];
+  let duplicateBusy = false;
+  const duplicateSelected = new Set();
+
+  function duplicateElements() {
+    const dialog = document.querySelector('#duplicateMediaDialog');
+    return {
+      dialog,
+      list: dialog.querySelector('#duplicateMediaList'),
+      summary: dialog.querySelector('#duplicateMediaSummary'),
+      status: dialog.querySelector('#duplicateMediaStatus'),
+      archive: dialog.querySelector('#duplicateMediaArchive'),
+      scan: dialog.querySelector('#duplicateMediaScanButton'),
+      applyArchive: dialog.querySelector('#duplicateMediaArchiveButton'),
+      applyDelete: dialog.querySelector('#duplicateMediaDeleteButton'),
+      selected: dialog.querySelector('#duplicateMediaSelected')
+    };
+  }
+
+  // The spinning wheel and text while the scan or a removal runs.
+  function setDuplicateBusy(on, text = 'Looking for identical files…') {
+    const ui = duplicateElements();
+    ui.scan.disabled = Boolean(on);
+    ui.dialog.setAttribute('aria-busy', on ? 'true' : 'false');
+    ui.list.classList.toggle('is-busy', Boolean(on));
+    ui.status.setAttribute('aria-busy', on ? 'true' : 'false');
+    if (!on) {
+      ui.status.replaceChildren();
+      return;
+    }
+    const spinner = document.createElement('span');
+    spinner.className = 'media-scan-spinner media-organise-spinner';
+    spinner.setAttribute('aria-hidden', 'true');
+    ui.status.replaceChildren(spinner, document.createTextNode(text));
+  }
+
+  function syncDuplicateSelection() {
+    const ui = duplicateElements();
+    const count = duplicateSelected.size;
+    ui.selected.textContent = count ? `${count} cop${count === 1 ? 'y' : 'ies'} selected` : '';
+    ui.applyDelete.disabled = duplicateBusy || !count;
+    ui.applyArchive.disabled = duplicateBusy || !count;
+  }
+
+  function renderDuplicateGroups(groups) {
+    const ui = duplicateElements();
+    ui.list.replaceChildren();
+    if (!groups.length) {
+      ui.summary.textContent = 'No duplicates found. Every file differs from the others.';
+      return;
+    }
+    const extraCopies = groups.reduce((total, group) => total + group.files.length - 1, 0);
+    const protectedGroups = groups.filter((group) => group.protected).length;
+    ui.summary.textContent = `${groups.length} group${groups.length === 1 ? '' : 's'} of identical files, ${extraCopies} extra cop${extraCopies === 1 ? 'y' : 'ies'}${protectedGroups ? `, ${protectedGroups} in use by a card image or life event so left alone` : ''}.`;
+    for (const group of groups) {
+      const section = document.createElement('section');
+      section.className = `duplicate-media-group${group.protected ? ' is-protected' : ''}`;
+      const heading = document.createElement('h4');
+      heading.textContent = `${duplicateSize(group.bytes)} · ${group.files.length} copies${group.protected ? ' · in use, so it is left alone' : ''}`;
+      section.append(heading);
+      for (const file of group.files) {
+        const row = document.createElement('label');
+        row.className = `duplicate-media-row${file.keeper ? ' is-keeper' : ''}`;
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.disabled = Boolean(file.keeper) || group.protected;
+        const selectionKey = duplicateKey(group, file);
+        box.checked = duplicateSelected.has(selectionKey);
+        box.addEventListener('change', () => {
+          if (box.checked) duplicateSelected.add(selectionKey);
+          else duplicateSelected.delete(selectionKey);
+          syncDuplicateSelection();
+        });
+        row.append(box, duplicateThumbnail(file));
+        const name = document.createElement('span');
+        name.className = 'duplicate-media-name';
+        const link = document.createElement('a');
+        link.href = '#';
+        link.textContent = file.name || file.relativePath;
+        link.title = `Open ${file.relativePath} in a new window`;
+        link.addEventListener('click', async (event) => {
+          event.preventDefault();
+          const url = await duplicatePreviewUrl(file);
+          if (url) window.open(url, '_blank', 'noopener');
+          else showToast(`"${file.relativePath}" could not be opened. It may no longer be in the media folder.`);
+        });
+        const detail = document.createElement('span');
+        detail.className = 'duplicate-media-detail';
+        const where = file.relativePath.split('/').slice(0, -1).join('/');
+        detail.textContent = ` · ${where || 'media folder root'}${file.owners?.length ? ` · ${file.owners.join(', ')}` : ''}`;
+        name.append(link, detail);
+        const keep = document.createElement('span');
+        keep.className = 'duplicate-media-keep';
+        keep.textContent = file.keeper ? 'Kept' : '';
+        row.append(name, keep);
+        section.append(row);
+      }
+      ui.list.append(section);
+    }
+  }
+
+  async function scanDuplicateMedia() {
+    const ui = duplicateElements();
+    if (duplicateBusy) return;
+    duplicateBusy = true;
+    duplicateSelected.clear();
+    ui.list.replaceChildren();
+    ui.applyDelete.disabled = true;
+    ui.applyArchive.disabled = true;
+    setButtonContent(ui.scan, 'scanFace', 'Scanning…');
+    setDuplicateBusy(true);
+    try {
+      duplicateGroups = await findDuplicateMedia();
+      renderDuplicateGroups(duplicateGroups);
+    } catch (error) {
+      duplicateGroups = [];
+      ui.summary.textContent = error?.message || 'The media folder could not be checked for duplicates.';
+    } finally {
+      duplicateBusy = false;
+      setDuplicateBusy(false);
+      setButtonContent(ui.scan, 'scanFace', 'Scan for duplicates');
+      syncDuplicateSelection();
+    }
+  }
+
+  // Drops the removed files from the index, the library cache and the records, so
+  // nothing keeps showing a file that is gone, then saves the GEDCOM.
+  async function afterDuplicateRemoval(result, removedPaths) {
+    const nextText = result.gedcomText || '';
+    if (nextText && nextText !== (state.gedcomText || serializeGedcomRecords(state.gedcomRecords))) {
+      state.gedcomText = nextText;
+      state.gedcomRecords = splitGedcomRecords(nextText);
+      reparseGedcomRecords();
+      markGedcomDirty();
+    }
+    if (state.mediaIndex) {
+      for (const [key, files] of [...state.mediaIndex.byName]) {
+        const remaining = files.filter((file) => !removedPaths.has(normalizeMediaPath(state.mediaRelativePaths.get(file) || file.name)));
+        if (!remaining.length) state.mediaIndex.byName.delete(key);
+        else if (remaining.length !== files.length) state.mediaIndex.byName.set(key, remaining);
+      }
+    }
+    // Previews and face results belong to files that may be gone now.
+    state.mediaLibraryCache = null;
+    state.mediaLibraryCacheKey = '';
+    state.mediaFaceAnalysis = null;
+    releaseMediaUrls();
+    if (state.mediaDirectoryHandle) await indexMediaDirectory(state.mediaDirectoryHandle);
+    await persistActiveSession();
+    if (state.selectedId) setFocus(state.selectedId, true); else render();
+    if (state.gedcomDirty) await saveGedcomFile({ interactive: true });
+  }
+
+  async function applyDuplicateRemoval(mode) {
+    const ui = duplicateElements();
+    if (duplicateBusy || !duplicateSelected.size) return;
+    const count = duplicateSelected.size;
+    const outcome = mode === 'delete' ? 'delete these files for good' : 'move these files into the archive folder';
+    if (!window.confirm(`Remove ${count} duplicate file${count === 1 ? '' : 's'} and unlink ${count === 1 ? 'it' : 'them'} from every person record?\n\nThis will ${outcome}. The copies that are kept stay as they are.`)) return;
+    duplicateBusy = true;
+    ui.applyDelete.disabled = true;
+    ui.applyArchive.disabled = true;
+    setDuplicateBusy(true, mode === 'delete' ? 'Deleting duplicate files…' : 'Moving duplicate files to the archive…');
+    try {
+      const result = await removeDuplicateMedia(duplicateGroups, duplicateSelected, mode);
+      const removedPaths = new Set((result.removed || []).map((item) => normalizeMediaPath(item.file)));
+      await afterDuplicateRemoval(result, removedPaths);
+      const failed = result.failed || [];
+      const removedCount = (result.removed || []).length;
+      ui.summary.textContent = `${removedCount} file${removedCount === 1 ? '' : 's'} ${mode === 'delete' ? 'deleted' : 'archived'}${failed.length ? `; ${failed.length} could not be removed (${failed[0].error})` : ''}.`;
+      duplicateGroups = duplicateGroups
+        .map((group) => ({ ...group, files: group.files.filter((file) => !removedPaths.has(normalizeMediaPath(file.relativePath))) }))
+        .filter((group) => group.files.length > 1);
+      duplicateSelected.clear();
+      renderDuplicateGroups(duplicateGroups);
+    } catch (error) {
+      ui.summary.textContent = error?.message || 'The duplicate files could not be removed.';
+    } finally {
+      duplicateBusy = false;
+      setDuplicateBusy(false);
+      syncDuplicateSelection();
+    }
+  }
+
+  function openDuplicateMediaDialog() {
+    const ui = duplicateElements();
+    duplicateGroups = [];
+    duplicateSelected.clear();
+    ui.list.replaceChildren();
+    ui.archive.value = 'Archive';
+    ui.summary.textContent = 'Looks for exact copies (the same bytes, any file name) among the images and PDFs in the media folder.';
+    ui.status.replaceChildren();
+    ui.applyDelete.disabled = true;
+    ui.applyArchive.disabled = true;
+    ui.scan.disabled = false;
+    setButtonContent(ui.scan, 'scanFace', 'Scan for duplicates');
+    if (!state.gedcomRecords.length) ui.summary.textContent = 'Open a GEDCOM first.';
+    else if (!state.mediaDirectoryHandle && !state.mediaHelper?.findDuplicates) {
+      ui.summary.textContent = 'Choose or link a media folder in this menu first. The local helper can also do this when it is running.';
+    }
+    showModalFocused(ui.dialog);
+  }
+
+  const duplicateMenuButton = document.querySelector('#duplicateMediaMenuButton');
+  const duplicateDialog = document.querySelector('#duplicateMediaDialog');
+  if (duplicateMenuButton) duplicateMenuButton.addEventListener('click', openDuplicateMediaDialog);
+  if (duplicateDialog) {
+    duplicateDialog.querySelector('#closeDuplicateMedia').addEventListener('click', () => duplicateDialog.close());
+    duplicateDialog.querySelector('#duplicateMediaScanButton').addEventListener('click', scanDuplicateMedia);
+    duplicateDialog.querySelector('#duplicateMediaDeleteButton').addEventListener('click', () => applyDuplicateRemoval('delete'));
+    duplicateDialog.querySelector('#duplicateMediaArchiveButton').addEventListener('click', () => applyDuplicateRemoval('archive'));
+  }
 })();

@@ -157,8 +157,7 @@
       }
     }
     return visit(directoryHandle).then(() => {
-      state.mediaRelativePaths = relativePaths;
-      state.mediaIndex = { byName };
+      pruneMediaIndex(byName, relativePaths);
       state.mediaLibraryCache = null;
     });
   }
@@ -357,9 +356,14 @@
       const info = response.ok ? await response.json() : null;
       state.mediaHelper = info?.available ? {
         folder: info.folder, deletePaths: info.deletePaths === true,
-        personFolders: info.personFolders === true,
+        personFolders: info.personFolders === true, organiseMedia: info.organiseMedia === true,
+        findDuplicates: info.findDuplicates === true, reveal: info.reveal === true,
+      readsPrimaryGedcom: info.readsPrimaryGedcom === true,
+        mediaPath: typeof info.mediaPath === 'string' ? info.mediaPath : '',
+        gedcomPath: typeof info.gedcomPath === 'string' ? info.gedcomPath : '',
         saveGedcom: info.saveGedcom === true, gedcomName: typeof info.gedcom === 'string' ? info.gedcom : ''
       } : null;
+      if (state.mediaHelper) syncMediaFolderLink();
     } catch {
       state.mediaHelper = null;
     }
@@ -403,6 +407,40 @@
     }
     if (loaded) render();
   }
+
+  // Shows "Media Folder" beside the page source in the top bar whenever the
+  // media folder's real location is known. Clicking it opens File Explorer there.
+  function syncMediaFolderLink() {
+    const link = elements.mediaFolderLink;
+    if (!link) return;
+    const location = state.mediaHelper?.mediaPath || '';
+    link.hidden = !location;
+    link.disabled = !location;
+    if (location) link.title = `Open this tree's media folder in File Explorer: ${location}`;
+    else link.removeAttribute('title');
+  }
+
+  // Opens File Explorer at the media folder itself (not a person's folder
+  // inside it). A picked folder cannot be revealed from the page, so the local
+  // helper does it whenever it serves the tree.
+  async function openMediaFolderInExplorer() {
+    if (state.mediaHelper?.reveal) {
+      try {
+        const response = await fetch('/api/reveal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: '' }) });
+        if (!response.ok) throw new Error('not found');
+      } catch {
+        showToast('File Explorer could not be opened. Kinship Atlas.exe starts it, so it needs to be running.');
+      }
+      return;
+    }
+    if (state.mediaDirectoryHandle) {
+      openMediaFolderInTab('');
+      return;
+    }
+    showToast('Choose the media folder in this menu first to open it.');
+  }
+
+  if (elements.mediaFolderLink) elements.mediaFolderLink.addEventListener('click', openMediaFolderInExplorer);
 
   function mediaSaveMode() {
     if (state.mediaDirectoryHandle) return 'folder';

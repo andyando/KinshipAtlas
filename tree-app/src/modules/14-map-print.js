@@ -866,5 +866,13 @@
   applyTheme(preferredTheme(), { remember: false });
 
   // Syncing once at startup captures selections made before this feature (or while the helper was down).
-  probeMediaHelper().then(loadHelperSelections).then(restoreActiveSession).then(applyDefaultOnStartup).then(syncSelectionsToHelper).then(loadHelperMedia);
-})();
+  // The media helper is asked about first, so a saved session that re-reads the
+  // folder (and asks whether the helper can find duplicates) has its answer.
+  probeMediaHelper()
+    .then(() => loadHelperSelections())
+    .then(() => restoreActiveSession())
+    .then(() => applyDefaultOnStartup())
+    .then(() => probeMediaHelper())
+    .then(() => syncSelectionsToHelper())
+    .then(() => loadHelperMedia())
+    .then(() => syncMediaFolderLink());

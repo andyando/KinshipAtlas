@@ -15,6 +15,7 @@
   <script src="map.js" defer></script>
   <script src="public-records.js" defer></script>
   <script src="face-scan.js" defer></script>
+  <script src="helpers/media-organise.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -38,7 +39,7 @@
       <button id="reportsButton" class="button button-quiet" type="button" aria-pressed="false" disabled hidden>Reports</button>
       <button id="mediaLibraryButton" class="button button-quiet media-library-nav-button" type="button" aria-pressed="false" disabled hidden>Media</button>
     </div>
-    <div class="topbar-meta"><span class="privacy-indicator"><span class="privacy-dot"></span> ON THIS DEVICE</span><span class="topbar-divider"></span><button id="treeLabel" class="tree-label-button" type="button" title="Update defaults: choose the GEDCOM file and media folder that open automatically" disabled>No tree loaded</button></div>
+    <div class="topbar-meta"><span class="privacy-indicator"><span class="privacy-dot"></span> ON THIS DEVICE</span><span class="topbar-divider"></span><button id="treeLabel" class="tree-label-button" type="button" title="Update defaults: choose the GEDCOM file and media folder that open automatically" disabled>No tree loaded</button><button id="mediaFolderLink" class="tree-label-button media-folder-link" type="button" title="Open this tree's media folder in File Explorer" hidden disabled>Media Folder</button></div>
     <div class="topbar-actions">
       <div id="primaryPersonBar" class="primary-person-bar" hidden>
         <button id="primaryHomeButton" class="button button-quiet primary-home-button" type="button" title="Show the home person in Relationship View">
@@ -64,6 +65,14 @@
           <input id="mediaInput" type="file" webkitdirectory directory multiple>
           <input id="mediaUploadInput" type="file" accept="image/*,.pdf,application/pdf" multiple>
           <button id="mediaLibraryMenuButton" class="menu-item" type="button" role="menuitem" disabled>Media library</button>
+          <button id="mediaOrganiseMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Move every image and PDF into its person's own folder, copy files shared by several people, and archive files no person uses">
+            <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 7.5A2 2 0 0 1 5 5.5h3.6l1.6 2H19a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 13.5h6"/><path d="M12.5 11l2.5 2.5-2.5 2.5"/></svg>
+            Organise media files
+          </button>
+          <button id="duplicateMediaMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Find files whose contents are identical and remove or archive the extra copies">
+            <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="3" width="12" height="15" rx="1.5"/><path d="M10 21H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1h3"/><path d="M15 8h-4M15 12h-4"/></svg>
+            Find duplicate images
+          </button>
           <button id="birthCountryMenuButton" class="menu-item" type="button" role="menuitem" disabled title="List people whose birth place does not identify a country, and fix them">People without a birth country</button>
           <button id="duplicateFinderMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Find people who may have been entered more than once">Find duplicate people</button>
           <button id="duplicateRelationMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Remove people connected more than once to the same parent or spouse">
@@ -492,6 +501,23 @@
             <p><strong>Review profile card images</strong> finds people with attached Portrait-classified media whose current card image is not a Portrait, and suggests the first attached portrait. Select any combination or use Select all / Deselect all, then update the chosen profile cards.</p>
             <h4>Find faces</h4>
             <p>Use the search and type filters first, then choose <strong>Scan faces</strong>. Kinship Atlas scans matching image files across all pages, entirely on this device, and shows progress while it works. When the scan finishes, review the images where a face was detected and apply the <strong>Portrait</strong> label to one image or to all checked images. Scanning does not change any classifications by itself.</p>
+            <h4>Organise media files</h4>
+            <p><strong>Settings &gt; Organise media files</strong> tidies the media folder against the open GEDCOM. Choose <strong>Check media folder</strong> to see the plan first, then <strong>Organise media files</strong> to carry it out:</p>
+            <ul>
+              <li>Every image or PDF linked to a person is moved into that person's own folder, named like <code>Ada Allnutt (1864-unknown) [I455]</code>. A missing folder is created.</li>
+              <li>When one file is linked to several people, a copy is made for each of them, so no file is shared between folders.</li>
+              <li>Card images stay with the people who use them, and the GEDCOM's file paths are updated to the new places when the tree is next saved.</li>
+              <li>Files that no person or event uses are moved into the archive folder (Archive, by default), in a dated subfolder, rather than being deleted.</li>
+              <li>A file already stored under the right name is left where it is, so running the check twice changes nothing.</li>
+            </ul>
+            <p>The archive folder name can be changed before organising. The same command is available from a terminal without the app: <code>node helpers/media-organise-cli.mjs "&lt;media folder&gt;" "&lt;gedcom file&gt;" --apply</code>.</p>
+            <h4>Find duplicate images</h4>
+            <p><strong>Settings &gt; Find duplicate images</strong> compares the contents of every image and PDF in the media folder and lists exact copies, however they are named. Thumbnails and PDF links let you open each file before choosing.</p>
+            <ul>
+              <li>A group is skipped entirely when any of its files is used as a card image or attached to a life event, so a photo in use is never removed.</li>
+              <li>Tick the copies to remove, then <strong>Delete selected</strong> (permanent) or <strong>Move selected to archive</strong> (into the archive folder, dated).</li>
+              <li>The kept file keeps its links; each removed file is unlinked from every person and event, and the GEDCOM is saved with those links gone.</li>
+            </ul>
           </article>
           <article class="help-article" data-help-article="maps-reports" hidden>
             <h3>Map View, Reports &amp; data checks</h3>
@@ -840,6 +866,41 @@
         <span id="duplicateFinderSelected" class="duplicate-finder-selected"></span>
         <button id="deleteDuplicatesButton" class="dialog-button dialog-button-danger" type="button" disabled>Delete selected duplicates</button>
         <button id="closeDuplicateFinder" class="dialog-button dialog-button-quiet" type="button">Close</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="mediaOrganiseDialog" class="app-dialog media-organise-dialog" aria-labelledby="mediaOrganiseTitle">
+    <section class="dialog-panel">
+      <h2 id="mediaOrganiseTitle">Organise media files</h2>
+      <p id="mediaOrganiseSummary">Check the media folder to see which files are outside their person's folder.</p>
+      <label class="media-organise-archive" for="mediaOrganiseArchive">Archive folder
+        <input id="mediaOrganiseArchive" type="text" value="Archive" maxlength="60" autocomplete="off" spellcheck="false">
+      </label>
+      <div id="mediaOrganiseList" class="media-organise-list" aria-live="polite"></div>
+      <p id="mediaOrganiseStatus" class="media-organise-status" role="status"></p>
+      <div class="dialog-actions">
+        <button id="mediaOrganiseApply" class="dialog-button dialog-button-primary" type="button" disabled>Organise media files</button>
+        <button id="mediaOrganiseCheck" class="dialog-button" type="button">Check media folder</button>
+        <button id="closeMediaOrganise" class="dialog-button dialog-button-quiet" type="button">Close</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="duplicateMediaDialog" class="app-dialog media-organise-dialog" aria-labelledby="duplicateMediaTitle">
+    <section class="dialog-panel">
+      <h2 id="duplicateMediaTitle">Find duplicate images</h2>
+      <p id="duplicateMediaSummary">Looks for exact copies (the same bytes, any file name) among the images and PDFs in the media folder.</p>
+      <p class="dialog-hint">A file used as a card image or attached to a life event is never offered, and neither are the other copies in its group. The kept file stays linked; the removed files are unlinked from every person record.</p>
+      <label class="media-organise-archive" for="duplicateMediaArchive">Archive folder
+        <input id="duplicateMediaArchive" type="text" value="Archive" maxlength="60" autocomplete="off" spellcheck="false">
+      </label>
+      <div id="duplicateMediaList" class="media-organise-list" aria-live="polite"></div>
+      <p id="duplicateMediaStatus" class="media-organise-status" role="status"></p>
+      <div class="dialog-actions">
+        <span id="duplicateMediaSelected" class="media-organise-pending"></span>
+        <button id="duplicateMediaArchiveButton" class="dialog-button" type="button" disabled>Move selected to archive</button>
+        <button id="duplicateMediaDeleteButton" class="dialog-button dialog-button-danger" type="button" disabled>Delete selected</button>
+        <button id="duplicateMediaScanButton" class="dialog-button dialog-button-primary" type="button">Scan for duplicates</button>
+        <button id="closeDuplicateMedia" class="dialog-button dialog-button-quiet" type="button">Close</button>
       </div>
     </section>
   </dialog>
