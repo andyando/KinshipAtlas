@@ -1,6 +1,6 @@
 {
   "eol": "lf",
-  "totalLines": 12113,
+  "totalLines": 12458,
   "modules": [
     {
       "file": "00-header.js",
@@ -75,51 +75,58 @@
     {
       "file": "10-rendering.js",
       "from": 2191,
-      "to": 6138,
-      "lines": 3948,
+      "to": 6139,
+      "lines": 3949,
       "name": "Rendering (tree, roster, details, media library, reports)"
     },
     {
       "file": "11-editors.js",
-      "from": 6139,
-      "to": 7269,
+      "from": 6140,
+      "to": 7270,
       "lines": 1131,
       "name": "Editors and dialogs (person, life events, relationships, deletion)"
     },
     {
       "file": "12-directory.js",
-      "from": 7270,
-      "to": 8209,
+      "from": 7271,
+      "to": 8210,
       "lines": 940,
       "name": "Directory, duplicate finder and birth-country suggestions"
     },
     {
       "file": "13-import.js",
-      "from": 8210,
-      "to": 10366,
-      "lines": 2157,
+      "from": 8211,
+      "to": 10368,
+      "lines": 2158,
       "name": "GEDCOM import, merging and saving"
     },
     {
       "file": "14-map-print.js",
-      "from": 10367,
-      "to": 11244,
+      "from": 10369,
+      "to": 11246,
       "lines": 878,
       "name": "Map, print, defaults, about/help and startup wiring"
     },
     {
       "file": "15-media-organise.js",
-      "from": 11245,
-      "to": 11663,
+      "from": 11247,
+      "to": 11665,
       "lines": 419,
       "name": "Media folder organisation (person folders, archive, GEDCOM rewrite)"
     },
     {
       "file": "16-duplicate-media.js",
-      "from": 11664,
-      "to": 12113,
-      "lines": 450,
+      "from": 11666,
+      "to": 12202,
+      "lines": 537,
       "name": "Duplicate media files (exact copies, archive or delete)"
+    },
+    {
+      "file": "17-orphan-records.js",
+      "from": 12203,
+      "to": 12458,
+      "lines": 256,
+      "name": "Orphan records (people with no family links)"
     }
   ]
 }

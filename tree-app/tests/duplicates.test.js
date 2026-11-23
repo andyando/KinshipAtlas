@@ -50,6 +50,88 @@ test('a file only linked to people is kept, and the copies can still go', () => 
   assert.equal(groups[0].protected, false);
 });
 
+test('identical files each linked to several people are left alone', () => {
+  const groups = core.groupDuplicates([
+    duplicateEntry('Ada/group.jpg', 'mm', { personIds: ['I1', 'I2'] }),
+    duplicateEntry('Bill/group.jpg', 'mm', { personIds: ['I2', 'I3'] })
+  ]);
+  // A photo naming several people is shared on purpose: one copy lives in each
+  // person's folder, so the copies are not offered for removal.
+  assert.equal(groups.length, 0);
+});
+
+test('identical files linked to one person are still duplicates', () => {
+  const groups = core.groupDuplicates([
+    duplicateEntry('Ada/photo.jpg', 'nn', { personIds: ['I1'] }),
+    duplicateEntry('Bill/photo.jpg', 'nn', { personIds: ['I2'] })
+  ]);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].files.length, 2);
+});
+
+test('only empty subfolders are reported, apart from the archive folder', () => {
+  const unused = core.findUnusedFolders({
+    archiveFolder: 'Archive',
+    folders: ['Ada Allnutt (1900-unknown) [I1]', 'Old papers', 'Archive', 'Deep/nested'],
+    files: [
+      { relativePath: 'keep.jpg' },
+      { relativePath: 'Ada Allnutt (1900-unknown) [I1]/photo.jpg' },
+      { relativePath: 'Old papers/scan.pdf' },
+      { relativePath: 'Archive/2020-01-01/old.jpg' }
+    ]
+  });
+  assert.deepEqual(unused.map((entry) => entry.folder), ['deep']);
+});
+
+test('a folder with files anywhere inside it is never reported', () => {
+  const unused = core.findUnusedFolders({
+    archiveFolder: 'Archive',
+    folders: ['Misc'],
+    files: [{ relativePath: 'Misc/held.jpg' }]
+  });
+  assert.equal(unused.length, 0);
+});
+
+test('stale FILE paths are repointed at the file\'s place in the media folder', () => {
+  const text = '0 @I1@ INDI\n1 NAME A /B/\n2 FILE G:\\tree-app\\Primary Media Library\\Ancestry_01112026_media\\Ada Allnutt [I455]\\photo.jpg\n0 TRLR\n';
+  const repointed = core.repointGedcomFiles(text, [
+    { relativePath: 'Ada Allnutt (1864-unknown) [I455]/photo.jpg' }
+  ], { mediaFolderName: 'Ancestry_01112026_media' });
+  assert.match(reponed(), /Ada Allnutt \(1864-unknown\) \[I455\]\/photo\.jpg/);
+  function reponed() { return repointed; }
+});
+
+test('a FILE path naming a shared name is only repointed by exact path', () => {
+  const text = '0 @I1@ INDI\n1 NAME A /B/\n2 FILE C:\\old\\Ada\\photo.jpg\n2 FILE C:\\old\\Bill\\photo.jpg\n0 TRLR\n';
+  const files = [
+    { relativePath: 'Ada/photo.jpg' },
+    { relativePath: 'Bill/photo.jpg' }
+  ];
+  const repointed = core.repointGedcomFiles(text, files, { mediaFolderName: 'media' });
+  // Neither old path spells either file's folder, and the name is shared, so
+  // nothing is guessed.
+  assert.equal(repointed, text);
+  // A media folder named "media" in the old path is stripped, leaving "Ada",
+  // which matches one file by its folder and name.
+  const exact = core.repointGedcomFiles('0 @I1@ INDI\n2 FILE C:\\old\\media\\Ada\\photo.jpg\n0 TRLR\n', files, { mediaFolderName: 'media' });
+  assert.match(exact, /Ada\/photo\.jpg/);
+  // A bare file name is only repointed when it matches a file's name: here the
+  // only file is "Ada/portrait.jpg", so a bare "portrait.jpg" line matches it.
+  const bare = core.repointGedcomFiles('0 @I1@ INDI\n2 FILE portrait.jpg\n0 TRLR\n', [{ relativePath: 'Ada/portrait.jpg' }], { mediaFolderName: 'media' });
+  assert.match(bare, /Ada\/portrait\.jpg/);
+});
+
+test('a FILE path is never repointed at an archived copy', () => {
+  const text = '0 @I1@ INDI\n1 NAME A /B/\n2 FILE C:\\old\\Ada\\photo.jpg\n0 TRLR\n';
+  const files = [
+    { relativePath: 'Archive/2020-01-01/photo.jpg' },
+    { relativePath: 'Ada/photo.jpg' }
+  ];
+  const repointed = core.repointGedcomFiles(text, files, { mediaFolderName: 'media' });
+  assert.match(repointed, /Ada\/photo\.jpg/);
+  assert.doesNotMatch(repointed, /Archive\//);
+});
+
 test('a different file that only shares a name is not a duplicate', () => {
   const groups = core.groupDuplicates([
     duplicateEntry('one/photo.jpg', '11'),

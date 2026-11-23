@@ -206,15 +206,26 @@
 
   // Shared "Classify" dropdown used by the person record's attached media and
   // the life-event media list, so both write the same media-type store as the
-  // Media page.
+  // Media page. The key is always the normalised path, exactly what the Media
+  // Library stores its classifications under, so a classification applied in
+  // one place shows up in the other even when the GEDCOM spells the path
+  // differently (an old install's absolute path, backslashes, capital letters).
   function mediaClassifyControl(mediaKey, label) {
+    const key = normalizeMediaPath(mediaKey);
     const wrapper = document.createElement('label');
     wrapper.className = 'media-classify';
     wrapper.textContent = 'Classify';
     const select = document.createElement('select');
-    select.dataset.mediaTypeKey = mediaKey;
+    select.dataset.mediaTypeKey = key;
+    select.dataset.mediaTypeRawKey = mediaKey;
     select.setAttribute('aria-label', `Classify ${label}`);
-    const current = state.mediaTypes.get(mediaKey) || 'unclassified';
+    const current = state.mediaTypes.get(key)
+      || state.mediaTypes.get(mediaKey)
+      // A classification recorded under an earlier path spelling (the tree was
+      // moved, or a duplicate person folder was merged away) still applies.
+      || state.mediaTypes.get(`g:/tree-app/primary media library/${state.mediaHelper?.folder || ''}/${key}`.replace(/\/+/, '/'))
+      || state.mediaTypes.get([...state.mediaTypes.keys()].find((stored) => stored.endsWith('/' + key) || key.endsWith('/' + stored)) || '')
+      || 'unclassified';
     for (const [value, text] of mediaTypeOptions) {
       const option = document.createElement('option');
       option.value = value;
@@ -223,7 +234,14 @@
       select.append(option);
     }
     select.addEventListener('change', () => {
-      state.mediaTypes.set(mediaKey, select.value);
+      // Store under the normalised key, and drop any earlier alias so the two
+      // spellings can never disagree.
+      for (const stored of [...state.mediaTypes.keys()]) {
+        if (stored === key) continue;
+        const storedName = stored.split('/').pop();
+        if (storedName === key.split('/').pop()) state.mediaTypes.delete(stored);
+      }
+      state.mediaTypes.set(key, select.value);
       if (!saveMediaTypes()) showToast('Classification saved for this tab only; browser storage is unavailable.');
     });
     wrapper.append(select);
@@ -236,7 +254,14 @@
       const saved = readSelection(mediaTypeStorageKey(storageKey)) || {};
       const validTypes = new Set(mediaTypeOptions.map(([value]) => value));
       for (const [path, type] of Object.entries(saved)) {
-        if (typeof path === 'string' && validTypes.has(type)) types.set(path, type);
+        if (typeof path !== 'string' || !validTypes.has(type)) continue;
+        // A relative path (the Media Library's own key spelling) is kept as it
+        // is; an absolute or backslashed spelling from an earlier install is
+        // normalised, so both screens read one entry per file.
+        if (/^([a-z]:[\\/]|\\\\|\/\/|file:)/i.test(path)) {
+          const key = normalizeMediaPath(path);
+          if (key && !types.has(key)) types.set(key, type);
+        } else if (!types.has(path)) types.set(path, type);
       }
     } catch { }
     return types;

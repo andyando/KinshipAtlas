@@ -125,18 +125,30 @@
         }
       };
       await walk(state.mediaDirectoryHandle, '');
-      return core.groupDuplicates(files, { heroKeys: [...heroKeys], eventKeys: [...eventKeys] }).map((group) => ({
-        hash: group.hash,
-        bytes: group.bytes,
-        protected: group.protected,
-        files: group.files.map((file) => ({
-          relativePath: file.relativePath,
-          name: file.name,
-          size: file.size,
-          keeper: file.relativePath === group.keeper.relativePath,
-          file: entries.get(file.key)
+      // Who each file is linked to, so an identical file shared by several
+      // people can be told apart from one held by a single person.
+      const organised = core.computeMediaOrganiseState(state.gedcomRecords, mediaOrganisePersonDetails(), files, {
+        heroPicks: new Map(Object.entries(savedHeroPicks())),
+        softNamedFolders: mediaOrganiseSoftNamedFolders()
+      });
+      return {
+        mediaPath: '',
+        mediaFolder: state.mediaDirectoryHandle.name,
+        groups: core.groupDuplicates(files.map((file) => ({ ...file, personIds: organised.owners.get(file.key) || [] })), { heroKeys: [...heroKeys], eventKeys: [...eventKeys] }).map((group) => ({
+          hash: group.hash,
+          bytes: group.bytes,
+          protected: group.protected,
+          shared: group.files.every((file) => (file.personIds || []).length > 1),
+          files: group.files.map((file) => ({
+            relativePath: file.relativePath,
+            name: file.name,
+            folder: mediaFolderOf(file.relativePath),
+            size: file.size,
+            keeper: file.relativePath === group.keeper.relativePath,
+            file: entries.get(file.key)
+          }))
         }))
-      }));
+      };
     }
     const response = await fetch('/api/duplicates', {
       method: 'POST',
@@ -145,18 +157,39 @@
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || 'The local helper could not check the media folder for duplicates.');
-    return (body.groups || []).map((group) => ({
-      hash: group.hash,
-      bytes: group.bytes,
-      protected: group.protected,
-      files: (group.files || []).map((file) => ({
-        relativePath: file.relativePath,
-        name: file.name,
-        size: file.size,
-        keeper: file.keeper,
-        owners: (file.owners || []).map((id) => state.people.get(id)?.name).filter(Boolean)
+    return {
+      mediaPath: typeof body.mediaPath === 'string' ? body.mediaPath : (state.mediaHelper?.mediaPath || ''),
+      mediaFolder: typeof body.mediaFolder === 'string' ? body.mediaFolder : (state.mediaHelper?.folder || ''),
+      groups: (body.groups || []).map((group) => ({
+        hash: group.hash,
+        bytes: group.bytes,
+        protected: group.protected,
+        shared: group.shared,
+        files: (group.files || []).map((file) => ({
+          relativePath: file.relativePath,
+          name: file.name,
+          // Older helpers leave the folder out: read it from the relative path.
+          folder: typeof file.folder === 'string' ? file.folder : mediaFolderOf(file.relativePath),
+          size: file.size,
+          keeper: file.keeper,
+          owners: (file.owners || []).map((id) => state.people.get(id)?.name).filter(Boolean)
+        }))
       }))
-    }));
+    };
+  }
+
+  // How a file's folder reads in the list. The media folder's own folder is the
+  // root, which is only true for files left directly in it; an older helper may
+  // send the whole path, so the part after the media folder's name is used.
+  function duplicateFolderLabel(folder) {
+    let name = String(folder || '').replace(/\\/g, '/').trim();
+    const mediaFolder = state.mediaDirectoryHandle?.name || state.mediaHelper?.mediaFolder || state.mediaHelper?.folder || '';
+    if (mediaFolder && normalizeMediaPath(name).includes(normalizeMediaPath(`/${mediaFolder}/`))) {
+      const parts = name.split('/');
+      const index = parts.findIndex((part) => part.toLocaleLowerCase() === mediaFolder.toLocaleLowerCase());
+      if (index >= 0) name = parts.slice(index + 1).join('/');
+    }
+    return name || '(media folder root)';
   }
 
   // The tick box key for one copy.
@@ -237,6 +270,7 @@
 
   let duplicateGroups = [];
   let duplicateBusy = false;
+  let duplicateFolder = '';
   const duplicateSelected = new Set();
 
   function duplicateElements() {
@@ -245,13 +279,53 @@
       dialog,
       list: dialog.querySelector('#duplicateMediaList'),
       summary: dialog.querySelector('#duplicateMediaSummary'),
+      folder: dialog.querySelector('#duplicateMediaFolder'),
       status: dialog.querySelector('#duplicateMediaStatus'),
       archive: dialog.querySelector('#duplicateMediaArchive'),
       scan: dialog.querySelector('#duplicateMediaScanButton'),
+      selectAll: dialog.querySelector('#duplicateMediaSelectAll'),
       applyArchive: dialog.querySelector('#duplicateMediaArchiveButton'),
       applyDelete: dialog.querySelector('#duplicateMediaDeleteButton'),
       selected: dialog.querySelector('#duplicateMediaSelected')
     };
+  }
+
+  // Shows the media folder the scan read, as its full disk path when the local
+  // helper knows it, so every row's folder below can be placed.
+  function setDuplicateFolder(mediaPath, mediaFolder) {
+    const ui = duplicateElements();
+    const name = mediaFolder || state.mediaDirectoryHandle?.name || state.mediaHelper?.folder || '';
+    const path = mediaPath || state.mediaHelper?.mediaPath || (state.mediaDirectoryHandle ? '' : '');
+    duplicateFolder = path || name;
+    ui.folder.hidden = !duplicateFolder;
+    ui.folder.replaceChildren();
+    if (!duplicateFolder) return;
+    const label = document.createElement('span');
+    label.className = 'duplicate-media-folder-label';
+    label.textContent = 'Media folder checked';
+    const value = document.createElement('code');
+    value.textContent = duplicateFolder;
+    ui.folder.append(label, value);
+  }
+
+  // Every copy that may be ticked: the extras, not the kept files, and never a
+  // group held by a card image or life event.
+  function duplicateRemovableKeys() {
+    const keys = [];
+    for (const group of duplicateGroups) {
+      if (group.protected) continue;
+      for (const file of group.files) if (!file.keeper) keys.push(duplicateKey(group, file));
+    }
+    return keys;
+  }
+
+  function syncDuplicateSelectAll() {
+    const ui = duplicateElements();
+    const keys = duplicateRemovableKeys();
+    ui.selectAll.disabled = duplicateBusy || !keys.length;
+    const chosen = keys.filter((key) => duplicateSelected.has(key)).length;
+    ui.selectAll.checked = keys.length > 0 && chosen === keys.length;
+    ui.selectAll.indeterminate = chosen > 0 && chosen < keys.length;
   }
 
   // The spinning wheel and text while the scan or a removal runs.
@@ -277,13 +351,25 @@
     ui.selected.textContent = count ? `${count} cop${count === 1 ? 'y' : 'ies'} selected` : '';
     ui.applyDelete.disabled = duplicateBusy || !count;
     ui.applyArchive.disabled = duplicateBusy || !count;
+    syncDuplicateSelectAll();
+  }
+
+  // Select all / Deselect all: ticks every removable copy, or clears them all.
+  function toggleDuplicateSelectAll(select) {
+    duplicateSelected.clear();
+    if (select) for (const key of duplicateRemovableKeys()) duplicateSelected.add(key);
+    for (const box of duplicateElements().dialog.querySelectorAll('.duplicate-media-row input[type=checkbox]')) {
+      box.checked = duplicateSelected.has(box.dataset.duplicateKey);
+    }
+    syncDuplicateSelection();
   }
 
   function renderDuplicateGroups(groups) {
     const ui = duplicateElements();
     ui.list.replaceChildren();
     if (!groups.length) {
-      ui.summary.textContent = 'No duplicates found. Every file differs from the others.';
+      ui.summary.textContent = 'Scan complete: no duplicate images or PDFs found. Every file in the media folder differs from all the others.';
+      showToast('Scan complete: no duplicate images or PDFs found.');
       return;
     }
     const extraCopies = groups.reduce((total, group) => total + group.files.length - 1, 0);
@@ -302,6 +388,7 @@
         box.type = 'checkbox';
         box.disabled = Boolean(file.keeper) || group.protected;
         const selectionKey = duplicateKey(group, file);
+        box.dataset.duplicateKey = selectionKey;
         box.checked = duplicateSelected.has(selectionKey);
         box.addEventListener('change', () => {
           if (box.checked) duplicateSelected.add(selectionKey);
@@ -311,8 +398,14 @@
         row.append(box, duplicateThumbnail(file));
         const name = document.createElement('span');
         name.className = 'duplicate-media-name';
+        // The folder comes first: copies of one photo often share a file name,
+        // and the folder is what tells them apart when choosing a copy to keep.
+        const folderLabel = document.createElement('span');
+        folderLabel.className = 'duplicate-media-folder-name';
+        folderLabel.textContent = duplicateFolderLabel(file.folder);
         const link = document.createElement('a');
         link.href = '#';
+        link.className = 'duplicate-media-file-name';
         link.textContent = file.name || file.relativePath;
         link.title = `Open ${file.relativePath} in a new window`;
         link.addEventListener('click', async (event) => {
@@ -323,9 +416,8 @@
         });
         const detail = document.createElement('span');
         detail.className = 'duplicate-media-detail';
-        const where = file.relativePath.split('/').slice(0, -1).join('/');
-        detail.textContent = ` · ${where || 'media folder root'}${file.owners?.length ? ` · ${file.owners.join(', ')}` : ''}`;
-        name.append(link, detail);
+        detail.textContent = `${file.owners?.length ? ` · ${file.owners.join(', ')}` : ''}`;
+        name.append(folderLabel, document.createTextNode(' / '), link, detail);
         const keep = document.createElement('span');
         keep.className = 'duplicate-media-keep';
         keep.textContent = file.keeper ? 'Kept' : '';
@@ -347,11 +439,15 @@
     setButtonContent(ui.scan, 'scanFace', 'Scanning…');
     setDuplicateBusy(true);
     try {
-      duplicateGroups = await findDuplicateMedia();
+      setDuplicateBusy(true, 'Reading and hashing the media folder… this can take a while for large folders.');
+      const found = await findDuplicateMedia();
+      duplicateGroups = found.groups || [];
+      setDuplicateFolder(found.mediaPath, found.mediaFolder);
       renderDuplicateGroups(duplicateGroups);
     } catch (error) {
       duplicateGroups = [];
       ui.summary.textContent = error?.message || 'The media folder could not be checked for duplicates.';
+      showToast(error?.message || 'The media folder could not be checked for duplicates.');
     } finally {
       duplicateBusy = false;
       setDuplicateBusy(false);
@@ -435,6 +531,8 @@
     else if (!state.mediaDirectoryHandle && !state.mediaHelper?.findDuplicates) {
       ui.summary.textContent = 'Choose or link a media folder in this menu first. The local helper can also do this when it is running.';
     }
+    setDuplicateFolder('', '');
+    syncDuplicateSelection();
     showModalFocused(ui.dialog);
   }
 
@@ -446,5 +544,5 @@
     duplicateDialog.querySelector('#duplicateMediaScanButton').addEventListener('click', scanDuplicateMedia);
     duplicateDialog.querySelector('#duplicateMediaDeleteButton').addEventListener('click', () => applyDuplicateRemoval('delete'));
     duplicateDialog.querySelector('#duplicateMediaArchiveButton').addEventListener('click', () => applyDuplicateRemoval('archive'));
+    duplicateDialog.querySelector('#duplicateMediaSelectAll').addEventListener('change', (event) => toggleDuplicateSelectAll(event.target.checked));
   }
-})();

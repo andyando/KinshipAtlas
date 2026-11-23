@@ -1333,6 +1333,7 @@
     document.querySelector('#duplicateFinderMenuButton').disabled = true;
     document.querySelector('#mediaOrganiseMenuButton').disabled = true;
     document.querySelector('#duplicateMediaMenuButton').disabled = true;
+    document.querySelector('#orphanRecordsMenuButton').disabled = true;
     releaseMediaUrls(); state.mediaIndex = null; state.mediaFolderPicked = false;
     state.mediaRelativePaths = new WeakMap(); state.folderMediaFiles = new Map(); state.mediaDirectoryHandle = null; state.pendingUploadPersonId = null; state.pendingPortraitReplacement = null;
     syncMediaButton();
@@ -1634,7 +1635,18 @@
     if (applied) showToast(`Updated the classification of ${applied} item${applied === 1 ? '' : 's'}.`);
   });
   document.querySelector('#mediaLibrarySelectAllButton').addEventListener('click', () => {
-    for (const entry of visibleMediaLibraryEntries()) state.mediaLibrarySelected.add(entry.key);
+    // One button for both directions: when everything visible is already
+    // selected, clicking clears; otherwise it selects.
+    const entries = visibleMediaLibraryEntries();
+    const allSelected = entries.length > 0 && entries.every((entry) => state.mediaLibrarySelected.has(entry.key));
+    if (allSelected) {
+      for (const entry of entries) state.mediaLibrarySelected.delete(entry.key);
+    } else {
+      for (const entry of entries) state.mediaLibrarySelected.add(entry.key);
+    }
+    const button = document.querySelector('#mediaLibrarySelectAllButton');
+    button.dataset.pressed = String(!allSelected);
+    setButtonContent(button, 'list', 'Select/Deselect all');
     renderMediaLibrary();
   });
   document.querySelector('#mediaLibraryClearSelectionButton').addEventListener('click', () => {

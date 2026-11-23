@@ -1,0 +1,61 @@
+exit 0
+url        http://127.0.0.1:8811/
+http       200
+load       31315ms
+title      "Kinship Atlas"
+bodyChars  893
+patchright c:\Users\agand\.vscode\extensions\danielsanmedium.dscodegpt-3.24.84\standalone\
+browser    pinned Chromium  C:\Users\agand\AppData\Local\ms-playwright\chromium-1248\chrome-win64\chrome.exe
+text       LOCAL FAMILY ARCHIVE Kinship Atlas VIEW Tree View Map View Pedigree View Reports Media ON THIS DEVICE No tree loaded Media Folder Settings ▾ Help ▾ DIRECTORY Showing 0 / 0 people ⌕ / Birth country All
+script     [
+ {
+  "step": "tree",
+  "label": "Ancestry_01112026.ged"
+ },
+ {
+  "step": "duplicates",
+  "folderShown": "Media folder checkedG:\\Kinship Atlas - Copy\\tree-app\\Primary Media Library\\Ancestry_01112026_media",
+  "summary": "456 groups of identical files, 965 extra copies, 5 in use by a card image or life event so left alone.",
+  "folderLabels": [
+   "",
+   "",
+   "",
+   ""
+  ],
+  "rootLabels": 0
+ },
+ {
+  "step": "select-all",
+  "ticked": 957,
+  "selected": "957 copies selected",
+  "afterClear": 0
+ },
+ {
+  "step": "orphan-menu",
+  "disabled": false
+ },
+ {
+  "step": "orphans",
+  "status": "",
+  "summary": "71 people in this GEDCOM have no parent, child, spouse or sibling link.",
+  "rows": 71,
+  "names": [
+   "Albert Blum · @I653@ · born ABT 1858 · New York City, New York, USA · 2 events",
+   "Ann McDonald · @I915@ · Dundee, Scotland · 2 events",
+   "Ann McDonald · @I1553@ · 1 event",
+   "Ann Pinneger · @I1582@ · 1 event",
+   "Benjamin Waite · @I370@ · born ABT 1826 · Otley, Yorkshire, England · 3 events · 1 media"
+  ],
+  "selectAll": false
+ },
+ {
+  "step": "errors",
+  "errors": []
+ }
+]
+
+console errors/warnings (1):
+  [error] Failed to load resource: the server responded with a status of 404 (Not Found)
+
+requests failed (1):
+  HTTP 404 http://127.0.0.1:8811/launcher/kinship-atlas.ico

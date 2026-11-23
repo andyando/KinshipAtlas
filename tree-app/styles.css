@@ -1173,7 +1173,17 @@ a.life-event-media-thumb:hover, a.life-event-media-thumb:focus-visible { border-
 :root[data-theme="dark"] .media-organise-archive input { background: #101817; color: var(--ink); border-color: var(--line-strong); }
 :root[data-theme="dark"] .media-organise-line.is-warning { color: #e6b58a; }
 :root[data-theme="dark"] .media-organise-line.is-replace { color: #e0a678; }
+.duplicate-media-folder {
+  margin: 2px 0 8px; font-size: 12px; color: var(--ink-soft);
+  overflow-wrap: anywhere; font-family: inherit;
+}
+.duplicate-media-folder code { font-size: 12px; color: var(--ink); }
+.duplicate-media-folder-label { display: block; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; font-size: 11px; }
 .duplicate-media-group {
+  border: 1px solid var(--line); border-radius: 7px;
+.duplicate-media-select-all {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-soft);
+}
   border: 1px solid var(--line); border-radius: 7px;
   padding: 8px 10px; margin: 8px 0 10px;
 }
@@ -1191,9 +1201,12 @@ a.life-event-media-thumb:hover, a.life-event-media-thumb:focus-visible { border-
 .duplicate-media-name { overflow-wrap: anywhere; color: var(--ink); }
 .duplicate-media-name a { color: var(--green); text-decoration: none; }
 .duplicate-media-name a:hover { text-decoration: underline; }
+.duplicate-media-folder-name { color: var(--ink); font-weight: 600; }
+.duplicate-media-file-name { color: var(--ink-soft); }
 .duplicate-media-detail { font-size: 12px; color: var(--ink-soft); }
 .duplicate-media-keep { font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
 .media-organise-pending { font-size: 13px; color: var(--ink-soft); margin-right: auto; }
+.orphan-record-row { grid-template-columns: auto minmax(0, 1fr); }
 .media-organise-status {
   margin: 6px 0 0; min-height: 1.2em; font-size: 13px; color: var(--ink); flex-shrink: 0;
   display: flex; align-items: center; gap: 6px;
@@ -1203,6 +1216,13 @@ a.life-event-media-thumb:hover, a.life-event-media-thumb:focus-visible { border-
   margin-right: 0; color: var(--green);
 }
 .media-organise-list.is-busy { opacity: .55; transition: opacity .2s ease; }
+/* A completed group of tasks: a green tick before its heading. */
+.media-organise-done { display: flex; align-items: center; gap: 7px; color: var(--green); }
+.media-organise-tick { color: var(--green); font-weight: 700; }
+.media-organise-line.is-done-message { color: var(--green); font-weight: 600; }
+/* An unused subfolder row, with its delete button pushed to the right. */
+.media-organise-line.is-unused-folder { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.media-organise-folder-delete { padding: 3px 10px; font-size: 12px; }
 @media (prefers-reduced-motion: reduce) {
   .media-organise-spinner { animation-duration: 2s; }
 }

@@ -72,6 +72,17 @@
     return Boolean(state.mediaDirectoryHandle);
   }
 
+  // Every media path any person or family record names, on a FILE line or
+  // through an OBJE pointer. The subfolder check reads this when a folder is not
+  // open in the tab, so a folder keeping one linked file is never reported.
+  function mediaOrganiseLinkedPaths() {
+    const paths = [];
+    for (const entry of (globalThis.KinshipMediaOrganise?.readGedcomMedia(state.gedcomRecords) || { files: [] }).files) {
+      if (entry.path) paths.push(entry.path);
+    }
+    return paths;
+  }
+
   function mediaOrganiseRequest() {
     const request = {
       people: mediaOrganisePersonDetails(),
@@ -79,7 +90,8 @@
       archiveFolder: mediaOrganiseElements().archive.value.trim() || 'Archive',
       // GEDCOM paths from another copy of the tree are read against this folder.
       mediaFolderName: mediaFolderNameForTree(),
-      heroPicks: Object.fromEntries(savedHeroPicks())
+      heroPicks: Object.fromEntries(savedHeroPicks()),
+      linkedPaths: mediaOrganiseLinkedPaths()
     };
     // Kinship Atlas.exe reads the tree from its own GEDCOM, so its requests stay
     // small; other helpers are sent the records as well.
@@ -93,14 +105,31 @@
     return state.mediaDirectoryHandle?.name || state.mediaHelper?.mediaFolder || state.mediaHelper?.folder || '';
   }
 
-  async function scanMediaOrganiseWithFolder() {
+  // Every media file under the folder open in this tab, as { relativePath }.
+  async function collectMediaOrganiseFiles() {
     const core = mediaOrganiseHelpers();
-    const directoryHandle = state.mediaDirectoryHandle;
     const files = [];
     const walk = async (directory, prefix) => {
       for await (const [name, entry] of directory.entries()) {
         const relativePath = prefix ? `${prefix}/${name}` : name;
         if (entry.kind === 'directory') { await walk(entry, relativePath); continue; }
+        if (!core.isMediaFile(name)) continue;
+        files.push({ relativePath });
+      }
+    };
+    await walk(state.mediaDirectoryHandle, '');
+    return files;
+  }
+
+  async function scanMediaOrganiseWithFolder() {
+    const core = mediaOrganiseHelpers();
+    const directoryHandle = state.mediaDirectoryHandle;
+    const files = [];
+    const folders = [];
+    const walk = async (directory, prefix) => {
+      for await (const [name, entry] of directory.entries()) {
+        const relativePath = prefix ? `${prefix}/${name}` : name;
+        if (entry.kind === 'directory') { if (!prefix) folders.push(name); await walk(entry, relativePath); continue; }
         if (!core.isMediaFile(name)) continue;
         let size = 0;
         try { size = (await entry.getFile()).size; } catch { size = 0; }
@@ -114,9 +143,11 @@
       archiveFolder: request.archiveFolder,
       mediaFolderName: request.mediaFolderName,
       heroPicks: new Map(Object.entries(request.heroPicks)),
-      softNamedFolders: mediaOrganiseSoftNamedFolders()
+      softNamedFolders: mediaOrganiseSoftNamedFolders(),
+      linkedPaths: request.linkedPaths
     });
-    return { organised, plan: core.planMediaOrganise(organised) };
+    const unusedFolders = core.findUnusedFolders({ ...organised, archiveFolder: request.archiveFolder, folders });
+    return { organised, plan: core.planMediaOrganise(organised), unusedFolders };
   }
 
   async function scanMediaOrganiseWithHelper() {
@@ -127,17 +158,22 @@
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || 'The local helper could not read the media folder.');
+    // Older helpers do not look for unused subfolders.
+    if (!Array.isArray(body.unusedFolders)) body.unusedFolders = [];
     return body;
   }
 
   // Moves every file in the plan with the footer picker, one folder at a time.
   // The GEDCOM text is rewritten as it goes; what was written is reported back.
-  async function applyMediaOrganiseWithFolder(plan) {
+  async function applyMediaOrganiseWithFolder(plan, ambiguousNames) {
     const core = mediaOrganiseHelpers();
     const directoryHandle = state.mediaDirectoryHandle;
     const summary = { moved: 0, copied: 0, replaced: 0, archived: 0, failed: 0, missing: 0 };
     const renames = [];
     let gedcomText = state.gedcomText || serializeGedcomRecords(state.gedcomRecords);
+    // File names more than one media file shares: a FILE line naming such a
+    // name is only rewritten when it spells the exact path.
+    const ambiguous = ambiguousNames || new Set();
     for (const action of plan.actions) {
       const segments = action.toPath.split('/');
       try {
@@ -153,7 +189,7 @@
         await core.placeMediaFile(source, toDirectory, segments.at(-1));
         // A move or archive takes the file away; a copy leaves it in place.
         if (action.kind !== 'copy') await fromParent.removeEntry(fromName);
-        gedcomText = core.rewriteGedcomFile(gedcomText, action.fromPath, action.toPath);
+        gedcomText = core.rewriteGedcomFile(gedcomText, action.fromPath, action.toPath, { ambiguousNames: ambiguous });
         renames.push({ from: action.fromPath, to: action.toPath });
         summary[action.kind] += 1;
       } catch (error) {
@@ -214,6 +250,9 @@
   function openMediaOrganiseDialog() {
     const ui = mediaOrganiseElements();
     if (!ui.dialog || !ui.summary) return;
+    // The buttons carry icons wherever the dialog last left them.
+    setButtonContent(ui.apply, 'organise', 'Organise media files');
+    setButtonContent(ui.check, 'checkFolder', 'Check media folder');
     mediaOrganisePlanState = null;
     ui.list.replaceChildren();
     ui.archive.value = 'Archive';
@@ -231,17 +270,137 @@
 
   // A plan as the dialog shows it, whichever caller produced it.
   function mediaOrganisePlanOf(source) {
-    if (!source) return { actions: [], placements: [], copies: [], archives: [], warnings: [], counts: {} };
+    if (!source) return { actions: [], placements: [], copies: [], archives: [], warnings: [], unusedFolders: [], counts: {} };
     const actions = source.actions || [];
     const placements = source.placements || actions.filter((action) => action.kind === 'move' || action.kind === 'replace');
     const copies = source.copies || actions.filter((action) => action.kind === 'copy');
     const archives = source.archives || actions.filter((action) => action.kind === 'archive');
-    return { ...source, actions, placements, copies, archives, warnings: source.warnings || [] };
+    return { ...source, actions, placements, copies, archives, warnings: source.warnings || [], unusedFolders: source.unusedFolders || [] };
+  }
+
+  // A green tick before a heading, for a group of tasks that is already done.
+  function mediaOrganiseTick(title) {
+    const heading = document.createElement('h4');
+    heading.className = 'media-organise-done';
+    const tick = document.createElement('span');
+    tick.className = 'media-organise-tick';
+    tick.textContent = '✔';
+    tick.setAttribute('aria-hidden', 'true');
+    heading.append(tick, document.createTextNode(` ${title}`));
+    return heading;
+  }
+
+  // The list of empty subfolders the check found, with a delete button each and
+  // a delete-all button for the whole list.
+  function renderMediaOrganiseUnusedFolders(unusedFolders) {
+    const ui = mediaOrganiseElements();
+    if (!unusedFolders.length) return;
+    const heading = document.createElement('h4');
+    heading.textContent = `Empty subfolders (${unusedFolders.length})`;
+    const deleteAll = document.createElement('button');
+    deleteAll.type = 'button';
+    deleteAll.className = 'dialog-button dialog-button-danger media-organise-folder-delete';
+    deleteAll.textContent = `Delete all ${unusedFolders.length}`;
+    deleteAll.addEventListener('click', async () => {
+      const names = unusedFolders.map((item) => item.folder);
+      if (!window.confirm(`Delete all ${unusedFolders.length} empty subfolders?
+
+${names.slice(0, 20).join('\n')}${names.length > 20 ? `\n… and ${names.length - 20} more` : ''}
+
+This cannot be undone.`)) return;
+      deleteAll.disabled = true;
+      // Delete every listed folder with no per-folder confirmation: the single
+      // confirmation above covers them all.
+      let deleted = 0;
+      let failed = 0;
+      const list = ui.list;
+      for (const item of unusedFolders) {
+        try {
+          if (mediaOrganiseUsesFolder()) {
+            await deleteMediaOrganiseFolderWithHandles(item);
+          } else {
+            const response = await fetch('/api/media-organise', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ...mediaOrganiseRequest(), deleteFolder: item.folder })
+            });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(body.error || 'The folder could not be deleted.');
+          }
+          deleted += 1;
+          ui.status.textContent = `Deleting… ${deleted}/${unusedFolders.length}`;
+        } catch { failed += 1; }
+      }
+      if (mediaOrganisePlanState) mediaOrganisePlanState.unusedFolders = [];
+      list.replaceChildren();
+      ui.summary.textContent = failed
+        ? `${deleted} of ${unusedFolders.length} empty subfolders deleted; ${failed} could not be removed.`
+        : `All ${deleted} empty subfolders deleted.`;
+    });
+    deleteAll.classList.add('media-organise-folder-delete-all');
+    heading.append(' ', deleteAll);
+    ui.list.append(heading);
+    for (const item of unusedFolders.slice(0, 80)) {
+      const row = document.createElement('p');
+      row.className = 'media-organise-line is-unused-folder';
+      const name = document.createElement('span');
+      name.textContent = item.folder;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'dialog-button dialog-button-danger media-organise-folder-delete';
+      button.textContent = 'Delete folder';
+      button.addEventListener('click', () => deleteMediaOrganiseFolder(item, button));
+      row.append(name, button);
+      ui.list.append(row);
+    }
+    if (unusedFolders.length > 80) ui.list.append(mediaOrganiseLine(`… and ${unusedFolders.length - 80} more (delete them with the button above once the first ones are gone).`, 'is-more'));
+  }
+
+  // Deletes one empty subfolder, then reports back.
+  async function deleteMediaOrganiseFolder(item, button) {
+    const ui = mediaOrganiseElements();
+    if (!window.confirm(`Delete the empty subfolder "${item.folder}"?\n\nThis cannot be undone.`)) return;
+    button.disabled = true;
+    try {
+      let summary;
+      if (mediaOrganiseUsesFolder()) {
+        summary = await deleteMediaOrganiseFolderWithHandles(item);
+      } else {
+        const response = await fetch('/api/media-organise', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...mediaOrganiseRequest(), deleteFolder: item.folder })
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || 'The local helper could not delete the folder.');
+        summary = body.folderDelete || {};
+      }
+      button.closest('.media-organise-line')?.remove();
+      if (mediaOrganisePlanState) {
+        mediaOrganisePlanState.unusedFolders = mediaOrganisePlanState.unusedFolders.filter((entry) => entry.folder !== item.folder);
+      }
+      ui.status.textContent = `"${item.folder}" deleted.`;
+    } catch (error) {
+      button.disabled = false;
+      ui.status.textContent = error?.message || 'The folder could not be deleted.';
+    }
+  }
+
+  // Deletes an empty subfolder through the folder handle open in this tab.
+  async function deleteMediaOrganiseFolderWithHandles(item) {
+    const directoryHandle = state.mediaDirectoryHandle;
+    const segments = String(item.folder || '').split('/').filter(Boolean);
+    if (!segments.length || segments.some((segment) => segment === '.' || segment === '..')) throw new Error('The folder could not be used.');
+    let parent = directoryHandle;
+    for (const segment of segments.slice(0, -1)) parent = await parent.getDirectoryHandle(segment);
+    try { await parent.removeEntry(segments.at(-1)); } catch { return { removed: 0, failed: 1 }; }
+    return { removed: 1, failed: 0 };
   }
 
   function renderMediaOrganisePlan(planState) {
     const ui = mediaOrganiseElements();
     const plan = mediaOrganisePlanOf(planState);
+    const unusedFolders = plan.unusedFolders || [];
     const parts = [];
     const moved = plan.placements.filter((action) => action.kind === 'move').length;
     const replaced = plan.placements.filter((action) => action.kind === 'replace').length;
@@ -249,19 +408,37 @@
     if (replaced) parts.push(`${mediaOrganiseCount(replaced, 'same-named file')} to replace`);
     if (plan.copies.length) parts.push(`${mediaOrganiseCount(plan.copies.length, 'shared file')} to copy`);
     if (plan.archives.length) parts.push(`${mediaOrganiseCount(plan.archives.length, 'unlinked file')} to archive`);
+    if (unusedFolders.length) parts.push(`${mediaOrganiseCount(unusedFolders.length, 'empty subfolder')} to delete`);
     const folders = new Set(plan.actions.map((action) => action.toFolder).filter(Boolean));
     if (folders.size) parts.push(`${mediaOrganiseCount(folders.size, 'folder')} in use`);
-    ui.summary.textContent = parts.length
-      ? `${parts.join(' · ')}.`
-      : 'Every linked file is already stored in its person\'s folder.';
+    // No new organise actions: the check found only completed work and unused
+    // subfolders, so the page says so at the top.
+    if (!parts.length) {
+      ui.summary.textContent = unusedFolders.length
+        ? `No new organise actions to be performed. ${mediaOrganiseCount(unusedFolders.length, 'empty subfolder')} can be deleted below.`
+        : 'No new organise actions to be performed. Every linked file is already stored in its person\'s folder.';
+    } else {
+      ui.summary.textContent = `${parts.join(' · ')}.`;
+    }
     ui.list.replaceChildren();
-    const groups = [
-      ['Shared files (a copy is made for each person)', plan.copies],
-      ['Linked files moved into person folders', plan.placements],
-      ['Unlinked files moved to the archive folder', plan.archives]
-    ];
-    for (const [title, actions] of groups) {
-      if (!actions.length) continue;
+    // Unactioned tasks come first; completed groups follow with a green tick.
+    const pending = [];
+    const done = [];
+    if (plan.copies.length) pending.push(['Shared files (a copy is made for each person)', plan.copies, false]);
+    if (moved || replaced) pending.push(['Linked files moved into person folders', plan.placements, false]);
+    if (plan.archives.length) pending.push(['Unlinked files moved to the archive folder', plan.archives, false]);
+    // A group the plan does not act on is one that is already done: the files
+    // are already where they belong, so the heading gets a green tick.
+    if (!moved && !replaced && plan.placements.length) done.push('Linked files moved into person folders');
+    if (!plan.archives.length && (plan.actions.length || unusedFolders.length)) done.push('Unlinked files moved to the archive folder');
+    for (const title of done) {
+      ui.list.append(mediaOrganiseTick(title));
+    }
+    if (!plan.actions.length) {
+      const message = mediaOrganiseLine('No new organise actions to be performed', 'is-done-message');
+      ui.list.insertBefore(message, ui.list.firstChild);
+    }
+    for (const [title, actions] of pending) {
       const heading = document.createElement('h4');
       heading.textContent = `${title} (${actions.length})`;
       ui.list.append(heading);
@@ -271,6 +448,7 @@
       }
       if (actions.length > shown.length) ui.list.append(mediaOrganiseLine(`… and ${actions.length - shown.length} more.`, 'is-more'));
     }
+    renderMediaOrganiseUnusedFolders(unusedFolders);
     for (const warning of plan.warnings) {
       ui.list.append(mediaOrganiseLine(warning.message, warning.kind === 'missing' || warning.kind === 'unsupported' ? 'is-warning' : ''));
     }
@@ -308,8 +486,8 @@
     try {
       if (mediaOrganiseUsesFolder()) {
         const scanned = await scanMediaOrganiseWithFolder();
-        mediaOrganisePlanState = scanned.plan;
-        renderMediaOrganisePlan(scanned.plan);
+        mediaOrganisePlanState = { ...scanned.plan, unusedFolders: scanned.unusedFolders || [] };
+        renderMediaOrganisePlan(mediaOrganisePlanState);
       } else {
         const body = await scanMediaOrganiseWithHelper();
         mediaOrganisePlanState = mediaOrganisePlanOf(body.plan);
@@ -326,6 +504,19 @@
     }
   }
 
+  // File names more than one media file shares, for the rewrite guards. Read
+  // from the folder open in the tab when it is, else from the media index.
+  async function mediaOrganiseAmbiguousNames() {
+    const core = mediaOrganiseHelpers();
+    const files = mediaOrganiseUsesFolder() ? await collectMediaOrganiseFiles() : [];
+    if (!files.length && state.mediaIndex) {
+      for (const filesOfName of state.mediaIndex.byName.values()) {
+        for (const file of filesOfName) files.push({ relativePath: state.mediaRelativePaths.get(file) || file.name });
+      }
+    }
+    return core.computeMediaOrganiseState(state.gedcomRecords, mediaOrganisePersonDetails(), files, {}).ambiguousNames || new Set();
+  }
+
   async function applyMediaOrganise() {
     const ui = mediaOrganiseElements();
     if (!mediaOrganisePlanState || mediaOrganiseBusy) return;
@@ -335,7 +526,8 @@
     ui.check.disabled = true;
     setMediaOrganiseStatus('Organising media files…');
     try {
-      const result = folderMode ? await applyMediaOrganiseWithFolder(mediaOrganisePlanState) : await applyMediaOrganiseWithHelper();
+      const ambiguousNames = await mediaOrganiseAmbiguousNames();
+      const result = folderMode ? await applyMediaOrganiseWithFolder(mediaOrganisePlanState, ambiguousNames) : await applyMediaOrganiseWithHelper();
       // The GEDCOM now points at the files' new places.
       const nextText = result.gedcomText || '';
       if (nextText && nextText !== (state.gedcomText || serializeGedcomRecords(state.gedcomRecords))) {
@@ -346,6 +538,23 @@
       }
       // Card images follow the files they were picked from.
       applyMediaOrganiseHeroRenames(result.renames || []);
+      // Every FILE line naming a media file of this folder ends up pointing at
+      // its place here, however it spelled the path before (an old install's
+      // absolute path, a folder since renamed).
+      if (folderMode) {
+        const core = mediaOrganiseHelpers();
+        const repointed = core.repointGedcomFiles(
+          state.gedcomText || serializeGedcomRecords(state.gedcomRecords),
+          await collectMediaOrganiseFiles(),
+          { mediaFolderName: mediaFolderNameForTree(), archiveFolder: mediaOrganiseElements().archive.value.trim() || 'Archive' }
+        );
+        if (repointed !== (state.gedcomText || serializeGedcomRecords(state.gedcomRecords))) {
+          state.gedcomText = repointed;
+          state.gedcomRecords = splitGedcomRecords(repointed);
+          reparseGedcomRecords();
+          markGedcomDirty();
+        }
+      }
       savePrimaryMedia();
       saveAdditionalMedia();
       // Re-read the media folder so previews, links and the Media Library show the new paths.

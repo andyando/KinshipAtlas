@@ -10,9 +10,11 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const core = require('./media-organise.js');
 
-// Every image or PDF under the media folder, as { relativePath, size }.
+// Every image or PDF under the media folder, as { relativePath, size }, plus
+// the top-level subfolders it holds.
 function listMediaFiles(mediaDir) {
   const files = [];
+  const folders = new Set();
   const walk = (directory, prefix) => {
     let entries;
     try {
@@ -23,6 +25,7 @@ function listMediaFiles(mediaDir) {
     for (const entry of entries) {
       const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
       if (entry.isDirectory()) {
+        if (!prefix) folders.add(entry.name);
         walk(path.join(directory, entry.name), relativePath);
         continue;
       }
@@ -33,6 +36,7 @@ function listMediaFiles(mediaDir) {
     }
   };
   walk(mediaDir, '');
+  files.folders = [...folders].sort((left, right) => left.localeCompare(right));
   return files;
 }
 
@@ -94,7 +98,8 @@ function planFor(mediaDir, request) {
     files,
     { gedcomText: typeof request.gedcomText === 'string' ? request.gedcomText : '', archiveFolder: request.archiveFolder || core.ARCHIVE_FOLDER, heroPicks }
   );
-  return { state, plan: core.planMediaOrganise(state) };
+  const unusedFolders = core.findUnusedFolders({ archiveFolder: request.archiveFolder || core.ARCHIVE_FOLDER, folders: files.folders, files });
+  return { state, plan: core.planMediaOrganise(state), unusedFolders };
 }
 
 // Carries out a plan and returns the GEDCOM with every moved file pointed at its
@@ -196,12 +201,14 @@ async function findDuplicates(mediaDir, request) {
     protected: group.protected,
     files: group.files.map((file) => ({
       relativePath: file.relativePath, name: file.name || core.mediaFileName(file.relativePath),
+      folder: core.mediaFolderOf(file.relativePath),
       size: file.size, hash: file.hash, keeper: file.relativePath === group.keeper.relativePath,
       owners: [...new Set([...(linkPaths.get(file.key) || []), ...(file.personIds || [])])]
     }))
   }));
   const examined = hashed.length;
-  return { groups: found, examined, files: files.length };
+  // The folder that was checked, so the dialog can name it.
+  return { groups: found, examined, files: files.length, mediaPath: path.resolve(mediaDir), mediaFolder: path.basename(mediaDir) };
 }
 
 // The media paths attached to a life event: a FILE line inside a BIRT, DEAT,
@@ -270,4 +277,27 @@ async function applyDuplicates(mediaDir, request) {
   return { gedcomText, removed, failed };
 }
 
-module.exports = { listMediaFiles, safeRelative, placeFile, planFor, applyPlan, findDuplicates, applyDuplicates, eventMediaPaths, hashFile };
+// Deletes one empty subfolder. The page only asks this for a folder the check
+// found nothing in; the delete refuses a folder that still holds files.
+function deleteFolder(mediaDir, folder) {
+  const relative = safeRelative(folder);
+  if (!relative) throw new Error('The folder could not be used.');
+  const full = absolute(mediaDir, relative);
+  if (!full || !fs.existsSync(full)) throw new Error('The folder is no longer in the media folder.');
+  const remaining = fs.readdirSync(full);
+  if (remaining.length) throw new Error('The folder is no longer empty, so it was left alone.');
+  fs.rmdirSync(full);
+  return { removed: 1, failed: 0 };
+}
+
+// Points every FILE line that names a media file of the folder at the file's
+// place there, however the line spells the path. Used after a plan has run, so
+// links written by an earlier install end up pointing at this media folder too.
+function repoint(mediaDir, gedcomText, files, request = {}) {
+  return core.repointGedcomFiles(gedcomText, files, {
+    mediaFolderName: typeof request.mediaFolderName === 'string' ? request.mediaFolderName : path.basename(mediaDir),
+    archiveFolder: request.archiveFolder || core.ARCHIVE_FOLDER
+  });
+}
+
+module.exports = { listMediaFiles, safeRelative, placeFile, planFor, applyPlan, findDuplicates, applyDuplicates, eventMediaPaths, hashFile, deleteFolder, repoint };

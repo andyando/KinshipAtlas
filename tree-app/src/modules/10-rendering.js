@@ -55,6 +55,7 @@
     document.querySelector('#duplicateRelationMenuButton').disabled = false;
     document.querySelector('#mediaOrganiseMenuButton').disabled = false;
     document.querySelector('#duplicateMediaMenuButton').disabled = false;
+    document.querySelector('#orphanRecordsMenuButton').disabled = false;
     elements.printMapButton.disabled = false;
     elements.showSiblings.disabled = false;
     document.querySelector('#openGedcomLabel').hidden = true;
@@ -2029,7 +2030,14 @@
   // Applies one classification to every selected media item, then redraws once.
   function applyBulkMediaClassification(entries, value) {
     if (!value || !entries.length) return 0;
-    for (const entry of entries) state.mediaTypes.set(entry.key, value);
+    for (const entry of entries) {
+      // One entry may have earlier aliases (an old path spelling); they all
+      // collapse onto the entry's own key so no screen shows a stale type.
+      for (const alias of entry.aliases || new Set([entry.key])) {
+        if (alias !== entry.key) state.mediaTypes.delete(alias);
+      }
+      state.mediaTypes.set(entry.key, value);
+    }
     const saved = saveMediaTypes();
     void syncMediaSelections();
     renderMediaLibrary();
@@ -2433,6 +2441,12 @@
     const bulkType = document.querySelector('#mediaLibraryBulkType');
     if (bulkApply) bulkApply.disabled = !state.mediaLibrarySelected.size || !bulkType.value;
     document.querySelector('#mediaLibrarySelectAllButton').disabled = !entries.length;
+    // Keep the toggle button painted with its icon and pressed state after redraws.
+    const selectAllButton = document.querySelector('#mediaLibrarySelectAllButton');
+    if (selectAllButton && typeof setButtonContent === 'function') {
+      setButtonContent(selectAllButton, 'list', 'Select/Deselect all');
+      selectAllButton.setAttribute('aria-pressed', selectAllButton.dataset.pressed === 'true' ? 'true' : 'false');
+    }
     for (const pager of elements.mediaLibraryView.querySelectorAll('.media-library-pagination')) {
       pager.hidden = pageCount <= 1;
       pager.querySelector('[data-media-page="-1"]').disabled = state.mediaLibraryPage === 0;
@@ -3028,8 +3042,13 @@
     trash: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M9 7V4h6v3"/>',
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 7.5v.5"/>',
     sliders: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
+    list: '<path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/>',
     scanFace: '<path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><circle cx="9" cy="10" r=".7"/><circle cx="15" cy="10" r=".7"/><path d="M8.5 14.5c1.9 2 5.1 2 7 0"/>',
     folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+    // Organise media files: a folder with an arrow going into it.
+    organise: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 13h6M12 10l3 3-3 3"/>',
+    // Check media folder: a magnifier over a folder.
+    checkFolder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="11" cy="12" r="2.5"/><path d="M13 14l3 3"/>',
     book: '<path d="M4 5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2z"/><path d="M4 20a2 2 0 0 0 2 1h13v-3"/><path d="M9 8h6"/>',
     // Birth: a baby — round head with a hair curl, smile, and a swaddled body below.
     birth: '<circle cx="12" cy="8" r="4"/><path d="M12 4c.3-1.3 1.9-1.3 2-.1"/><path d="M10.8 9.4c.7.6 1.7.6 2.4 0"/><path d="M8 21v-2a4 4 0 0 1 8 0v2"/>',

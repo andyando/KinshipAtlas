@@ -5,7 +5,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFile } = require('node:child_process');
-const { planFor, applyPlan, findDuplicates, applyDuplicates } = require('./helpers/media-organise-fs.js');
+const { listMediaFiles, planFor, applyPlan, findDuplicates, applyDuplicates, deleteFolder, repoint } = require('./helpers/media-organise-fs.js');
 
 let mediaDir = path.resolve(process.argv[2] || process.env.MEDIA_DIR || '');
 const port = Number(process.argv[3] || process.env.PORT || 8765);
@@ -305,22 +305,35 @@ function receiveMediaOrganise(request, response) {
     } catch {
       return send(response, 500, { error: 'The media folder could not be read.' });
     }
-    const { state, plan } = planned;
+    const { state, plan, unusedFolders } = planned;
+    // Deleting one unused subfolder the plan reported.
+    if (typeof body.deleteFolder === 'string' && body.deleteFolder) {
+      try {
+        const folderDelete = deleteFolder(mediaDir, body.deleteFolder);
+        return send(response, 200, { ok: true, folderDelete, gedcomText: state.gedcomText });
+      } catch (error) {
+        return send(response, 500, { error: error?.message || 'The folder could not be deleted.' });
+      }
+    }
     if (body.apply !== true) {
       return send(response, 200, {
-        ok: true, plan: { counts: plan.counts, actions: plan.actions, warnings: plan.warnings }, gedcomText: state.gedcomText
+        ok: true, plan: { counts: plan.counts, actions: plan.actions, warnings: plan.warnings }, unusedFolders, gedcomText: state.gedcomText
       });
     }
     try {
       const result = applyPlan(mediaDir, state, plan);
+      // Every FILE line naming a media file of this folder ends up pointing at
+      // its place here, however it spelled the path before.
+      const repointed = repoint(mediaDir, result.gedcomText, listMediaFiles(mediaDir), body);
       return send(response, 200, {
         ok: true,
         plan: { counts: plan.counts, actions: plan.actions, warnings: plan.warnings },
+        unusedFolders,
         moves: result.moves,
         renames: result.renames,
         summary: result.counts,
         unsupported: state.unsupported,
-        gedcomText: result.gedcomText
+        gedcomText: repointed
       });
     } catch {
       return send(response, 500, { error: 'The media folder could not be organised. Some files may already have moved.' });

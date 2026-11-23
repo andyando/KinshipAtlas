@@ -73,6 +73,10 @@
             <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="3" width="12" height="15" rx="1.5"/><path d="M10 21H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1h3"/><path d="M15 8h-4M15 12h-4"/></svg>
             Find duplicate images
           </button>
+          <button id="orphanRecordsMenuButton" class="menu-item" type="button" role="menuitem" disabled title="List people with no parents, children, spouses or siblings, and remove the ones you choose">
+            <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="9" cy="9" r="3.2"/><path d="M4 20v-1.2a5 5 0 0 1 10 0V20"/><path d="M16 6h5M16 6l3-3M16 6l3 3" stroke-dasharray="2 2"/></svg>
+            Orphan records
+          </button>
           <button id="birthCountryMenuButton" class="menu-item" type="button" role="menuitem" disabled title="List people whose birth place does not identify a country, and fix them">People without a birth country</button>
           <button id="duplicateFinderMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Find people who may have been entered more than once">Find duplicate people</button>
           <button id="duplicateRelationMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Remove people connected more than once to the same parent or spouse">
@@ -249,7 +253,7 @@
       </div>
     </div>
     <div class="media-library-bulk">
-      <button id="mediaLibrarySelectAllButton" class="button button-secondary" type="button">Select all matches</button>
+      <button id="mediaLibrarySelectAllButton" class="button button-secondary" type="button" data-pressed="false">Select/Deselect all</button>
       <button id="mediaLibraryClearSelectionButton" class="button button-quiet" type="button">Clear selection</button>
       <label class="media-library-filter" for="mediaLibraryBulkType">Classify selected as
         <select id="mediaLibraryBulkType"><option value="">Choose a class…</option></select>
@@ -511,6 +515,8 @@
               <li>A file already stored under the right name is left where it is, so running the check twice changes nothing.</li>
             </ul>
             <p>The archive folder name can be changed before organising. The same command is available from a terminal without the app: <code>node helpers/media-organise-cli.mjs "&lt;media folder&gt;" "&lt;gedcom file&gt;" --apply</code>.</p>
+            <h4>Orphan records</h4>
+            <p><strong>Settings &gt; Orphan records</strong> lists people with no parent, child, spouse or sibling link, so they appear on no other person's card. Choose <strong>Scan for orphans</strong>, tick the records you mean to remove (or <strong>Select all</strong>), then <strong>Delete selected records</strong>. Deleting removes each person's record and life events; sources and media files are kept. A person who turns out to be linked after all is left alone.</p>
             <h4>Find duplicate images</h4>
             <p><strong>Settings &gt; Find duplicate images</strong> compares the contents of every image and PDF in the media folder and lists exact copies, however they are named. Thumbnails and PDF links let you open each file before choosing.</p>
             <ul>
@@ -889,6 +895,7 @@
     <section class="dialog-panel">
       <h2 id="duplicateMediaTitle">Find duplicate images</h2>
       <p id="duplicateMediaSummary">Looks for exact copies (the same bytes, any file name) among the images and PDFs in the media folder.</p>
+      <p id="duplicateMediaFolder" class="duplicate-media-folder" hidden></p>
       <p class="dialog-hint">A file used as a card image or attached to a life event is never offered, and neither are the other copies in its group. The kept file stays linked; the removed files are unlinked from every person record.</p>
       <label class="media-organise-archive" for="duplicateMediaArchive">Archive folder
         <input id="duplicateMediaArchive" type="text" value="Archive" maxlength="60" autocomplete="off" spellcheck="false">
@@ -896,11 +903,28 @@
       <div id="duplicateMediaList" class="media-organise-list" aria-live="polite"></div>
       <p id="duplicateMediaStatus" class="media-organise-status" role="status"></p>
       <div class="dialog-actions">
+        <label class="duplicate-media-select-all" for="duplicateMediaSelectAll"><input id="duplicateMediaSelectAll" type="checkbox" disabled> Select all duplicates</label>
         <span id="duplicateMediaSelected" class="media-organise-pending"></span>
         <button id="duplicateMediaArchiveButton" class="dialog-button" type="button" disabled>Move selected to archive</button>
         <button id="duplicateMediaDeleteButton" class="dialog-button dialog-button-danger" type="button" disabled>Delete selected</button>
         <button id="duplicateMediaScanButton" class="dialog-button dialog-button-primary" type="button">Scan for duplicates</button>
         <button id="closeDuplicateMedia" class="dialog-button dialog-button-quiet" type="button">Close</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="orphanRecordsDialog" class="app-dialog media-organise-dialog" aria-labelledby="orphanRecordsTitle">
+    <section class="dialog-panel">
+      <h2 id="orphanRecordsTitle">Orphan records</h2>
+      <p id="orphanRecordsSummary">People in this GEDCOM with no parent, child, spouse or sibling link.</p>
+      <p class="dialog-hint">An orphan record is not connected to anyone else in the tree: it appears on no person's card and in no relationship view. Deleting a record also removes its life events and the now-empty family records around it; sources and media files are kept.</p>
+      <div id="orphanRecordsList" class="media-organise-list" aria-live="polite"></div>
+      <p id="orphanRecordsStatus" class="media-organise-status" role="status"></p>
+      <div class="dialog-actions">
+        <label class="duplicate-media-select-all" for="orphanRecordsSelectAll"><input id="orphanRecordsSelectAll" type="checkbox" disabled> Select all</label>
+        <span id="orphanRecordsSelected" class="media-organise-pending"></span>
+        <button id="orphanRecordsDeleteButton" class="dialog-button dialog-button-danger" type="button" disabled>Delete selected records</button>
+        <button id="orphanRecordsScanButton" class="dialog-button dialog-button-primary" type="button">Scan for orphans</button>
+        <button id="closeOrphanRecords" class="dialog-button dialog-button-quiet" type="button">Close</button>
       </div>
     </section>
   </dialog>

@@ -492,6 +492,12 @@
 
     const unsupported = [...new Set(read.files.filter((entry) => entry.path && !isGedcomFileReference(entry.path) && !knownKey(entry.path)
       && /^([a-z]:[\\/]|\\\\|\/\/|file:)/i.test(entry.path)).map((entry) => entry.path))];
+    // File names more than one media file shares. A FILE line naming such a
+    // name is only rewritten when it spells the exact path, so a move never
+    // repoints a line at another person's copy of the same-named file.
+    const nameCounts = new Map();
+    for (const entry of entries.values()) nameCounts.set(entry.name.toLocaleLowerCase(), (nameCounts.get(entry.name.toLocaleLowerCase()) || 0) + 1);
+    const ambiguousNames = new Set([...nameCounts].filter(([, count]) => count > 1).map(([name]) => name));
     const text = typeof options.gedcomText === 'string'
       ? options.gedcomText
       : (records || []).map((record) => record.lines.join('\n')).join('\n\n');
@@ -508,7 +514,8 @@
       stamp,
       gedcomText: text,
       folders: [...new Set(actions.map((action) => action.toFolder).filter(Boolean))],
-      personFolder: folderFor
+      personFolder: folderFor,
+      ambiguousNames
     };
   }
 
@@ -565,11 +572,16 @@
 
   // Points one FILE path at its new location. A GEDCOM line may use \ or /, may
   // quote the path, and may name only the file without its folder; all of these
-  // are matched case-insensitively. Line endings are kept as they are.
-  function rewriteGedcomFile(gedcomText, oldPath, newPath) {
+  // are matched case-insensitively. When the file's name is unique in the media
+  // folder, a line naming that name names this file, whatever folder it spells
+  // (an old install's absolute path, a folder since renamed) - otherwise only
+  // the exact path matches, so another person's copy is never repointed. Line
+  // endings are kept as they are.
+  function rewriteGedcomFile(gedcomText, oldPath, newPath, options = {}) {
     const from = normalizeMediaPath(oldPath);
     if (!from) return gedcomText;
     const fileName = mediaFileName(oldPath).toLocaleLowerCase();
+    const byName = !(options.ambiguousNames || new Set()).has(fileName);
     const replacement = splitMediaPath(newPath);
     let changed = false;
     const lines = String(gedcomText || '').split('\n');
@@ -580,8 +592,54 @@
       const value = match[2].trim();
       const quoted = /^".*"$/.test(value);
       const key = normalizeMediaPath(quoted ? value.slice(1, -1) : value);
-      if (key !== from && key !== fileName) continue;
+      if (key !== from && !(byName && mediaFileName(key) === fileName)) continue;
       lines[index] = `${match[1]}${quoted ? `"${replacement}"` : replacement}${carriageReturn}`;
+      changed = true;
+    }
+    return changed ? lines.join('\n') : gedcomText;
+  }
+
+  // Points every FILE line that names a media file of the media folder at the
+  // file's place there, however the line spells the path - an old install's
+  // absolute path, a folder since renamed, a bare file name. A line is only
+  // rewritten when its file is found unambiguously: the exact relative path,
+  // the path after the media folder's name, or a file name only one file has.
+  // Files in the archive folder are never targets, so a link is never pointed
+  // at an archived copy.
+  function repointGedcomFiles(gedcomText, files, options = {}) {
+    const mediaFolderName = String(options.mediaFolderName || '');
+    const archiveFolder = options.archiveFolder || ARCHIVE_FOLDER;
+    const entries = fileMap(files);
+    const byName = new Map();
+    for (const entry of entries.values()) {
+      if (isArchiveFolderName(entry.folder, archiveFolder)) continue;
+      const name = entry.name.toLocaleLowerCase();
+      if (!byName.has(name)) byName.set(name, []);
+      byName.get(name).push(entry.relativePath.toLocaleLowerCase());
+    }
+    const inArchive = (key) => isArchiveFolderName(entries.get(key)?.folder, archiveFolder);
+    const resolve = (path) => {
+      const key = normalizeMediaPath(path);
+      if (entries.has(key) && !inArchive(key)) return key;
+      const relative = normalizeMediaPath(mediaRelativeReference(path, mediaFolderName));
+      if (relative !== key && entries.has(relative) && !inArchive(relative)) return relative;
+      const named = mediaFileName(key || relative).toLocaleLowerCase();
+      const candidates = (byName.get(named) || []).filter((candidate) => !inArchive(candidate));
+      return candidates.length === 1 ? candidates[0] : '';
+    };
+    let changed = false;
+    const lines = String(gedcomText || '').split('\n');
+    for (let index = 0; index < lines.length; index += 1) {
+      const carriageReturn = lines[index].endsWith('\r') ? '\r' : '';
+      const match = /^(\d+\s+FILE\s+)(.*)$/.exec(lines[index].replace(/\r$/, ''));
+      if (!match) continue;
+      const value = match[2].trim();
+      if (!value || isGedcomFileReference(value)) continue;
+      const target = resolve(value);
+      if (!target || normalizeMediaPath(value) === target) continue;
+      const found = entries.get(target);
+      if (!found) continue;
+      lines[index] = `${match[1]}${found.relativePath}${carriageReturn}`;
       changed = true;
     }
     return changed ? lines.join('\n') : gedcomText;
@@ -603,6 +661,38 @@
     await writable.write(blob);
     await writable.close();
     return { reused: false };
+  }
+
+  // True when a folder is the archive folder or one of its known aliases.
+  function isArchiveFolderName(folder, archiveFolder = ARCHIVE_FOLDER) {
+    const top = normalizeMediaPath(folder).split('/')[0];
+    return Boolean(top) && (top === normalizeMediaPath(archiveFolder).split('/')[0] || ARCHIVE_FOLDER_ALIASES.includes(top));
+  }
+
+  // Subfolders of the media folder that hold no files at all, so they can be
+  // deleted. `state.folders` lists every subfolder's relative path and
+  // `state.files` every media file; a top-level folder is reported when no file
+  // sits anywhere inside it. The archive folder and its aliases are never
+  // reported, and a folder with any file in it is never reported.
+  function findUnusedFolders(state) {
+    const tops = new Set();
+    for (const folder of state.folders || []) {
+      const top = normalizeMediaPath(folder).split('/')[0];
+      if (top) tops.add(top);
+    }
+    const occupied = new Set();
+    for (const file of state.files || []) {
+      const top = normalizeMediaPath(mediaFolderOf(file.relativePath)).split('/')[0];
+      if (top) occupied.add(top);
+    }
+    const archiveFolder = state.archiveFolder || ARCHIVE_FOLDER;
+    const unused = [];
+    for (const top of tops) {
+      if (occupied.has(top) || isArchiveFolderName(top, archiveFolder)) continue;
+      unused.push({ folder: top, files: [] });
+    }
+    unused.sort((left, right) => left.folder.localeCompare(right.folder));
+    return unused;
   }
 
   // True for a file that may be deleted or archived: an image or PDF, whatever
@@ -630,6 +720,11 @@
     for (const [hash, files] of groups) {
       if (files.length < 2) continue;
       const linked = (entry) => Boolean(entry.linked || entry.personIds?.length || entry.owners?.length);
+      // An identical file linked to several people is a valid share: a photo
+      // with several people in it belongs under each person's folder. Such a
+      // group is left alone, so the copies are not offered for removal.
+      const personIdsOf = (entry) => entry.personIds || entry.owners || [];
+      if (files.length > 1 && files.every((entry) => linked(entry) && personIdsOf(entry).length > 1)) continue;
       // A protected file is never offered: its group keeps every copy.
       const protectedFile = files.find((entry) => hero.has(entry.key) || event.has(entry.key));
       const keeper = protectedFile || files.find((entry) => linked(entry)) || files[0];
@@ -672,10 +767,13 @@
     computeMediaOrganiseState,
     planMediaOrganise,
     rewriteGedcomFile,
+    repointGedcomFiles,
     removeGedcomFileReferences,
     placeMediaFile,
     isDuplicateCandidate,
-    groupDuplicates
+    groupDuplicates,
+    findUnusedFolders,
+    isArchiveFolderName
   };
 
   global.KinshipMediaOrganise = api;

@@ -568,6 +568,8 @@ static class KinshipAtlasLauncher
         public List<string[]> Renames = new List<string[]>();
         // The files used as card images, by normalised media path.
         public Dictionary<string, List<string>> Chosen = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        // The people linked to each file, by normalised media path.
+        public Dictionary<string, List<string>> Owners = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
     }
 
     static string MediaNormalize(string value)
@@ -599,6 +601,104 @@ static class KinshipAtlasLauncher
         string relative = MediaNormalize(relativePath);
         if (key.Length == 0 || relative.Length == 0) return false;
         return key == relative || key.EndsWith("/" + relative) || relative.EndsWith("/" + key);
+    }
+
+    // An absolute FILE path written by an earlier install ("G:\tree-app\…") is
+    // read against this media folder: the part after the folder ending in
+    // "media" is the file's place here. A relative path is used as written.
+    static string MediaRelativeReference(string path)
+    {
+        string value = MediaSplit(path);
+        if (!IsAbsoluteMediaPath(path)) return value;
+        string[] parts = value.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
+        for (int index = parts.Length - 2; index >= 0; index--)
+        {
+            if (!System.Text.RegularExpressions.Regex.IsMatch(parts[index], "media$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) continue;
+            return string.Join("/", parts, index + 1, parts.Length - index - 1);
+        }
+        return value;
+    }
+
+    // File names that more than one media file in the folder shares.
+    static HashSet<string> AmbiguousMediaNames(List<MediaEntry> entries)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (MediaEntry entry in entries)
+        {
+            string name = (entry.Name ?? "").ToLowerInvariant();
+            if (name.Length == 0) continue;
+            int seen;
+            counts.TryGetValue(name, out seen);
+            counts[name] = seen + 1;
+        }
+        var ambiguous = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (KeyValuePair<string, int> count in counts) if (count.Value > 1) ambiguous.Add(count.Key);
+        return ambiguous;
+    }
+
+    // Points every FILE line naming a media file of the folder at the file's
+    // place there, however the line spells the path - an old install's absolute
+    // path, a folder since renamed, a bare file name. A file name shared by
+    // several files is only matched when the line spells the exact path. Files
+    // in the archive folder are never targets.
+    static string RepointGedcomFiles(string gedcomText, List<MediaEntry> files, string mediaFolderName, string archiveFolder)
+    {
+        var entries = new Dictionary<string, MediaEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (MediaEntry file in files)
+        {
+            string relative = MediaSplit(file.Relative);
+            string key = relative.ToLowerInvariant();
+            if (key.Length == 0 || entries.ContainsKey(key)) continue;
+            file.Key = key;
+            file.Folder = MediaFolderOf(relative);
+            file.Name = MediaFileName(relative);
+            file.Relative = relative;
+            entries[key] = file;
+        }
+        string archiveKey = MediaNormalize(archiveFolder).Split('/')[0];
+        Func<string, bool> isArchivedKey = delegate (string key)
+        {
+            MediaEntry entry;
+            if (!entries.TryGetValue(key, out entry) || entry == null) return false;
+            string top = MediaNormalize(entry.Folder).Split('/')[0];
+            return top == archiveKey || IsArchiveFolderName(top);
+        };
+        var byName = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (MediaEntry entry in entries.Values)
+        {
+            string top = MediaNormalize(entry.Folder).Split('/')[0];
+            if (top == archiveKey || IsArchiveFolderName(top)) continue;
+            string name = (entry.Name ?? "").ToLowerInvariant();
+            if (!byName.ContainsKey(name)) byName[name] = new List<string>();
+            byName[name].Add(entry.Key);
+        }
+        var lines = new List<string>((gedcomText ?? "").Split('\n'));
+        bool changed = false;
+        for (int index = 0; index < lines.Count; index++)
+        {
+            string carriage = lines[index].EndsWith("\r") ? "\r" : "";
+            var match = System.Text.RegularExpressions.Regex.Match(lines[index].TrimEnd('\r'), "^(\\d+\\s+FILE\\s+)(.*)$");
+            if (!match.Success) continue;
+            string value = match.Groups[2].Value.Trim();
+            if (value.Length == 0 || !IsMediaExtension(value)) continue;
+            string target = "";
+            string key = MediaNormalize(value);
+            if (entries.ContainsKey(key) && !isArchivedKey(key)) target = key;
+            if (target.Length == 0)
+            {
+                string relative = MediaNormalize(MediaRelativeReference(value));
+                if (relative != key && entries.ContainsKey(relative) && !isArchivedKey(relative)) target = relative;
+            }
+            if (target.Length == 0)
+            {
+                List<string> candidates;
+                if (byName.TryGetValue(MediaFileName(MediaNormalize(MediaRelativeReference(value))).ToLowerInvariant(), out candidates) && candidates.Count == 1) target = candidates[0];
+            }
+            if (target.Length == 0 || MediaNormalize(value) == target) continue;
+            lines[index] = match.Groups[1].Value + entries[target].Relative + carriage;
+            changed = true;
+        }
+        return changed ? string.Join("\n", lines) : gedcomText;
     }
 
     static bool IsMediaExtension(string name)
@@ -816,7 +916,9 @@ static class KinshipAtlasLauncher
         {
             string key = MediaNormalize(path);
             if (entries.ContainsKey(key)) return key;
-            foreach (string candidate in entries.Keys) if (SameMediaPath(key, candidate)) return candidate;
+            string relative = MediaNormalize(MediaRelativeReference(path));
+            if (relative != key && entries.ContainsKey(relative)) return relative;
+            foreach (string candidate in entries.Keys) if (SameMediaPath(relative, candidate)) return candidate;
             return key;
         };
         var byName = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
@@ -829,9 +931,10 @@ static class KinshipAtlasLauncher
         {
             string key = keyOf(path);
             if (entries.ContainsKey(key)) return key;
+            string relative = MediaNormalize(MediaRelativeReference(path));
             List<string> candidates;
-            if (!byName.TryGetValue(MediaFileName(path), out candidates)) return key;
-            string folder = MediaNormalize(MediaFolderOf(path));
+            if (!byName.TryGetValue(MediaFileName(relative), out candidates)) return key;
+            string folder = MediaNormalize(MediaFolderOf(relative));
             var inFolder = new List<string>();
             foreach (string candidate in candidates) if (MediaNormalize(entries[candidate].Folder) == folder) inFolder.Add(candidate);
             if (inFolder.Count == 1) return inFolder[0];
@@ -882,6 +985,7 @@ static class KinshipAtlasLauncher
             list.Sort((left, right) => order[left].CompareTo(order[right]));
             owners[user.Key] = list;
         }
+        result.Owners = owners;
         var chosen = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (KeyValuePair<string, string> pick in heroPicks)
         {
@@ -989,12 +1093,16 @@ static class KinshipAtlasLauncher
     }
 
     // Points every FILE line that named a moved file at its new place. Line
-    // endings are kept; a path is matched on \\ or /, quoted or not, and by name.
-    static string RewriteGedcomFile(string gedcomText, string oldPath, string newPath)
+    // endings are kept; a path is matched on \\ or /, quoted or not, and — when
+    // the file's name is unique in the media folder — by that name alone, so a
+    // line written by an earlier install ("G:\tree-app\…\old folder\file.jpg")
+    // is repointed too. A name several files share is only matched by exact path.
+    static string RewriteGedcomFile(string gedcomText, string oldPath, string newPath, HashSet<string> ambiguousNames)
     {
         string from = MediaNormalize(oldPath);
         if (from.Length == 0) return gedcomText;
         string fileName = MediaFileName(oldPath).ToLowerInvariant();
+        bool byName = ambiguousNames == null || !ambiguousNames.Contains(fileName);
         string replacement = MediaSplit(newPath);
         var lines = new List<string>((gedcomText ?? "").Split('\n'));
         bool changed = false;
@@ -1006,7 +1114,7 @@ static class KinshipAtlasLauncher
             string value = match.Groups[2].Value.Trim();
             bool quoted = value.Length > 1 && value.StartsWith("\"") && value.EndsWith("\"");
             string key = MediaNormalize(quoted ? value.Substring(1, value.Length - 2) : value);
-            if (key != from && key != fileName) continue;
+            if (key != from && !(byName && MediaFileName(key).ToLowerInvariant() == fileName)) continue;
             lines[index] = match.Groups[1].Value + (quoted ? "\"" + replacement + "\"" : replacement) + carriage;
             changed = true;
         }
@@ -1109,6 +1217,61 @@ static class KinshipAtlasLauncher
         return sb.Append(']').ToString();
     }
 
+    // The media folder's empty subfolders, apart from the archive folder and its
+    // aliases: a folder holding any file is never listed.
+    static List<string> EmptyFolders(string mediaDir, string archiveFolder)
+    {
+        var empty = new List<string>();
+        if (!Directory.Exists(mediaDir)) return empty;
+        string archiveKey = (archiveFolder ?? "Archive").Trim().ToLowerInvariant();
+        foreach (string folder in Directory.GetDirectories(mediaDir))
+        {
+            string name = Path.GetFileName(folder);
+            if (Array.IndexOf(ArchiveFolderNames, name.ToLowerInvariant()) >= 0 || name.ToLowerInvariant() == archiveKey) continue;
+            if (Directory.GetFileSystemEntries(folder, "*", SearchOption.AllDirectories).Length == 0) empty.Add(name);
+        }
+        empty.Sort(StringComparer.OrdinalIgnoreCase);
+        return empty;
+    }
+
+    static string EmptyFoldersJson(string mediaDir, string archiveFolder)
+    {
+        var sb = new StringBuilder("[");
+        List<string> empty = EmptyFolders(mediaDir, archiveFolder);
+        for (int index = 0; index < empty.Count; index++)
+        {
+            if (index > 0) sb.Append(',');
+            sb.Append("{\"folder\":").Append(Js(empty[index])).Append(",\"files\":[]}");
+        }
+        return sb.Append(']').ToString();
+    }
+
+    // Deletes one empty subfolder of the media folder. A folder that still holds
+    // anything is refused, so only the folders the check listed can go.
+    static string DeleteEmptyFolder(string mediaDir, string folder)
+    {
+        string relative = SafeMediaRelative(folder);
+        if (relative.Length == 0) throw new Exception("The folder could not be used.");
+        string full = Path.GetFullPath(Path.Combine(mediaDir, relative));
+        string root = Path.GetFullPath(mediaDir).TrimEnd('\\') + Path.DirectorySeparatorChar;
+        if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase)) throw new Exception("The folder could not be used.");
+        if (!Directory.Exists(full)) throw new Exception("The folder is no longer in the media folder.");
+        if (Directory.GetFileSystemEntries(full).Length > 0) throw new Exception("The folder is no longer empty, so it was left alone.");
+        Directory.Delete(full);
+        return "{\"ok\":true,\"folderDelete\":{\"removed\":1,\"failed\":0}}";
+    }
+
+    // "A\\b\\c" -> "A/b/c" inside the media folder only: no absolute paths, no
+    // "..", no drive letters.
+    static string SafeMediaRelative(string value)
+    {
+        string relative = (value ?? "").Replace('\\', '/').Trim();
+        if (relative.Length == 0 || relative.StartsWith("/") || System.Text.RegularExpressions.Regex.IsMatch(relative, "^[a-z]:", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) return "";
+        string[] segments = relative.Split('/');
+        foreach (string segment in segments) if (segment.Length == 0 || segment == "." || segment == "..") return "";
+        return string.Join("/", segments);
+    }
+
     // The reply to POST /api/media-organise: plans the organisation (apply: false)
     // or carries it out (apply: true), and includes the GEDCOM text to save.
     // records and peopleJson come from the primary GEDCOM, so the request body
@@ -1130,11 +1293,13 @@ static class KinshipAtlasLauncher
         string mediaFolderName = JsonString(json, "mediaFolderName") ?? Path.GetFileName(mediaDir);
         if (System.Text.RegularExpressions.Regex.IsMatch(mediaFolderName, "[\\\\/:*?\"<>|]")) mediaFolderName = Path.GetFileName(mediaDir);
 
+        List<MediaEntry> mediaEntries = ListMediaEntries(mediaDir);
+        HashSet<string> ambiguousNames = AmbiguousMediaNames(mediaEntries);
         MediaOrganiseResult plan;
         try
         {
             List<GedcomRecord> gedcomRecords = records ?? SplitGedcomRecords(gedcomText);
-            plan = ComputeMediaOrganise(gedcomRecords, ReadMediaPeople(peopleJson), ListMediaEntries(mediaDir), archiveFolder, ReadHeroPicks(json));
+            plan = ComputeMediaOrganise(gedcomRecords, ReadMediaPeople(peopleJson), mediaEntries, archiveFolder, ReadHeroPicks(json));
         }
         catch
         {
@@ -1142,7 +1307,7 @@ static class KinshipAtlasLauncher
         }
         if (!apply)
         {
-            return "{\"ok\":true,\"plan\":{\"actions\":" + MediaActionsJson(plan.Actions) + ",\"warnings\":" + MediaWarningsJson(plan.Warnings) + "},\"gedcomText\":" + Js(gedcomText) + "}";
+            return "{\"ok\":true,\"plan\":{\"actions\":" + MediaActionsJson(plan.Actions) + ",\"warnings\":" + MediaWarningsJson(plan.Warnings) + "},\"unusedFolders\":" + EmptyFoldersJson(mediaDir, archiveFolder) + ",\"gedcomText\":" + Js(gedcomText) + "}";
         }
         var moves = new StringBuilder("[");
         var renames = new StringBuilder("[");
@@ -1166,7 +1331,7 @@ static class KinshipAtlasLauncher
               .Append(",\"toPath\":").Append(Js(toPath)).Append(",\"ok\":true}");
             if (action.Kind == "copy") continue;
             string before = gedcomText;
-            gedcomText = RewriteGedcomFile(gedcomText, action.FromPath, toPath);
+            gedcomText = RewriteGedcomFile(gedcomText, action.FromPath, toPath, ambiguousNames);
             if (gedcomText != before)
             {
                 if (!firstRename) renames.Append(',');
@@ -1176,6 +1341,9 @@ static class KinshipAtlasLauncher
         }
         moves.Append(']');
         renames.Append(']');
+        // Every FILE line naming a media file of this folder ends up pointing at
+        // its place here, however it spelled the path before.
+        try { gedcomText = RepointGedcomFiles(gedcomText, ListMediaEntries(mediaDir), mediaFolderName, archiveFolder); } catch { }
         try { WritePrimaryData(appDir); } catch { }
         int failed = 0;
         foreach (MediaAction action in plan.Actions) if (moves.ToString().Contains("\"fromPath\":" + Js(action.FromPath) + ",\"toPath\":" + Js(action.ToPath) + ",\"ok\":false")) failed++;
@@ -1213,6 +1381,13 @@ static class KinshipAtlasLauncher
         string reply;
         try
         {
+            // Deleting one empty subfolder the check listed needs no plan.
+            string deleteFolder = JsonString(json, "deleteFolder");
+            if (deleteFolder != null && deleteFolder.Length > 0)
+            {
+                SendJson(ctx, 200, DeleteEmptyFolder(mediaDir, deleteFolder));
+                return;
+            }
             // The primary GEDCOM is already loaded, so its records need not be sent.
             List<GedcomRecord> records = null;
             string peopleJson = JsonString(json, "people") ?? "";
@@ -1286,6 +1461,17 @@ static class KinshipAtlasLauncher
         foreach (KeyValuePair<string, List<MediaEntry>> group in groups)
         {
             List<MediaEntry> files = group.Value;
+            // An identical file linked to several people is a valid share: a
+            // photo naming several people belongs under each person's folder.
+            // Such a group is left alone, so the copies are not offered.
+            bool sharedGroup = true;
+            foreach (MediaEntry file in files)
+            {
+                List<string> ids;
+                state.Owners.TryGetValue(file.Key, out ids);
+                if (ids == null || ids.Count < 2) { sharedGroup = false; break; }
+            }
+            if (sharedGroup) continue;
             bool protectedGroup = false;
             foreach (MediaEntry file in files) if (hero.Contains(file.Key) || events.Contains(file.Key)) protectedGroup = true;
             MediaEntry keeper = files[0];
@@ -1300,11 +1486,14 @@ static class KinshipAtlasLauncher
                 if (!firstFile) sb.Append(',');
                 firstFile = false;
                 sb.Append("{\"relativePath\":").Append(Js(file.Relative)).Append(",\"name\":").Append(Js(file.Name))
+                  .Append(",\"folder\":").Append(Js(file.Folder))
                   .Append(",\"size\":").Append(file.Size).Append(",\"keeper\":").Append(JsonBool(file == keeper)).Append(",\"owners\":[]}");
             }
             sb.Append("]}");
         }
-        return sb.Append("],\"examined\":").Append(ListMediaEntries(mediaDir).Count).Append('}').ToString();
+        return sb.Append("],\"examined\":").Append(ListMediaEntries(mediaDir).Count)
+            .Append(",\"mediaPath\":").Append(Js(Path.GetFullPath(mediaDir)))
+            .Append(",\"mediaFolder\":").Append(Js(Path.GetFileName(mediaDir))).Append('}').ToString();
     }
 
     // Deletes or archives the copies the page picked. Each must be an exact copy
