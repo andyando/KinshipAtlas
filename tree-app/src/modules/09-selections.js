@@ -793,6 +793,31 @@
     }
   }
 
+  // Opens File Explorer focused on this person's own media folder (the folder
+  // itself, not a file inside it). Through the launcher this always works; with
+  // a media folder opened in the tab, the tab falls back to opening the folder
+  // there.
+  async function openPersonMediaFolderInExplorer(personId) {
+    const folder = mediaPersonFolderName(personId);
+    if (!folder) { showToast('This person has no media folder yet.'); return; }
+    if (state.mediaHelper?.reveal) {
+      try {
+        const response = await fetch('/api/reveal', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: folder })
+        });
+        if (!response.ok) throw new Error('not found');
+        return;
+      } catch {
+        showToast('File Explorer could not be opened. Kinship Atlas.exe starts it, so it needs to be running.');
+        return;
+      }
+    }
+    if (state.mediaDirectoryHandle) { openMediaFolderInTab(folder); return; }
+    showToast('Choose the media folder in this menu first to open it.');
+  }
+
   function unlinkPersonMedia(personId, path) {
     const person = state.people.get(personId);
     if (!person) return;

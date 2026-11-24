@@ -2177,6 +2177,31 @@
     }
   }
 
+  // Opens File Explorer focused on this person's own media folder (the folder
+  // itself, not a file inside it). Through the launcher this always works; with
+  // a media folder opened in the tab, the tab falls back to opening the folder
+  // there.
+  async function openPersonMediaFolderInExplorer(personId) {
+    const folder = mediaPersonFolderName(personId);
+    if (!folder) { showToast('This person has no media folder yet.'); return; }
+    if (state.mediaHelper?.reveal) {
+      try {
+        const response = await fetch('/api/reveal', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: folder })
+        });
+        if (!response.ok) throw new Error('not found');
+        return;
+      } catch {
+        showToast('File Explorer could not be opened. Kinship Atlas.exe starts it, so it needs to be running.');
+        return;
+      }
+    }
+    if (state.mediaDirectoryHandle) { openMediaFolderInTab(folder); return; }
+    showToast('Choose the media folder in this menu first to open it.');
+  }
+
   function unlinkPersonMedia(personId, path) {
     const person = state.people.get(personId);
     if (!person) return;
@@ -3044,14 +3069,40 @@
     setupYearFilter('DEAT');
   }
 
-  function section(title) {
+  function section(title, options = {}) {
+    const { collapsible = true } = options;
     const wrapper = document.createElement('section');
     wrapper.className = 'detail-section';
-    const heading = document.createElement('h3');
+    const heading = document.createElement('button');
+    heading.type = 'button';
     heading.className = 'detail-section-title';
-    heading.textContent = title;
-    wrapper.append(heading);
-    return wrapper;
+    const label = document.createElement('span');
+    label.className = 'detail-section-label';
+    label.textContent = title;
+    const body = document.createElement('div');
+    body.className = 'detail-section-body';
+    if (collapsible) {
+      const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      chevron.setAttribute('viewBox', '0 0 24 24');
+      chevron.setAttribute('aria-hidden', 'true');
+      chevron.setAttribute('class', 'detail-section-chevron');
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', 'M6 9l6 6 6-6');
+      path.setAttribute('fill', 'none');
+      chevron.append(path);
+      heading.append(chevron, label);
+      heading.setAttribute('aria-expanded', 'true');
+      heading.addEventListener('click', () => {
+        const collapsed = wrapper.classList.toggle('is-collapsed');
+        heading.setAttribute('aria-expanded', String(!collapsed));
+        body.hidden = collapsed;
+      });
+      wrapper.append(heading, body);
+      return { wrapper, body };
+    }
+    heading.append(label);
+    wrapper.append(heading, body);
+    return { wrapper, body };
   }
 
   const relationGroupTypes = { Parents: 'PARENT', Siblings: 'SIBLING', 'Partners / spouses': 'PARTNER', Children: 'CHILD' };
@@ -3233,7 +3284,7 @@
       const empty = document.createElement('div');
       empty.className = 'event-detail';
       empty.textContent = 'No events recorded.';
-      eventSection.append(empty);
+      eventSection.body.append(empty);
     } else {
       const list = document.createElement('div');
       list.className = 'event-list';
@@ -3320,9 +3371,9 @@
         item.append(icon, marker, body);
         list.append(item);
       }
-      eventSection.append(list);
+      eventSection.body.append(list);
     }
-    return eventSection;
+    return eventSection.wrapper;
   }
 
   function renderKinship(person) {
@@ -3333,8 +3384,8 @@
     summary.className = 'kinship-summary';
     if (primary.id === person.id) {
       summary.textContent = `${person.name} is the primary person.`;
-      kinSection.append(summary);
-      return kinSection;
+      kinSection.body.append(summary);
+      return kinSection.wrapper;
     }
     const graph = kinshipGraph();
     const result = describeKinship(graph, primary.id, person.id);
@@ -3346,7 +3397,7 @@
     } else {
       summary.textContent = `${person.name} is not a blood relative or close in-law of ${primary.name} in the recorded tree.`;
     }
-    kinSection.append(summary);
+    kinSection.body.append(summary);
 
     const addPeople = (label, ids) => {
       const group = document.createElement('div');
@@ -3362,7 +3413,7 @@
         list.append(button);
       }
       group.append(heading, list);
-      kinSection.append(group);
+      kinSection.body.append(group);
     };
     if (result.ancestors?.length) addPeople(result.ancestors.length === 1 ? 'Closest common ancestor' : 'Closest common ancestors', result.ancestors);
     if (result.via) addPeople('Connected through', [result.via]);
@@ -3372,7 +3423,7 @@
       const none = document.createElement('div');
       none.className = 'event-detail';
       none.textContent = `No recorded family links connect ${person.name} to ${primary.name}.`;
-      kinSection.append(none);
+      kinSection.body.append(none);
     } else {
       const group = document.createElement('div');
       group.className = 'relation-group';
@@ -3395,13 +3446,13 @@
         list.append(label, button);
       }
       group.append(heading, list);
-      kinSection.append(group);
+      kinSection.body.append(group);
     }
     const note = document.createElement('div');
     note.className = 'event-source';
     note.textContent = 'Calculated from relationships recorded in this GEDCOM; confirm against sources before relying on it.';
-    kinSection.append(note);
-    return kinSection;
+    kinSection.body.append(note);
+    return kinSection.wrapper;
   }
 
   function primaryPersonStorageKey() {
@@ -3781,7 +3832,7 @@
     elements.details.replaceChildren();
     // Re-renders for the same person (e.g. after an edit) keep their scroll position.
     if (state.selectedId !== lastDetailsPersonId) {
-      elements.details.scrollTop = 0;
+      elements.details.querySelector('.details-scroll')?.scrollTo?.(0, 0);
       lastDetailsPersonId = state.selectedId;
     }
     syncPrimaryPersonBar();
@@ -3924,14 +3975,14 @@
     const kinship = renderKinship(person);
     if (kinship) elements.details.append(kinship);
     const relationSection = section('Relationships');
-    for (const [label, items] of relationshipGroups(person)) addRelationGroup(relationSection, label, items);
-    elements.details.append(relationSection);
+    for (const [label, items] of relationshipGroups(person)) addRelationGroup(relationSection.body, label, items);
+    elements.details.append(relationSection.wrapper);
     elements.details.append(renderEvents(person));
     const sourceIds = [...new Set(person.sourceIds)];
     const sourceSection = section('Source references');
     if (!sourceIds.length) {
       const empty = document.createElement('div'); empty.className = 'event-detail'; empty.textContent = 'No person-level source references recorded.';
-      sourceSection.append(empty);
+      sourceSection.body.append(empty);
     } else {
       const list = document.createElement('div'); list.className = 'source-list';
       for (const sourceId of sourceIds) {
@@ -3940,20 +3991,47 @@
         chip.textContent = source?.title ? `${sourceId} · ${source.title}` : sourceId;
         list.append(chip);
       }
-      sourceSection.append(list);
+      sourceSection.body.append(list);
     }
-    elements.details.append(sourceSection);
+    elements.details.append(sourceSection.wrapper);
     const media = renderMedia(person);
     if (media) elements.details.append(media);
+    // The hero (card image, birth country, name, action buttons) is a fixed
+    // header: everything below it scrolls in its own container instead of the
+    // hero scrolling away with the rest.
+    const scroll = document.createElement('div');
+    scroll.className = 'details-scroll';
+    while (elements.details.childNodes.length > 1) scroll.append(elements.details.childNodes[1]);
+    elements.details.append(scroll);
   }
 
   function renderMedia(person) {
     const mediaSection = document.createElement('section');
     mediaSection.className = 'detail-section detail-media-section';
-    const heading = document.createElement('h3');
+    const heading = document.createElement('button');
+    heading.type = 'button';
     heading.className = 'detail-section-title';
-    heading.textContent = `Attached media (${person.mediaPaths.length})`;
-    mediaSection.append(heading);
+    heading.setAttribute('aria-expanded', 'true');
+    const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    chevron.setAttribute('viewBox', '0 0 24 24');
+    chevron.setAttribute('aria-hidden', 'true');
+    chevron.setAttribute('class', 'detail-section-chevron');
+    const chevronPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    chevronPath.setAttribute('d', 'M6 9l6 6 6-6');
+    chevronPath.setAttribute('fill', 'none');
+    chevron.append(chevronPath);
+    const headingLabel = document.createElement('span');
+    headingLabel.className = 'detail-section-label';
+    headingLabel.textContent = `Attached media (${person.mediaPaths.length})`;
+    heading.append(chevron, headingLabel);
+    const mediaBody = document.createElement('div');
+    mediaBody.className = 'detail-section-body';
+    heading.addEventListener('click', () => {
+      const collapsed = mediaSection.classList.toggle('is-collapsed');
+      heading.setAttribute('aria-expanded', String(!collapsed));
+      mediaBody.hidden = collapsed;
+    });
+    mediaSection.append(heading, mediaBody);
 
     const actions = document.createElement('div');
     actions.className = 'media-actions';
@@ -3969,13 +4047,22 @@
           : 'Select a media folder before adding files';
       actions.append(addButton);
     }
-    mediaSection.append(actions);
+    // Open this person's media folder in File Explorer, focused. With a media
+    // folder opened in the tab this still works when the local helper reveals
+    // it; through the launcher it always can.
+    const openFolderButton = makeButton('Open media folder', 'media-open-folder-button');
+    openFolderButton.type = 'button';
+    openFolderButton.dataset.openMediaFolderFor = person.id;
+    openFolderButton.title = 'Open this person\'s media folder in File Explorer';
+    if (!state.mediaHelper?.reveal && !state.mediaDirectoryHandle) openFolderButton.disabled = true;
+    actions.append(openFolderButton);
+    mediaBody.append(actions);
 
     if (!person.mediaPaths.length) {
       const note = document.createElement('div');
       note.className = 'event-detail';
       note.textContent = 'No media attached yet.';
-      mediaSection.append(note);
+      mediaBody.append(note);
       return mediaSection;
     }
 
@@ -3983,7 +4070,7 @@
       const note = document.createElement('div');
       note.className = 'event-detail';
       note.textContent = 'Link the media folder to view these files.';
-      mediaSection.append(note);
+      mediaBody.append(note);
       return mediaSection;
     }
 
@@ -3996,7 +4083,7 @@
     };
     const grid = document.createElement('div');
     grid.className = 'media-grid';
-    mediaSection.append(grid);
+    mediaBody.append(grid);
     const mediaItems = [];
     const primaryImage = primaryImageFor(person);
     const linkedEvents = new Map();
@@ -4089,18 +4176,18 @@
         expandedMediaPersonId = expanded ? person.id : null;
         applyExpanded();
       });
-      mediaSection.append(showMoreButton);
+      mediaBody.append(showMoreButton);
     }
     if (missing === person.mediaPaths.length) {
       const note = document.createElement('div');
       note.className = 'event-detail';
       note.textContent = 'No referenced files were found in the selected folder.';
-      mediaSection.append(note);
+      mediaBody.append(note);
     } else if (missing) {
       const note = document.createElement('div');
       note.className = 'event-source';
       note.textContent = `${missing} referenced file${missing === 1 ? '' : 's'} not found.`;
-      mediaSection.append(note);
+      mediaBody.append(note);
     }
     return mediaSection;
   }
@@ -4451,17 +4538,9 @@
         if (entry) chosen.push(entry);
       }
       const applied = applyBulkMediaClassification(chosen, 'portrait');
-      // Only drop the rows that were actually applied; any unticked row stays
-      // on screen so it can still be reviewed individually.
-      for (const check of [...list.querySelectorAll('input[type="checkbox"]:checked')]) {
-        const row = check.closest('.profile-review-row');
-        check.checked = false;
-        check.disabled = true;
-        row?.classList.add('is-applied');
-        const single = row?.querySelector('.face-scan-single');
-        if (single) { single.disabled = true; single.textContent = 'Portrait applied'; }
-      }
-      if (!list.querySelector('.profile-review-row')) close();
+      // The classification is done, so the review dialog closes: the Media
+      // Library's own portrait view reflects the change immediately.
+      if (applied) close();
       if (applied) showToast(`${applied} image${applied === 1 ? '' : 's'} classified as Portrait.`);
     });
     dialog.querySelector('.face-scan-cancel').addEventListener('click', close);
@@ -6165,13 +6244,14 @@
   // Printed pages are always light: a dark theme wastes ink and photos, charts
   // and maps are designed for the light palette. The current theme is restored
   // as soon as the print dialog closes.
+  const printLightThemes = new Set(['dark']);
   function forcePrintLightTheme() {
     const root = document.documentElement;
     const previous = root.dataset.theme;
-    if (previous !== 'dark') return () => { };
-    root.dataset.theme = 'light';
-    // Any dark-mode stylesheet rules keyed on [data-theme=dark] stop matching;
-    // also drop the dark native-widget hint so form controls print light.
+    if (!printLightThemes.has(previous)) return () => { };
+    root.dataset.theme = 'heritage';
+    // Any dark-mode stylesheet rules stop matching; also drop the dark
+    // native-widget hint so form controls print light.
     const meta = document.querySelector('meta[name="color-scheme"]');
     const previousMeta = meta?.getAttribute('content');
     if (meta) meta.setAttribute('content', 'light');
@@ -9770,23 +9850,26 @@
     showToast(`Deleted ${idsToDelete.size} duplicate person${idsToDelete.size > 1 ? 's' : ''}.`);
   });
   document.querySelector('#closeDuplicateFinder').addEventListener('click', closeDuplicateFinder);
-  // ---------- Colour theme (light / dark) ----------
+  // ---------- Colour theme ----------
   // The theme is a single data-theme attribute on <html>; styles.css holds the
-  // dark palette, so every component follows it. The choice is remembered in
-  // localStorage and re-applied on every startup.
+  // palettes, so every component follows it. The choice is remembered in
+  // localStorage and re-applied on every startup. Themes are chosen from the
+  // Settings > Theme submenu.
   const themeStorageKey = 'kinship-atlas:theme';
   const themeColorMeta = () => document.querySelector('meta[name="color-scheme"]');
+  const knownThemes = ['heritage', 'dark', 'parchment', 'forest', 'royal'];
+  const darkThemes = new Set(['dark']);
 
   function applyTheme(theme, { remember = true } = {}) {
-    const dark = theme === 'dark';
-    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    if (!knownThemes.includes(theme)) theme = 'heritage';
+    const dark = darkThemes.has(theme);
+    document.documentElement.dataset.theme = theme;
     // Tell the browser so native controls, scrollbars and form widgets match.
     const meta = themeColorMeta();
     if (meta) meta.setAttribute('content', dark ? 'dark light' : 'light dark');
-    document.querySelector('#darkModeButton').hidden = dark;
-    document.querySelector('#lightModeButton').hidden = !dark;
+    syncThemeMenu();
     if (remember) {
-      try { localStorage.setItem(themeStorageKey, dark ? 'dark' : 'light'); } catch { }
+      try { localStorage.setItem(themeStorageKey, theme); } catch { }
     }
     // Redraw the pedigree so its connector colours and card surfaces follow the theme.
     if (state.pedigreeMode) renderPedigreeView();
@@ -9795,13 +9878,38 @@
   function preferredTheme() {
     try {
       const saved = localStorage.getItem(themeStorageKey);
-      if (saved === 'dark' || saved === 'light') return saved;
+      if (knownThemes.includes(saved)) return saved;
+      // Older installs only stored light/dark; a removed theme falls back too.
+      if (saved === 'light') return 'heritage';
+      if (saved === 'dark') return 'dark';
+      if (saved === 'atlas-dark') return 'dark';
     } catch { }
-    return window.matchMedia?.('(prefers-color-scheme: dark)')?.matches ? 'dark' : 'light';
+    return window.matchMedia?.('(prefers-color-scheme: dark)')?.matches ? 'dark' : 'heritage';
   }
 
-  document.querySelector('#darkModeButton').addEventListener('click', () => applyTheme('dark'));
-  document.querySelector('#lightModeButton').addEventListener('click', () => applyTheme('light'));
+  function syncThemeMenu() {
+    const current = document.documentElement.dataset.theme || 'heritage';
+    for (const option of document.querySelectorAll('#themePanel .theme-option')) {
+      option.setAttribute('aria-checked', String(option.dataset.themeChoice === current));
+    }
+  }
+
+  const themeMenuButton = document.querySelector('#themeMenuButton');
+  const themePanel = document.querySelector('#themePanel');
+  function setThemeSubmenuOpen(open) {
+    themePanel.hidden = !open;
+    themeMenuButton.setAttribute('aria-expanded', String(open));
+  }
+  themeMenuButton.addEventListener('click', () => setThemeSubmenuOpen(themePanel.hidden));
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('#themeSubmenu')) setThemeSubmenuOpen(false);
+  });
+  for (const option of document.querySelectorAll('#themePanel .theme-option')) {
+    option.addEventListener('click', () => {
+      applyTheme(option.dataset.themeChoice);
+      setThemeSubmenuOpen(false);
+    });
+  }
 
   document.querySelector('#duplicateRelationMenuButton').addEventListener('click', openDuplicateRelationFinder);
   document.querySelector('#duplicateRelationSelectAll').addEventListener('change', (event) => {
@@ -10093,6 +10201,11 @@
     const revealButton = event.target.closest('button[data-reveal-media]');
     if (revealButton) {
       revealMediaInExplorer(revealButton.dataset.revealMedia, event.shiftKey);
+      return;
+    }
+    const openFolderButton = event.target.closest('button[data-open-media-folder-for]');
+    if (openFolderButton) {
+      openPersonMediaFolderInExplorer(openFolderButton.dataset.openMediaFolderFor);
       return;
     }
     const button = event.target.closest('button[data-person-id]');
@@ -10970,7 +11083,12 @@
   }
   for (const item of topMenus) {
     item.button.addEventListener('click', () => setMenuOpen(item, item.panel.hidden));
-    item.panel.addEventListener('click', () => window.setTimeout(() => setMenuOpen(item, false), 0));
+    // Any click inside the panel closes it, except interactions with the Theme
+    // submenu (its toggle and options), which manage their own opening state.
+    item.panel.addEventListener('click', (event) => {
+      if (event.target.closest('#themeSubmenu')) return;
+      window.setTimeout(() => setMenuOpen(item, false), 0);
+    });
   }
   document.addEventListener('click', (event) => {
     if (!topMenus.some((item) => item.menu.contains(event.target))) setMenuOpen(null, false);
@@ -11297,7 +11415,10 @@
     .then(() => probeMediaHelper())
     .then(() => syncSelectionsToHelper())
     .then(() => loadHelperMedia())
-    .then(() => syncMediaFolderLink());
+    .then(() => syncMediaFolderLink())
+    // Files the user dropped by hand into person folders while this tab was
+    // closed become that person's media, so nothing waits for a manual check.
+    .then(() => adoptMediaInPersonFolders());
 ﻿  // ---------------------------------------------------------------------------
   // 15. Media folder organisation (person folders, archive, GEDCOM rewrite)
   // ---------------------------------------------------------------------------
@@ -11405,6 +11526,96 @@
     return state.mediaDirectoryHandle?.name || state.mediaHelper?.mediaFolder || state.mediaHelper?.folder || '';
   }
 
+  // Adopting: new image or PDF files a user dropped by hand into an existing
+  // person folder, but that no GEDCOM record names yet, become that person's
+  // media. The file keeps its place; only the link is added (and saved).
+  function mediaOrganiseFolderOwnerOf(folderName) {
+    const wanted = String(folderName || '').trim().toLocaleLowerCase();
+    if (!wanted) return '';
+    // A folder named "... [I123]" names its person however the rest is spelled.
+    const idInName = /\[([^\]]+)\]\s*$/.exec(wanted)?.[1]?.replace(/^@+|@+$/g, '').toLocaleLowerCase();
+    if (idInName) {
+      const byId = [...state.people.keys()].find((key) => key.toLocaleLowerCase() === idInName);
+      if (byId) return byId;
+    }
+    for (const person of state.people.values()) {
+      if (mediaPersonFolderName(person.id).toLocaleLowerCase() === wanted) return person.id;
+    }
+    return '';
+  }
+
+  // Files a person record already names, by normalised path or bare name.
+  function mediaOrganiseLinkedKeys() {
+    const keys = new Set();
+    const add = (path) => {
+      if (!path) return;
+      keys.add(normalizeMediaPath(path));
+      keys.add(normalizeMediaPath(splitName(path)));
+    };
+    for (const person of state.people.values()) for (const path of person.mediaPaths || []) add(path);
+    for (const family of state.families.values()) for (const event of [family.marriage, family.divorce]) for (const path of event?.mediaPaths || []) add(path);
+    return keys;
+  }
+
+  // Walks the folder open in the tab — or, in helper mode, the media files the
+  // launcher already indexed — and adopts every unlinked media file that sits
+  // inside a person folder. Returns how many were linked.
+  async function adoptMediaInPersonFolders() {
+    if (!state.people.size) return 0;
+    const core = mediaOrganiseHelpers();
+    const linked = mediaOrganiseLinkedKeys();
+    let adopted = 0;
+    let changed = false;
+    const adopt = (relativePath) => {
+      if (linked.has(normalizeMediaPath(relativePath)) || linked.has(normalizeMediaPath(splitName(relativePath)))) return;
+      const segments = relativePath.split('/');
+      if (segments.length < 2) return;
+      const personId = mediaOrganiseFolderOwnerOf(segments[0]);
+      if (!personId) return;
+      const person = state.people.get(personId);
+      if (!person) return;
+      if (!person.mediaPaths.includes(relativePath)) person.mediaPaths.push(relativePath);
+      const paths = state.additionalMedia.get(personId) || [];
+      if (!paths.includes(relativePath)) paths.push(relativePath);
+      state.additionalMedia.set(personId, paths);
+      linked.add(normalizeMediaPath(relativePath));
+      linked.add(normalizeMediaPath(splitName(relativePath)));
+      adopted += 1;
+      changed = true;
+    };
+    if (state.mediaDirectoryHandle) {
+      const walk = async (directory, prefix) => {
+        for await (const [name, entry] of directory.entries()) {
+          const relativePath = prefix ? `${prefix}/${name}` : name;
+          if (entry.kind === 'directory') { await walk(entry, relativePath); continue; }
+          if (!core.isMediaFile(name)) continue;
+          adopt(relativePath);
+        }
+      };
+      try {
+        await walk(state.mediaDirectoryHandle, '');
+      } catch (error) {
+        console.warn('Person folders could not be checked for new media.', error);
+        return adopted;
+      }
+    } else if (state.mediaHelper && Array.isArray(window.KINSHIP_PRIMARY?.media)) {
+      // Helper mode: the launcher's primary-data.js lists every media file in
+      // the library with its person-folder path.
+      for (const item of window.KINSHIP_PRIMARY.media) {
+        if (item?.path) adopt(item.path);
+      }
+    } else {
+      return 0;
+    }
+    if (changed) {
+      savePrimaryMedia();
+      saveAdditionalMedia();
+      // The media library and details panel pick up the new links.
+      if (state.selectedId) setFocus(state.selectedId, true); else render();
+    }
+    return adopted;
+  }
+
   // Every media file under the folder open in this tab, as { relativePath }.
   async function collectMediaOrganiseFiles() {
     const core = mediaOrganiseHelpers();
@@ -11414,7 +11625,11 @@
         const relativePath = prefix ? `${prefix}/${name}` : name;
         if (entry.kind === 'directory') { await walk(entry, relativePath); continue; }
         if (!core.isMediaFile(name)) continue;
-        files.push({ relativePath });
+        // Sizes let the planner recognise a copy an earlier organise run left in
+        // the destination folder (same name and size = already copied).
+        let size = 0;
+        try { size = (await entry.getFile()).size; } catch { size = 0; }
+        files.push({ relativePath, size });
       }
     };
     await walk(state.mediaDirectoryHandle, '');
@@ -11697,7 +11912,7 @@ This cannot be undone.`)) return;
     return { removed: 1, failed: 0 };
   }
 
-  function renderMediaOrganisePlan(planState) {
+  function renderMediaOrganisePlan(planState, adoptedCount = 0) {
     const ui = mediaOrganiseElements();
     const plan = mediaOrganisePlanOf(planState);
     const unusedFolders = plan.unusedFolders || [];
@@ -11720,6 +11935,7 @@ This cannot be undone.`)) return;
     } else {
       ui.summary.textContent = `${parts.join(' · ')}.`;
     }
+    if (adoptedCount) ui.summary.textContent = `${mediaOrganiseCount(adoptedCount, 'new file')} in person folders adopted as that person's media. ${ui.summary.textContent}`;
     ui.list.replaceChildren();
     // Unactioned tasks come first; completed groups follow with a green tick.
     const pending = [];
@@ -11784,15 +12000,19 @@ This cannot be undone.`)) return;
     ui.apply.disabled = true;
     setMediaOrganiseStatus('Reading the media folder…');
     try {
+      // New files dropped by hand into a person folder become that person's
+      // media before the plan is drawn, so the check sees them as linked.
+      const adopted = await adoptMediaInPersonFolders();
       if (mediaOrganiseUsesFolder()) {
         const scanned = await scanMediaOrganiseWithFolder();
         mediaOrganisePlanState = { ...scanned.plan, unusedFolders: scanned.unusedFolders || [] };
-        renderMediaOrganisePlan(mediaOrganisePlanState);
+        renderMediaOrganisePlan(mediaOrganisePlanState, adopted);
       } else {
         const body = await scanMediaOrganiseWithHelper();
         mediaOrganisePlanState = mediaOrganisePlanOf(body.plan);
         renderMediaOrganisePlan(mediaOrganisePlanState);
       }
+      if (adopted) ui.summary.textContent = `${mediaOrganiseCount(adopted, 'new file')} in person folders adopted as that person's media. ${ui.summary.textContent}`;
       setMediaOrganiseStatus('');
     } catch (error) {
       ui.summary.textContent = error?.message || 'The media folder could not be read.';
@@ -11857,6 +12077,10 @@ This cannot be undone.`)) return;
       }
       savePrimaryMedia();
       saveAdditionalMedia();
+      // New files dropped by hand into a person folder while organising become
+      // that person's media, so nothing waits for the next check.
+      const adopted = await adoptMediaInPersonFolders();
+      if (adopted) ui.status.textContent = `${mediaOrganiseCount(adopted, 'new file')} in person folders adopted as that person's media. `;
       // Re-read the media folder so previews, links and the Media Library show the new paths.
       if (folderMode) await indexMediaDirectory(state.mediaDirectoryHandle);
       // Card images and cached previews belong to the files' old places.

@@ -156,6 +156,10 @@
         while (stack.length > level) stack.pop();
         stack[level] = { tag, value };
         if (tag !== 'FILE' || !value) continue;
+        // The tree's own GEDCOM file ("... .ged") and documents the GEDCOM
+        // carries with it (.html, .txt, .doc…) are recorded, not media files
+        // that belong in the media folder; they are never reported missing.
+        if (isGedcomFileReference(value)) continue;
         let medium = '';
         for (let index = level - 1; index >= 0; index -= 1) {
           if (stack[index]?.tag === 'OBJE') { medium = index === 0 ? mediaId(record.xref) : mediaId(stack[index].value); break; }
@@ -196,16 +200,16 @@
     if (!/^([a-z]:[\\/]|\\\\|\/\/|file:)/i.test(String(path || '').trim())) return value;
     const parts = value.split('/').filter(Boolean);
     for (let index = parts.length - 2; index >= 0; index -= 1) {
-      if (!/media$/i.test(parts[index])) continue;
+      const folder = parts[index];
+      // The media folder is the part ending "... media", or the folder directly
+      // named "... Media Library".
+      if (!/media$/i.test(folder) && !/media library$/i.test(folder)) continue;
       const rest = parts.slice(index + 1);
-      // The folder directly named "... Media Library" is the media folder.
-      if (index + 2 < parts.length) return rest.join('/');
-      // Otherwise the media folder is the next folder down, usually a dated or
-      // renamed tree folder whose name only the current app knows.
-      if (mediaFolderName && rest.length) {
-        return [mediaFolderName, ...rest.slice(1)].join('/');
-      }
-      return rest.join('/');
+      // A person folder after the media folder is part of the file's place here.
+      if (rest.length > 1) return rest.join('/');
+      // A path ending "...\<media folder>\file.jpg" names a loose file, so only
+      // the file name is kept: it finds the file wherever it now sits.
+      return rest[0] || '';
     }
     return value;
   }
@@ -253,15 +257,41 @@
       if (!id || order.has(id)) continue;
       order.set(id, order.size);
       byId.set(id, person);
-      const folder = normalizeMediaPath(personFolderName(person));
+    }
+    // A folder already in the media folder that carries a person's "[Ixxxx]"
+    // belongs to that person, however its name is spelled: nicknames written
+    // "_Cock_", years the GEDCOM does not record, or a name edited since the
+    // folder was made. Those folders are reused — with their on-disk spelling,
+    // so the move lands in the folder that exists — instead of computing a
+    // fresh name that would match nothing on disk.
+    const existingFolderById = new Map();
+    const existingFolderKeys = new Set();   // lower-cased folder -> true, for a case-insensitive lookup
+    for (const entry of entries.values()) {
+      const folder = splitMediaPath(entry.folder);
+      const key = folder.toLocaleLowerCase();
+      if (!key || key.includes('/')) continue;
+      const id = /\[([^\]]+)\]\s*$/.exec(key)?.[1]?.replace(/^@+|@+$/g, '');
+      if (!id) continue;
+      // Folder keys are lower-cased, so the id must be matched without case:
+      // the person ids in byId keep their GEDCOM spelling ("I1670").
+      const person = [...byId.keys()].find((pid) => pid.toLocaleLowerCase() === id);
+      if (!person) continue;
+      const prev = existingFolderById.get(person);
+      existingFolderById.set(person, prev === undefined ? folder : (prev.toLocaleLowerCase() === key ? prev : ''));
+    }
+    const folderFor = (id) => {
+      const person = byId.get(mediaId(id));
+      if (!person) return '';
+      const existing = existingFolderById.get(mediaId(id));
+      if (existing) return existing;   // on-disk spelling
+      return personFolderName(person);
+    };
+    for (const id of byId.keys()) {
+      const folder = normalizeMediaPath(folderFor(id));
       if (!folder) continue;
       if (!foldersOf.has(folder)) foldersOf.set(folder, []);
       foldersOf.get(folder).push(id);
     }
-    const folderFor = (id) => {
-      const person = byId.get(mediaId(id));
-      return person ? personFolderName(person) : '';
-    };
     const archiveKey = normalizeMediaPath(archiveFolder);
     const isArchiveFolder = (folder) => {
       const top = normalizeMediaPath(folder).split('/')[0];
@@ -275,11 +305,16 @@
       if (entries.has(key)) return key;
       const relative = normalizeMediaPath(mediaRelativeReference(path, mediaFolderName));
       if (relative !== key && entries.has(relative)) return relative;
-      // A file keeps its name through every move, so its name finds it even when
-      // the GEDCOM's folder is an old or copied one.
-      const named = mediaFileName(relative);
+      // Absolute paths like "G:\tree-app\Primary Media Library\<name>" that
+      // name the media folder directly (no person folder after it) reduce to
+      // just a file name, so that name finds the file wherever it sits now.
+      const named = mediaFileName(relative) || mediaFileName(key);
       if (named) for (const candidate of entries.keys()) {
         if (sameMediaPath(relative, candidate) || mediaFileName(candidate) === named) return candidate;
+      }
+      // A bare file name in the GEDCOM matches a file in any person folder.
+      if (named && !named.includes('/')) for (const candidate of entries.keys()) {
+        if (mediaFileName(candidate) === named) return candidate;
       }
       return key;
     };
@@ -393,6 +428,24 @@
       return names;
     };
 
+    // True when the destination folder already holds a copy this file's earlier
+    // organise runs made: "name (2).jpg"… beside the wanted "name.jpg". A file
+    // the user named that way themselves is indistinguishable, but re-copying
+    // would duplicate it again either way, so the copy is skipped and the file
+    // shows up in "Find duplicate images" for a manual check.
+    const hasPriorCopy = (entry, folder) => {
+      const dot = entry.name.lastIndexOf('.');
+      if (dot < 0) return false;
+      const base = entry.name.slice(0, dot).toLocaleLowerCase();
+      const extension = entry.name.slice(dot).toLocaleLowerCase();
+      const suffix = /^(.*) \((\d+)\)$/;
+      for (const existing of namesIn(folder)) {
+        const match = suffix.exec(existing);
+        if (match && match[1].toLocaleLowerCase() === base && existing.endsWith(extension)) return true;
+      }
+      return false;
+    };
+
     const actions = [];
     const used = new Set();
     const warnings = [];
@@ -403,23 +456,36 @@
       if (used.has(key)) continue;
       const personIds = owners.get(key) || [];
       if (personIds.length) {
-        // The first person (by GEDCOM order) keeps the file; every other person
-        // gets a copy, so no file is shared between folders.
+        // A file already sitting in one of its owners' folders stays exactly
+        // there: the owner whose folder holds it is the keeper, and every other
+        // owner gets a copy into their own folder. Moving it away (because a
+        // GEDCOM-earlier owner computes first) would churn files users have
+        // arranged and rewrite links for nothing.
+        const keeper = personIds.find((id) => normalizeMediaPath(folderFor(id)) === normalizeMediaPath(entry.folder));
+        const keeperId = keeper || personIds[0];
         for (const id of personIds) {
           const folder = folderFor(id);
           const wanted = `${folder}/${entry.name}`;
           let toPath = wanted;
-          let kind = id === personIds[0] ? 'move' : 'copy';
+          let kind = id === keeperId ? 'move' : 'copy';
           const occupant = entries.get(normalizeMediaPath(wanted));
           if (occupant && kind === 'move') {
             // A same-named file already in the folder is the same image when the
-            // GEDCOM's own record of it is linked to the same people. Otherwise
-            // the name is taken, so this file gets a numbered name instead of
-            // overwriting a photo.
-            const sameImage = (owners.get(normalizeMediaPath(wanted)) || []).join(',') === personIds.join(',');
+            // GEDCOM's own record of it is linked to the same people, or when it
+            // is byte-for-byte the same size (a copy from an earlier organise
+            // run). Otherwise the name is taken, so this file gets a numbered
+            // name instead of overwriting a photo.
+            const sameImage = (owners.get(normalizeMediaPath(wanted)) || []).join(',') === personIds.join(',')
+              || (occupant.size && entry.size && occupant.size === entry.size);
             if (sameImage) continue;
             toPath = `${folder}/${uniqueName(entry.name, namesIn(folder))}`;
           } else if (occupant || used.has(normalizeMediaPath(wanted))) {
+            if (occupant?.size && entry.size && occupant.size === entry.size) continue;   // already copied earlier
+            // Without sizes (the local helper's older plan), a copy an earlier
+            // run made is still recognised: the destination folder already
+            // holds "name (2).jpg"… of this same file, so re-copying would only
+            // duplicate it again.
+            if (kind === 'copy' && hasPriorCopy(entry, folder)) continue;
             toPath = `${folder}/${uniqueName(entry.name, namesIn(folder))}`;
           }
           const toKey = normalizeMediaPath(toPath);

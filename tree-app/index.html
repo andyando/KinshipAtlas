@@ -83,14 +83,30 @@
             <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M21 3 12 12"/><path d="M12 12 8 16"/><path d="M8 16 3.5 20.5"/><path d="M3.5 20.5c-1.4 1.4-1.4 3 0 3.9 1.4.9 3 .4 3.9-1l1.8-2.7-3-3z"/><path d="M6.2 17.7l3 3"/><path d="M9.2 14.7l3 3"/></svg>
             Remove duplicate relationships
           </button>
-          <button id="darkModeButton" class="menu-item" type="button" role="menuitem" title="Switch the site to dark colours">
-            <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20.5 14.2A8.6 8.6 0 0 1 9.8 3.5a8.6 8.6 0 1 0 10.7 10.7z"/></svg>
-            Dark mode
-          </button>
-          <button id="lightModeButton" class="menu-item" type="button" role="menuitem" title="Switch the site back to light colours" hidden>
-            <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M2.5 12h2.4M19.1 12h2.4M5.3 5.3l1.7 1.7M17 17l1.7 1.7M18.7 5.3L17 7M7 17l-1.7 1.7"/></svg>
-            Light mode
-          </button>
+          <div class="menu-submenu" id="themeSubmenu">
+            <button id="themeMenuButton" class="menu-item menu-submenu-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="themePanel">
+              <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.6"/></svg>
+              Theme
+              <span class="menu-caret submenu-caret" aria-hidden="true">▸</span>
+            </button>
+            <div id="themePanel" class="settings-panel submenu-panel" role="menu" aria-label="Colour theme" hidden>
+              <button class="menu-item theme-option" type="button" role="menuitemradio" data-theme-choice="heritage" aria-checked="true">
+                <span class="theme-swatch" style="background:#17352f" aria-hidden="true"></span> Heritage
+              </button>
+              <button class="menu-item theme-option" type="button" role="menuitemradio" data-theme-choice="dark" aria-checked="false">
+                <span class="theme-swatch" style="background:#0d1413" aria-hidden="true"></span> Dark Mode
+              </button>
+              <button class="menu-item theme-option" type="button" role="menuitemradio" data-theme-choice="parchment" aria-checked="false">
+                <span class="theme-swatch" style="background:#f8f1dd" aria-hidden="true"></span> Antique Parchment
+              </button>
+              <button class="menu-item theme-option" type="button" role="menuitemradio" data-theme-choice="forest" aria-checked="false">
+                <span class="theme-swatch" style="background:#4c8c4a" aria-hidden="true"></span> Family Tree
+              </button>
+              <button class="menu-item theme-option" type="button" role="menuitemradio" data-theme-choice="royal" aria-checked="false">
+                <span class="theme-swatch" style="background:#5f6bd7" aria-hidden="true"></span> Royal Archive
+              </button>
+            </div>
+          </div>
           <button id="defaultsButton" class="menu-item" type="button" role="menuitem" title="Choose the GEDCOM file and media folder that open automatically">Update defaults</button>
           <button id="updateAppButton" class="menu-item" type="button" role="menuitem">Check for application updates</button>
           <button id="clearButton" class="menu-item" type="button" role="menuitem" disabled>Start Again</button>
@@ -885,8 +901,8 @@
       <div id="mediaOrganiseList" class="media-organise-list" aria-live="polite"></div>
       <p id="mediaOrganiseStatus" class="media-organise-status" role="status"></p>
       <div class="dialog-actions">
+        <button id="mediaOrganiseCheck" class="dialog-button media-organise-check-button" type="button">Check media folder</button>
         <button id="mediaOrganiseApply" class="dialog-button dialog-button-primary" type="button" disabled>Organise media files</button>
-        <button id="mediaOrganiseCheck" class="dialog-button" type="button">Check media folder</button>
         <button id="closeMediaOrganise" class="dialog-button dialog-button-quiet" type="button">Close</button>
       </div>
     </section>

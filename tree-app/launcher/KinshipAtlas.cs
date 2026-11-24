@@ -224,6 +224,9 @@ static class KinshipAtlasLauncher
 
     // Opens File Explorer at the tree's media folder (the default), or with the
     // given media file or folder selected inside it. POST {"kind":"media"}.
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
     static void HandleReveal(HttpListenerContext ctx, string appDir, string mediaDir)
     {
         string json;
@@ -248,6 +251,19 @@ static class KinshipAtlasLauncher
             if (File.Exists(target)) Process.Start("explorer.exe", "/select," + Quote(target));
             else if (Directory.Exists(target)) Process.Start("explorer.exe", Quote(target));
             else Process.Start("explorer.exe", Quote(mediaDir));
+            // Explorer opens behind the browser window when launched from a web
+            // page; bring it to the front so the window the user asked for has
+            // focus.
+            try
+            {
+                System.Threading.Thread.Sleep(400);
+                var explorer = Process.GetProcessesByName("explorer");
+                foreach (var process in explorer)
+                {
+                    try { if (process.MainWindowHandle != IntPtr.Zero) SetForegroundWindow(process.MainWindowHandle); } catch { }
+                }
+            }
+            catch { }
         }
         catch { SendJson(ctx, 500, "{\"error\":\"File Explorer could not be opened.\"}"); return; }
         SendJson(ctx, 200, "{\"ok\":true}");
@@ -606,7 +622,7 @@ static class KinshipAtlasLauncher
     // An absolute FILE path written by an earlier install ("G:\tree-app\…") is
     // read against this media folder: the part after the folder ending in
     // "media" is the file's place here. A relative path is used as written.
-    static string MediaRelativeReference(string path)
+    static string MediaRelativeReference(string path, string mediaFolderName)
     {
         string value = MediaSplit(path);
         if (!IsAbsoluteMediaPath(path)) return value;
@@ -614,9 +630,25 @@ static class KinshipAtlasLauncher
         for (int index = parts.Length - 2; index >= 0; index--)
         {
             if (!System.Text.RegularExpressions.Regex.IsMatch(parts[index], "media$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) continue;
-            return string.Join("/", parts, index + 1, parts.Length - index - 1);
+            string[] rest = Slice(parts, index + 1);
+            if (index + 2 < parts.Length) return string.Join("/", rest);
+            if (mediaFolderName.Length > 0 && rest.Length > 0)
+            {
+                string[] withFolder = new string[rest.Length];
+                withFolder[0] = mediaFolderName;
+                Array.Copy(rest, 1, withFolder, 1, rest.Length - 1);
+                return string.Join("/", withFolder);
+            }
+            return string.Join("/", rest);
         }
         return value;
+    }
+
+    static string[] Slice(string[] source, int start)
+    {
+        string[] result = new string[source.Length - start];
+        Array.Copy(source, start, result, 0, result.Length);
+        return result;
     }
 
     // File names that more than one media file in the folder shares.
@@ -686,13 +718,13 @@ static class KinshipAtlasLauncher
             if (entries.ContainsKey(key) && !isArchivedKey(key)) target = key;
             if (target.Length == 0)
             {
-                string relative = MediaNormalize(MediaRelativeReference(value));
+                string relative = MediaNormalize(MediaRelativeReference(value, mediaFolderName));
                 if (relative != key && entries.ContainsKey(relative) && !isArchivedKey(relative)) target = relative;
             }
             if (target.Length == 0)
             {
                 List<string> candidates;
-                if (byName.TryGetValue(MediaFileName(MediaNormalize(MediaRelativeReference(value))).ToLowerInvariant(), out candidates) && candidates.Count == 1) target = candidates[0];
+                if (byName.TryGetValue(MediaFileName(MediaNormalize(MediaRelativeReference(value, mediaFolderName))).ToLowerInvariant(), out candidates) && candidates.Count == 1) target = candidates[0];
             }
             if (target.Length == 0 || MediaNormalize(value) == target) continue;
             lines[index] = match.Groups[1].Value + entries[target].Relative + carriage;
@@ -734,6 +766,10 @@ static class KinshipAtlasLauncher
     }
 
     // Names and years for every person in the GEDCOM, in the shape the page sends.
+    // Birth and death years are read from each person's BIRT and DEAT dates, so
+    // person folders come out as "Ada Allnutt (1864-unknown) [I455]" — matching
+    // folders already on disk — rather than "(unknown-unknown)" when the page's
+    // own request carries no year values.
     static string MediaPeopleJson(List<GedcomRecord> records)
     {
         var sb = new StringBuilder("[");
@@ -744,6 +780,8 @@ static class KinshipAtlasLauncher
             string given = "";
             string surname = "";
             string raw = "";
+            string birthYear = "";
+            string deathYear = "";
             foreach (string line in record.Lines)
             {
                 var nameField = System.Text.RegularExpressions.Regex.Match(line, "^1\\s+NAME\\s+(.*)$");
@@ -752,14 +790,39 @@ static class KinshipAtlasLauncher
                 if (givn.Success && given.Length == 0) given = givn.Groups[1].Value;
                 var surn = System.Text.RegularExpressions.Regex.Match(line, "^2\\s+SURN\\s+(.*)$");
                 if (surn.Success && surname.Length == 0) surname = surn.Groups[1].Value;
+                var birth = System.Text.RegularExpressions.Regex.Match(line, "^2\\s+DATE\\s+(.*)$");
+                if (birth.Success)
+                {
+                    // The DATE line only counts when it sits under a 1 BIRT or 1 DEAT.
+                    string year = System.Text.RegularExpressions.Regex.Match(birth.Groups[1].Value, "\\d{4}").Value;
+                    if (year.Length > 0)
+                    {
+                        if (birthYear.Length == 0 && PreviousLevel1Tag(record, line) == "BIRT") birthYear = year;
+                        if (deathYear.Length == 0 && PreviousLevel1Tag(record, line) == "DEAT") deathYear = year;
+                    }
+                }
             }
             if (!first) sb.Append(',');
             first = false;
             string fullName = (given.Length > 0 ? given : raw.Split('/')[0].Trim()) + " " + (surname.Length > 0 ? surname : (raw.Split('/').Length > 1 ? raw.Split('/')[1] : ""));
             sb.Append("{\"id\":").Append(Js(record.Xref)).Append(",\"name\":").Append(Js(System.Text.RegularExpressions.Regex.Replace(fullName.Trim(), "\\s+", " ")))
-              .Append(",\"birthYear\":\"\",\"deathYear\":\"\"}");
+              .Append(",\"birthYear\":").Append(Js(birthYear)).Append(",\"deathYear\":").Append(Js(deathYear)).Append('}');
         }
         return sb.Append(']').ToString();
+    }
+
+    // The most recent level-1 tag before this line in the record: "BIRT" when a
+    // 2 DATE line sits under 1 BIRT, "DEAT" under 1 DEAT, and so on.
+    static string PreviousLevel1Tag(GedcomRecord record, string line)
+    {
+        string result = "";
+        foreach (string scan in record.Lines)
+        {
+            if (scan == line) return result;
+            var field = System.Text.RegularExpressions.Regex.Match(scan, "^1\\s+(\\S+)");
+            if (field.Success) result = field.Groups[1].Value.ToUpperInvariant();
+        }
+        return result;
     }
 
     static string UniqueMediaName(string fileName, HashSet<string> taken)
@@ -773,6 +836,27 @@ static class KinshipAtlasLauncher
             if (!taken.Contains(candidate.ToLowerInvariant())) return candidate;
         }
         return stem + " (" + DateTime.Now.Ticks + ")" + extension;
+    }
+
+    // True when the destination folder already holds a copy this file's earlier
+    // organise runs made: "name (2).jpg"… beside the wanted "name.jpg". A file
+    // the user named that way themselves is indistinguishable, but re-copying
+    // would duplicate it again either way, so the copy is skipped and the file
+    // shows up in "Find duplicate images" for a manual check.
+    static bool HasPriorMediaCopy(HashSet<string> namesInFolder, string fileName)
+    {
+        int dot = fileName.LastIndexOf('.');
+        if (dot < 0) return false;
+        string stem = fileName.Substring(0, dot);
+        string extension = fileName.Substring(dot);
+        var suffix = new System.Text.RegularExpressions.Regex("^(.*) \\((\\d+)\\)$");
+        foreach (string existing in namesInFolder)
+        {
+            var match = suffix.Match(existing);
+            if (match.Success && string.Equals(match.Groups[1].Value, stem, StringComparison.OrdinalIgnoreCase)
+                && existing.EndsWith(extension, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
     }
 
     static string JsonBool(bool value) { return value ? "true" : "false"; }
@@ -877,7 +961,7 @@ static class KinshipAtlasLauncher
     // Works out where every file in the media folder belongs, as the app does:
     // linked files go to each linked person's folder, files in a person's folder
     // follow that person, and everything else goes to "Archive/<date>".
-    static MediaOrganiseResult ComputeMediaOrganise(List<GedcomRecord> records, List<MediaPerson> people, List<MediaEntry> files, string archiveFolder, Dictionary<string, string> heroPicks)
+    static MediaOrganiseResult ComputeMediaOrganise(List<GedcomRecord> records, List<MediaPerson> people, List<MediaEntry> files, string archiveFolder, Dictionary<string, string> heroPicks, string mediaFolderName)
     {
         var result = new MediaOrganiseResult();
         string stamp = DateTime.Now.ToString("yyyy-MM-dd");
@@ -891,9 +975,6 @@ static class KinshipAtlasLauncher
             if (id.Length == 0 || byId.ContainsKey(id)) continue;
             order[id] = order.Count;
             byId[id] = person;
-            string folder = MediaNormalize(MediaPersonFolder(person));
-            if (!foldersOf.ContainsKey(folder)) foldersOf[folder] = new List<string>();
-            foldersOf[folder].Add(id);
         }
         foreach (MediaEntry file in files)
         {
@@ -906,6 +987,40 @@ static class KinshipAtlasLauncher
             file.Relative = relative;
             entries[key] = file;
         }
+        // A folder already in the media folder that carries a person's "[Ixxxx]"
+        // belongs to that person, however its name is spelled: nicknames written
+        // "_Cock_", years the GEDCOM does not record, or a name edited since the
+        // folder was made. Those folders are reused — with their on-disk
+        // spelling, so the move lands in the folder that exists — instead of
+        // computing a fresh name that would match nothing on disk.
+        var existingFolderById = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (MediaEntry e in entries.Values)
+        {
+            string folder = MediaSplit(e.Folder);
+            if (folder.Length == 0 || folder.IndexOf('/') >= 0) continue;
+            var m = System.Text.RegularExpressions.Regex.Match(folder, "\\[([^\\]]+)\\]\\s*$");
+            if (!m.Success) continue;
+            string pid = m.Groups[1].Value.Trim('@');
+            if (!byId.ContainsKey(pid)) continue;
+            string prev;
+            if (!existingFolderById.TryGetValue(pid, out prev)) existingFolderById[pid] = folder;
+            else if (!string.Equals(prev, folder, StringComparison.OrdinalIgnoreCase)) existingFolderById[pid] = "";   // two folders claim the id: no reuse
+        }
+        Func<string, string> folderFor = delegate (string id)
+        {
+            MediaPerson owner;
+            if (!byId.TryGetValue(id, out owner) || owner == null) return "";
+            string existing;
+            if (existingFolderById.TryGetValue(id, out existing) && existing.Length > 0) return existing;
+            return MediaPersonFolder(owner);
+        };
+        foreach (string pid in byId.Keys)
+        {
+            string folder = MediaNormalize(folderFor(pid));
+            if (folder.Length == 0) continue;
+            if (!foldersOf.ContainsKey(folder)) foldersOf[folder] = new List<string>();
+            foldersOf[folder].Add(pid);
+        }
         string archiveKey = MediaNormalize(archiveFolder);
         Func<string, bool> isArchive = delegate (string folder)
         {
@@ -916,7 +1031,7 @@ static class KinshipAtlasLauncher
         {
             string key = MediaNormalize(path);
             if (entries.ContainsKey(key)) return key;
-            string relative = MediaNormalize(MediaRelativeReference(path));
+            string relative = MediaNormalize(MediaRelativeReference(path, mediaFolderName));
             if (relative != key && entries.ContainsKey(relative)) return relative;
             foreach (string candidate in entries.Keys) if (SameMediaPath(relative, candidate)) return candidate;
             return key;
@@ -931,13 +1046,27 @@ static class KinshipAtlasLauncher
         {
             string key = keyOf(path);
             if (entries.ContainsKey(key)) return key;
-            string relative = MediaNormalize(MediaRelativeReference(path));
+            string relative = MediaNormalize(MediaRelativeReference(path, mediaFolderName));
             List<string> candidates;
             if (!byName.TryGetValue(MediaFileName(relative), out candidates)) return key;
             string folder = MediaNormalize(MediaFolderOf(relative));
             var inFolder = new List<string>();
             foreach (string candidate in candidates) if (MediaNormalize(entries[candidate].Folder) == folder) inFolder.Add(candidate);
             if (inFolder.Count == 1) return inFolder[0];
+            // The recorded folder names the same person but spells it differently
+            // ("... (unknown-unknown) [I621]" vs "... (1872-1955) [I621]"): the
+            // folder on disk that carries the same "[Ixxxx]" is the file's place.
+            var idMatch = System.Text.RegularExpressions.Regex.Match(folder, "\\[([^\\]]+)\\]\\s*$");
+            if (idMatch.Success)
+            {
+                var inFolderById = new List<string>();
+                foreach (string candidate in candidates)
+                {
+                    string candidateFolder = MediaNormalize(entries[candidate].Folder);
+                    if (System.Text.RegularExpressions.Regex.IsMatch(candidateFolder, "\\[" + System.Text.RegularExpressions.Regex.Escape(idMatch.Groups[1].Value) + "\\]\\s*$")) inFolderById.Add(candidate);
+                }
+                if (inFolderById.Count == 1) return inFolderById[0];
+            }
             return candidates.Count == 1 ? candidates[0] : key;
         };
 
@@ -1013,27 +1142,43 @@ static class KinshipAtlasLauncher
             if (personIds == null) personIds = new List<string>();
             if (personIds.Count > 0)
             {
+                // A file already sitting in one of its owners' folders stays
+                // exactly there: the owner whose folder holds it is the keeper,
+                // and every other owner gets a copy. Moving it away (because a
+                // GEDCOM-earlier owner computes first) would churn files users
+                // have arranged and rewrite links for nothing.
+                string keeperId = personIds[0];
+                foreach (string candidate in personIds)
+                {
+                    if (MediaNormalize(folderFor(candidate)) == MediaNormalize(entry.Folder)) { keeperId = candidate; break; }
+                }
                 for (int index = 0; index < personIds.Count; index++)
                 {
                     string id = personIds[index];
-                    string folder = MediaPersonFolder(byId[id]);
+                    string folder = folderFor(id);
                     string wanted = folder + "/" + entry.Name;
                     string wantedKey = MediaNormalize(wanted);
                     if (wantedKey == key) continue;
                     MediaEntry occupant;
                     entries.TryGetValue(wantedKey, out occupant);
                     string toPath = wanted;
-                    string kind = index == 0 ? "move" : "copy";
+                    string kind = id == keeperId ? "move" : "copy";
                     if (occupant != null && kind == "move")
                     {
                         List<string> existingOwners;
                         owners.TryGetValue(wantedKey, out existingOwners);
-                        bool sameImage = string.Join(",", existingOwners ?? new List<string>()) == string.Join(",", personIds);
+                        bool sameImage = string.Join(",", existingOwners ?? new List<string>()) == string.Join(",", personIds)
+                            || (occupant.Size > 0 && entry.Size > 0 && occupant.Size == entry.Size);
                         if (sameImage) continue;
                         kind = "replace";
                     }
                     else if (occupant != null || used.Contains(wantedKey))
                     {
+                        if (occupant != null && occupant.Size > 0 && entry.Size > 0 && occupant.Size == entry.Size) continue;   // already copied earlier
+                        // Without sizes, a copy an earlier run made is still
+                        // recognised by its numbered name ("name (2).jpg"…)
+                        // sitting beside the wanted "name.jpg" in the folder.
+                        if (kind == "copy" && HasPriorMediaCopy(namesIn(folder), entry.Name)) continue;
                         toPath = folder + "/" + UniqueMediaName(entry.Name, namesIn(folder));
                     }
                     string toKey = MediaNormalize(toPath);
@@ -1055,14 +1200,14 @@ static class KinshipAtlasLauncher
             string targetFolder = archiveTarget;
             if (named != null && named.Count == 1)
             {
-                targetFolder = MediaPersonFolder(byId[named[0]]);
+                targetFolder = folderFor(named[0]);
                 archiveKind = "move";
                 ownerId = named[0];
             }
             else if (chosen.ContainsKey(key))
             {
                 string personId = chosen[key][0];
-                targetFolder = MediaPersonFolder(byId[personId]);
+                targetFolder = folderFor(personId);
                 archiveKind = "move";
                 ownerId = personId;
                 result.Warnings.Add("\"" + entry.Relative + "\" is an unlinked card image, so it moves to the person's folder instead of the archive.");
@@ -1082,6 +1227,19 @@ static class KinshipAtlasLauncher
         foreach (MediaReference reference in references)
         {
             if (reference.Path.Length == 0 || entries.ContainsKey(fallbackKey(reference.Path))) continue;
+            // The GEDCOM's own tree file ("... .ged") is not a media file, and a
+            // FILE line naming an image or PDF the GEDCOM itself carries is
+            // documented, not missing. Neither belongs in the media folder.
+            string nameOnly = MediaFileName(MediaSplit(reference.Path));
+            if (nameOnly.EndsWith(".ged", StringComparison.OrdinalIgnoreCase) || !IsMediaExtension(nameOnly)) continue;
+            // A file name the media folder holds at all (even more than once, or
+            // under a folder spelled differently) is not missing: the file is
+            // here, only the recorded path is out of date.
+            List<string> sameName;
+            if (byName.TryGetValue(nameOnly.ToLowerInvariant(), out sameName) && sameName.Count > 0) continue;
+            // Paths written by an earlier install ("G:\tree-app\…") or by a copy
+            // of the tree elsewhere already resolved to a file here through their
+            // folder-name fallback; only paths that name nothing here are missing.
             string warning = "\"" + reference.Path + "\" is named in the GEDCOM but is not in the media folder.";
             if (!result.Warnings.Contains(warning)) result.Warnings.Add(warning);
             if (IsAbsoluteMediaPath(reference.Path) && !result.Unsupported.Contains(reference.Path)) result.Unsupported.Add(reference.Path);
@@ -1299,7 +1457,7 @@ static class KinshipAtlasLauncher
         try
         {
             List<GedcomRecord> gedcomRecords = records ?? SplitGedcomRecords(gedcomText);
-            plan = ComputeMediaOrganise(gedcomRecords, ReadMediaPeople(peopleJson), mediaEntries, archiveFolder, ReadHeroPicks(json));
+            plan = ComputeMediaOrganise(gedcomRecords, ReadMediaPeople(peopleJson), mediaEntries, archiveFolder, ReadHeroPicks(json), mediaFolderName);
         }
         catch
         {
@@ -1451,7 +1609,7 @@ static class KinshipAtlasLauncher
         List<GedcomRecord> records = SplitGedcomRecords(gedcomText);
         string peopleJson = JsonString(json, "people") ?? "";
         if (peopleJson.Length == 0) peopleJson = "{\"people\":" + MediaPeopleJson(records) + "}";
-        MediaOrganiseResult state = ComputeMediaOrganise(records, ReadMediaPeople(peopleJson), ListMediaEntries(mediaDir), "Archive", ReadHeroPicks(json));
+        MediaOrganiseResult state = ComputeMediaOrganise(records, ReadMediaPeople(peopleJson), ListMediaEntries(mediaDir), "Archive", ReadHeroPicks(json), Path.GetFileName(mediaDir));
         HashSet<string> hero = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (string key in state.Chosen.Keys) hero.Add(key);
         HashSet<string> events = EventMediaKeys(records);

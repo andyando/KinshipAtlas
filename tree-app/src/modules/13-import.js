@@ -1517,23 +1517,26 @@
     showToast(`Deleted ${idsToDelete.size} duplicate person${idsToDelete.size > 1 ? 's' : ''}.`);
   });
   document.querySelector('#closeDuplicateFinder').addEventListener('click', closeDuplicateFinder);
-  // ---------- Colour theme (light / dark) ----------
+  // ---------- Colour theme ----------
   // The theme is a single data-theme attribute on <html>; styles.css holds the
-  // dark palette, so every component follows it. The choice is remembered in
-  // localStorage and re-applied on every startup.
+  // palettes, so every component follows it. The choice is remembered in
+  // localStorage and re-applied on every startup. Themes are chosen from the
+  // Settings > Theme submenu.
   const themeStorageKey = 'kinship-atlas:theme';
   const themeColorMeta = () => document.querySelector('meta[name="color-scheme"]');
+  const knownThemes = ['heritage', 'dark', 'parchment', 'forest', 'royal'];
+  const darkThemes = new Set(['dark']);
 
   function applyTheme(theme, { remember = true } = {}) {
-    const dark = theme === 'dark';
-    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    if (!knownThemes.includes(theme)) theme = 'heritage';
+    const dark = darkThemes.has(theme);
+    document.documentElement.dataset.theme = theme;
     // Tell the browser so native controls, scrollbars and form widgets match.
     const meta = themeColorMeta();
     if (meta) meta.setAttribute('content', dark ? 'dark light' : 'light dark');
-    document.querySelector('#darkModeButton').hidden = dark;
-    document.querySelector('#lightModeButton').hidden = !dark;
+    syncThemeMenu();
     if (remember) {
-      try { localStorage.setItem(themeStorageKey, dark ? 'dark' : 'light'); } catch { }
+      try { localStorage.setItem(themeStorageKey, theme); } catch { }
     }
     // Redraw the pedigree so its connector colours and card surfaces follow the theme.
     if (state.pedigreeMode) renderPedigreeView();
@@ -1542,13 +1545,38 @@
   function preferredTheme() {
     try {
       const saved = localStorage.getItem(themeStorageKey);
-      if (saved === 'dark' || saved === 'light') return saved;
+      if (knownThemes.includes(saved)) return saved;
+      // Older installs only stored light/dark; a removed theme falls back too.
+      if (saved === 'light') return 'heritage';
+      if (saved === 'dark') return 'dark';
+      if (saved === 'atlas-dark') return 'dark';
     } catch { }
-    return window.matchMedia?.('(prefers-color-scheme: dark)')?.matches ? 'dark' : 'light';
+    return window.matchMedia?.('(prefers-color-scheme: dark)')?.matches ? 'dark' : 'heritage';
   }
 
-  document.querySelector('#darkModeButton').addEventListener('click', () => applyTheme('dark'));
-  document.querySelector('#lightModeButton').addEventListener('click', () => applyTheme('light'));
+  function syncThemeMenu() {
+    const current = document.documentElement.dataset.theme || 'heritage';
+    for (const option of document.querySelectorAll('#themePanel .theme-option')) {
+      option.setAttribute('aria-checked', String(option.dataset.themeChoice === current));
+    }
+  }
+
+  const themeMenuButton = document.querySelector('#themeMenuButton');
+  const themePanel = document.querySelector('#themePanel');
+  function setThemeSubmenuOpen(open) {
+    themePanel.hidden = !open;
+    themeMenuButton.setAttribute('aria-expanded', String(open));
+  }
+  themeMenuButton.addEventListener('click', () => setThemeSubmenuOpen(themePanel.hidden));
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('#themeSubmenu')) setThemeSubmenuOpen(false);
+  });
+  for (const option of document.querySelectorAll('#themePanel .theme-option')) {
+    option.addEventListener('click', () => {
+      applyTheme(option.dataset.themeChoice);
+      setThemeSubmenuOpen(false);
+    });
+  }
 
   document.querySelector('#duplicateRelationMenuButton').addEventListener('click', openDuplicateRelationFinder);
   document.querySelector('#duplicateRelationSelectAll').addEventListener('change', (event) => {
@@ -1840,6 +1868,11 @@
     const revealButton = event.target.closest('button[data-reveal-media]');
     if (revealButton) {
       revealMediaInExplorer(revealButton.dataset.revealMedia, event.shiftKey);
+      return;
+    }
+    const openFolderButton = event.target.closest('button[data-open-media-folder-for]');
+    if (openFolderButton) {
+      openPersonMediaFolderInExplorer(openFolderButton.dataset.openMediaFolderFor);
       return;
     }
     const button = event.target.closest('button[data-person-id]');

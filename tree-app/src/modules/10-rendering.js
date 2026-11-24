@@ -829,14 +829,40 @@
     setupYearFilter('DEAT');
   }
 
-  function section(title) {
+  function section(title, options = {}) {
+    const { collapsible = true } = options;
     const wrapper = document.createElement('section');
     wrapper.className = 'detail-section';
-    const heading = document.createElement('h3');
+    const heading = document.createElement('button');
+    heading.type = 'button';
     heading.className = 'detail-section-title';
-    heading.textContent = title;
-    wrapper.append(heading);
-    return wrapper;
+    const label = document.createElement('span');
+    label.className = 'detail-section-label';
+    label.textContent = title;
+    const body = document.createElement('div');
+    body.className = 'detail-section-body';
+    if (collapsible) {
+      const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      chevron.setAttribute('viewBox', '0 0 24 24');
+      chevron.setAttribute('aria-hidden', 'true');
+      chevron.setAttribute('class', 'detail-section-chevron');
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', 'M6 9l6 6 6-6');
+      path.setAttribute('fill', 'none');
+      chevron.append(path);
+      heading.append(chevron, label);
+      heading.setAttribute('aria-expanded', 'true');
+      heading.addEventListener('click', () => {
+        const collapsed = wrapper.classList.toggle('is-collapsed');
+        heading.setAttribute('aria-expanded', String(!collapsed));
+        body.hidden = collapsed;
+      });
+      wrapper.append(heading, body);
+      return { wrapper, body };
+    }
+    heading.append(label);
+    wrapper.append(heading, body);
+    return { wrapper, body };
   }
 
   const relationGroupTypes = { Parents: 'PARENT', Siblings: 'SIBLING', 'Partners / spouses': 'PARTNER', Children: 'CHILD' };
@@ -1018,7 +1044,7 @@
       const empty = document.createElement('div');
       empty.className = 'event-detail';
       empty.textContent = 'No events recorded.';
-      eventSection.append(empty);
+      eventSection.body.append(empty);
     } else {
       const list = document.createElement('div');
       list.className = 'event-list';
@@ -1105,9 +1131,9 @@
         item.append(icon, marker, body);
         list.append(item);
       }
-      eventSection.append(list);
+      eventSection.body.append(list);
     }
-    return eventSection;
+    return eventSection.wrapper;
   }
 
   function renderKinship(person) {
@@ -1118,8 +1144,8 @@
     summary.className = 'kinship-summary';
     if (primary.id === person.id) {
       summary.textContent = `${person.name} is the primary person.`;
-      kinSection.append(summary);
-      return kinSection;
+      kinSection.body.append(summary);
+      return kinSection.wrapper;
     }
     const graph = kinshipGraph();
     const result = describeKinship(graph, primary.id, person.id);
@@ -1131,7 +1157,7 @@
     } else {
       summary.textContent = `${person.name} is not a blood relative or close in-law of ${primary.name} in the recorded tree.`;
     }
-    kinSection.append(summary);
+    kinSection.body.append(summary);
 
     const addPeople = (label, ids) => {
       const group = document.createElement('div');
@@ -1147,7 +1173,7 @@
         list.append(button);
       }
       group.append(heading, list);
-      kinSection.append(group);
+      kinSection.body.append(group);
     };
     if (result.ancestors?.length) addPeople(result.ancestors.length === 1 ? 'Closest common ancestor' : 'Closest common ancestors', result.ancestors);
     if (result.via) addPeople('Connected through', [result.via]);
@@ -1157,7 +1183,7 @@
       const none = document.createElement('div');
       none.className = 'event-detail';
       none.textContent = `No recorded family links connect ${person.name} to ${primary.name}.`;
-      kinSection.append(none);
+      kinSection.body.append(none);
     } else {
       const group = document.createElement('div');
       group.className = 'relation-group';
@@ -1180,13 +1206,13 @@
         list.append(label, button);
       }
       group.append(heading, list);
-      kinSection.append(group);
+      kinSection.body.append(group);
     }
     const note = document.createElement('div');
     note.className = 'event-source';
     note.textContent = 'Calculated from relationships recorded in this GEDCOM; confirm against sources before relying on it.';
-    kinSection.append(note);
-    return kinSection;
+    kinSection.body.append(note);
+    return kinSection.wrapper;
   }
 
   function primaryPersonStorageKey() {
@@ -1566,7 +1592,7 @@
     elements.details.replaceChildren();
     // Re-renders for the same person (e.g. after an edit) keep their scroll position.
     if (state.selectedId !== lastDetailsPersonId) {
-      elements.details.scrollTop = 0;
+      elements.details.querySelector('.details-scroll')?.scrollTo?.(0, 0);
       lastDetailsPersonId = state.selectedId;
     }
     syncPrimaryPersonBar();
@@ -1709,14 +1735,14 @@
     const kinship = renderKinship(person);
     if (kinship) elements.details.append(kinship);
     const relationSection = section('Relationships');
-    for (const [label, items] of relationshipGroups(person)) addRelationGroup(relationSection, label, items);
-    elements.details.append(relationSection);
+    for (const [label, items] of relationshipGroups(person)) addRelationGroup(relationSection.body, label, items);
+    elements.details.append(relationSection.wrapper);
     elements.details.append(renderEvents(person));
     const sourceIds = [...new Set(person.sourceIds)];
     const sourceSection = section('Source references');
     if (!sourceIds.length) {
       const empty = document.createElement('div'); empty.className = 'event-detail'; empty.textContent = 'No person-level source references recorded.';
-      sourceSection.append(empty);
+      sourceSection.body.append(empty);
     } else {
       const list = document.createElement('div'); list.className = 'source-list';
       for (const sourceId of sourceIds) {
@@ -1725,20 +1751,47 @@
         chip.textContent = source?.title ? `${sourceId} · ${source.title}` : sourceId;
         list.append(chip);
       }
-      sourceSection.append(list);
+      sourceSection.body.append(list);
     }
-    elements.details.append(sourceSection);
+    elements.details.append(sourceSection.wrapper);
     const media = renderMedia(person);
     if (media) elements.details.append(media);
+    // The hero (card image, birth country, name, action buttons) is a fixed
+    // header: everything below it scrolls in its own container instead of the
+    // hero scrolling away with the rest.
+    const scroll = document.createElement('div');
+    scroll.className = 'details-scroll';
+    while (elements.details.childNodes.length > 1) scroll.append(elements.details.childNodes[1]);
+    elements.details.append(scroll);
   }
 
   function renderMedia(person) {
     const mediaSection = document.createElement('section');
     mediaSection.className = 'detail-section detail-media-section';
-    const heading = document.createElement('h3');
+    const heading = document.createElement('button');
+    heading.type = 'button';
     heading.className = 'detail-section-title';
-    heading.textContent = `Attached media (${person.mediaPaths.length})`;
-    mediaSection.append(heading);
+    heading.setAttribute('aria-expanded', 'true');
+    const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    chevron.setAttribute('viewBox', '0 0 24 24');
+    chevron.setAttribute('aria-hidden', 'true');
+    chevron.setAttribute('class', 'detail-section-chevron');
+    const chevronPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    chevronPath.setAttribute('d', 'M6 9l6 6 6-6');
+    chevronPath.setAttribute('fill', 'none');
+    chevron.append(chevronPath);
+    const headingLabel = document.createElement('span');
+    headingLabel.className = 'detail-section-label';
+    headingLabel.textContent = `Attached media (${person.mediaPaths.length})`;
+    heading.append(chevron, headingLabel);
+    const mediaBody = document.createElement('div');
+    mediaBody.className = 'detail-section-body';
+    heading.addEventListener('click', () => {
+      const collapsed = mediaSection.classList.toggle('is-collapsed');
+      heading.setAttribute('aria-expanded', String(!collapsed));
+      mediaBody.hidden = collapsed;
+    });
+    mediaSection.append(heading, mediaBody);
 
     const actions = document.createElement('div');
     actions.className = 'media-actions';
@@ -1754,13 +1807,22 @@
           : 'Select a media folder before adding files';
       actions.append(addButton);
     }
-    mediaSection.append(actions);
+    // Open this person's media folder in File Explorer, focused. With a media
+    // folder opened in the tab this still works when the local helper reveals
+    // it; through the launcher it always can.
+    const openFolderButton = makeButton('Open media folder', 'media-open-folder-button');
+    openFolderButton.type = 'button';
+    openFolderButton.dataset.openMediaFolderFor = person.id;
+    openFolderButton.title = 'Open this person\'s media folder in File Explorer';
+    if (!state.mediaHelper?.reveal && !state.mediaDirectoryHandle) openFolderButton.disabled = true;
+    actions.append(openFolderButton);
+    mediaBody.append(actions);
 
     if (!person.mediaPaths.length) {
       const note = document.createElement('div');
       note.className = 'event-detail';
       note.textContent = 'No media attached yet.';
-      mediaSection.append(note);
+      mediaBody.append(note);
       return mediaSection;
     }
 
@@ -1768,7 +1830,7 @@
       const note = document.createElement('div');
       note.className = 'event-detail';
       note.textContent = 'Link the media folder to view these files.';
-      mediaSection.append(note);
+      mediaBody.append(note);
       return mediaSection;
     }
 
@@ -1781,7 +1843,7 @@
     };
     const grid = document.createElement('div');
     grid.className = 'media-grid';
-    mediaSection.append(grid);
+    mediaBody.append(grid);
     const mediaItems = [];
     const primaryImage = primaryImageFor(person);
     const linkedEvents = new Map();
@@ -1874,18 +1936,18 @@
         expandedMediaPersonId = expanded ? person.id : null;
         applyExpanded();
       });
-      mediaSection.append(showMoreButton);
+      mediaBody.append(showMoreButton);
     }
     if (missing === person.mediaPaths.length) {
       const note = document.createElement('div');
       note.className = 'event-detail';
       note.textContent = 'No referenced files were found in the selected folder.';
-      mediaSection.append(note);
+      mediaBody.append(note);
     } else if (missing) {
       const note = document.createElement('div');
       note.className = 'event-source';
       note.textContent = `${missing} referenced file${missing === 1 ? '' : 's'} not found.`;
-      mediaSection.append(note);
+      mediaBody.append(note);
     }
     return mediaSection;
   }
@@ -2236,17 +2298,9 @@
         if (entry) chosen.push(entry);
       }
       const applied = applyBulkMediaClassification(chosen, 'portrait');
-      // Only drop the rows that were actually applied; any unticked row stays
-      // on screen so it can still be reviewed individually.
-      for (const check of [...list.querySelectorAll('input[type="checkbox"]:checked')]) {
-        const row = check.closest('.profile-review-row');
-        check.checked = false;
-        check.disabled = true;
-        row?.classList.add('is-applied');
-        const single = row?.querySelector('.face-scan-single');
-        if (single) { single.disabled = true; single.textContent = 'Portrait applied'; }
-      }
-      if (!list.querySelector('.profile-review-row')) close();
+      // The classification is done, so the review dialog closes: the Media
+      // Library's own portrait view reflects the change immediately.
+      if (applied) close();
       if (applied) showToast(`${applied} image${applied === 1 ? '' : 's'} classified as Portrait.`);
     });
     dialog.querySelector('.face-scan-cancel').addEventListener('click', close);
@@ -3950,13 +4004,14 @@
   // Printed pages are always light: a dark theme wastes ink and photos, charts
   // and maps are designed for the light palette. The current theme is restored
   // as soon as the print dialog closes.
+  const printLightThemes = new Set(['dark']);
   function forcePrintLightTheme() {
     const root = document.documentElement;
     const previous = root.dataset.theme;
-    if (previous !== 'dark') return () => { };
-    root.dataset.theme = 'light';
-    // Any dark-mode stylesheet rules keyed on [data-theme=dark] stop matching;
-    // also drop the dark native-widget hint so form controls print light.
+    if (!printLightThemes.has(previous)) return () => { };
+    root.dataset.theme = 'heritage';
+    // Any dark-mode stylesheet rules stop matching; also drop the dark
+    // native-widget hint so form controls print light.
     const meta = document.querySelector('meta[name="color-scheme"]');
     const previousMeta = meta?.getAttribute('content');
     if (meta) meta.setAttribute('content', 'light');

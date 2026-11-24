@@ -105,6 +105,96 @@
     return state.mediaDirectoryHandle?.name || state.mediaHelper?.mediaFolder || state.mediaHelper?.folder || '';
   }
 
+  // Adopting: new image or PDF files a user dropped by hand into an existing
+  // person folder, but that no GEDCOM record names yet, become that person's
+  // media. The file keeps its place; only the link is added (and saved).
+  function mediaOrganiseFolderOwnerOf(folderName) {
+    const wanted = String(folderName || '').trim().toLocaleLowerCase();
+    if (!wanted) return '';
+    // A folder named "... [I123]" names its person however the rest is spelled.
+    const idInName = /\[([^\]]+)\]\s*$/.exec(wanted)?.[1]?.replace(/^@+|@+$/g, '').toLocaleLowerCase();
+    if (idInName) {
+      const byId = [...state.people.keys()].find((key) => key.toLocaleLowerCase() === idInName);
+      if (byId) return byId;
+    }
+    for (const person of state.people.values()) {
+      if (mediaPersonFolderName(person.id).toLocaleLowerCase() === wanted) return person.id;
+    }
+    return '';
+  }
+
+  // Files a person record already names, by normalised path or bare name.
+  function mediaOrganiseLinkedKeys() {
+    const keys = new Set();
+    const add = (path) => {
+      if (!path) return;
+      keys.add(normalizeMediaPath(path));
+      keys.add(normalizeMediaPath(splitName(path)));
+    };
+    for (const person of state.people.values()) for (const path of person.mediaPaths || []) add(path);
+    for (const family of state.families.values()) for (const event of [family.marriage, family.divorce]) for (const path of event?.mediaPaths || []) add(path);
+    return keys;
+  }
+
+  // Walks the folder open in the tab — or, in helper mode, the media files the
+  // launcher already indexed — and adopts every unlinked media file that sits
+  // inside a person folder. Returns how many were linked.
+  async function adoptMediaInPersonFolders() {
+    if (!state.people.size) return 0;
+    const core = mediaOrganiseHelpers();
+    const linked = mediaOrganiseLinkedKeys();
+    let adopted = 0;
+    let changed = false;
+    const adopt = (relativePath) => {
+      if (linked.has(normalizeMediaPath(relativePath)) || linked.has(normalizeMediaPath(splitName(relativePath)))) return;
+      const segments = relativePath.split('/');
+      if (segments.length < 2) return;
+      const personId = mediaOrganiseFolderOwnerOf(segments[0]);
+      if (!personId) return;
+      const person = state.people.get(personId);
+      if (!person) return;
+      if (!person.mediaPaths.includes(relativePath)) person.mediaPaths.push(relativePath);
+      const paths = state.additionalMedia.get(personId) || [];
+      if (!paths.includes(relativePath)) paths.push(relativePath);
+      state.additionalMedia.set(personId, paths);
+      linked.add(normalizeMediaPath(relativePath));
+      linked.add(normalizeMediaPath(splitName(relativePath)));
+      adopted += 1;
+      changed = true;
+    };
+    if (state.mediaDirectoryHandle) {
+      const walk = async (directory, prefix) => {
+        for await (const [name, entry] of directory.entries()) {
+          const relativePath = prefix ? `${prefix}/${name}` : name;
+          if (entry.kind === 'directory') { await walk(entry, relativePath); continue; }
+          if (!core.isMediaFile(name)) continue;
+          adopt(relativePath);
+        }
+      };
+      try {
+        await walk(state.mediaDirectoryHandle, '');
+      } catch (error) {
+        console.warn('Person folders could not be checked for new media.', error);
+        return adopted;
+      }
+    } else if (state.mediaHelper && Array.isArray(window.KINSHIP_PRIMARY?.media)) {
+      // Helper mode: the launcher's primary-data.js lists every media file in
+      // the library with its person-folder path.
+      for (const item of window.KINSHIP_PRIMARY.media) {
+        if (item?.path) adopt(item.path);
+      }
+    } else {
+      return 0;
+    }
+    if (changed) {
+      savePrimaryMedia();
+      saveAdditionalMedia();
+      // The media library and details panel pick up the new links.
+      if (state.selectedId) setFocus(state.selectedId, true); else render();
+    }
+    return adopted;
+  }
+
   // Every media file under the folder open in this tab, as { relativePath }.
   async function collectMediaOrganiseFiles() {
     const core = mediaOrganiseHelpers();
@@ -114,7 +204,11 @@
         const relativePath = prefix ? `${prefix}/${name}` : name;
         if (entry.kind === 'directory') { await walk(entry, relativePath); continue; }
         if (!core.isMediaFile(name)) continue;
-        files.push({ relativePath });
+        // Sizes let the planner recognise a copy an earlier organise run left in
+        // the destination folder (same name and size = already copied).
+        let size = 0;
+        try { size = (await entry.getFile()).size; } catch { size = 0; }
+        files.push({ relativePath, size });
       }
     };
     await walk(state.mediaDirectoryHandle, '');
@@ -397,7 +491,7 @@ This cannot be undone.`)) return;
     return { removed: 1, failed: 0 };
   }
 
-  function renderMediaOrganisePlan(planState) {
+  function renderMediaOrganisePlan(planState, adoptedCount = 0) {
     const ui = mediaOrganiseElements();
     const plan = mediaOrganisePlanOf(planState);
     const unusedFolders = plan.unusedFolders || [];
@@ -420,6 +514,7 @@ This cannot be undone.`)) return;
     } else {
       ui.summary.textContent = `${parts.join(' · ')}.`;
     }
+    if (adoptedCount) ui.summary.textContent = `${mediaOrganiseCount(adoptedCount, 'new file')} in person folders adopted as that person's media. ${ui.summary.textContent}`;
     ui.list.replaceChildren();
     // Unactioned tasks come first; completed groups follow with a green tick.
     const pending = [];
@@ -484,15 +579,19 @@ This cannot be undone.`)) return;
     ui.apply.disabled = true;
     setMediaOrganiseStatus('Reading the media folder…');
     try {
+      // New files dropped by hand into a person folder become that person's
+      // media before the plan is drawn, so the check sees them as linked.
+      const adopted = await adoptMediaInPersonFolders();
       if (mediaOrganiseUsesFolder()) {
         const scanned = await scanMediaOrganiseWithFolder();
         mediaOrganisePlanState = { ...scanned.plan, unusedFolders: scanned.unusedFolders || [] };
-        renderMediaOrganisePlan(mediaOrganisePlanState);
+        renderMediaOrganisePlan(mediaOrganisePlanState, adopted);
       } else {
         const body = await scanMediaOrganiseWithHelper();
         mediaOrganisePlanState = mediaOrganisePlanOf(body.plan);
         renderMediaOrganisePlan(mediaOrganisePlanState);
       }
+      if (adopted) ui.summary.textContent = `${mediaOrganiseCount(adopted, 'new file')} in person folders adopted as that person's media. ${ui.summary.textContent}`;
       setMediaOrganiseStatus('');
     } catch (error) {
       ui.summary.textContent = error?.message || 'The media folder could not be read.';
@@ -557,6 +656,10 @@ This cannot be undone.`)) return;
       }
       savePrimaryMedia();
       saveAdditionalMedia();
+      // New files dropped by hand into a person folder while organising become
+      // that person's media, so nothing waits for the next check.
+      const adopted = await adoptMediaInPersonFolders();
+      if (adopted) ui.status.textContent = `${mediaOrganiseCount(adopted, 'new file')} in person folders adopted as that person's media. `;
       // Re-read the media folder so previews, links and the Media Library show the new paths.
       if (folderMode) await indexMediaDirectory(state.mediaDirectoryHandle);
       // Card images and cached previews belong to the files' old places.

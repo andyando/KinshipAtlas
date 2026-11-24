@@ -548,7 +548,12 @@
   }
   for (const item of topMenus) {
     item.button.addEventListener('click', () => setMenuOpen(item, item.panel.hidden));
-    item.panel.addEventListener('click', () => window.setTimeout(() => setMenuOpen(item, false), 0));
+    // Any click inside the panel closes it, except interactions with the Theme
+    // submenu (its toggle and options), which manage their own opening state.
+    item.panel.addEventListener('click', (event) => {
+      if (event.target.closest('#themeSubmenu')) return;
+      window.setTimeout(() => setMenuOpen(item, false), 0);
+    });
   }
   document.addEventListener('click', (event) => {
     if (!topMenus.some((item) => item.menu.contains(event.target))) setMenuOpen(null, false);
@@ -875,4 +880,7 @@
     .then(() => probeMediaHelper())
     .then(() => syncSelectionsToHelper())
     .then(() => loadHelperMedia())
-    .then(() => syncMediaFolderLink());
+    .then(() => syncMediaFolderLink())
+    // Files the user dropped by hand into person folders while this tab was
+    // closed become that person's media, so nothing waits for a manual check.
+    .then(() => adoptMediaInPersonFolders());
