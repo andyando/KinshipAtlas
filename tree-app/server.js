@@ -5,6 +5,20 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFile } = require('node:child_process');
+
+// Explorer opens behind the browser window when launched from a web page; bring
+// it to the front with the Windows Script Host shell, matching the launcher's
+// SetForegroundWindow behavior. Tries the window's folder-name title first,
+// then the generic "File Explorer" title Windows 11 shows.
+function focusExplorerWindow(fallbackTitle) {
+  if (process.platform !== 'win32') return;
+  setTimeout(() => {
+    const script =
+      '$w = New-Object -ComObject wscript.shell; ' +
+      'if (-not $w.AppActivate(' + JSON.stringify(fallbackTitle).replace(/"/g, "'") + ')) { $w.AppActivate(\'File Explorer\') }';
+    execFile('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', script], () => { });
+  }, 500);
+}
 const { listMediaFiles, planFor, applyPlan, findDuplicates, applyDuplicates, deleteFolder, repoint } = require('./helpers/media-organise-fs.js');
 
 let mediaDir = path.resolve(process.argv[2] || process.env.MEDIA_DIR || '');
@@ -72,6 +86,7 @@ function revealInExplorer(request, response) {
       : process.platform === 'darwin' ? ['open', [fs.statSync(existing).isDirectory() ? existing : '-R', existing]]
         : ['xdg-open', [fs.statSync(existing).isDirectory() ? existing : path.dirname(existing)]];
     execFile(command, args, () => { });
+    focusExplorerWindow(path.basename(existing));
     send(response, 200, { ok: true });
   });
 }
@@ -236,6 +251,7 @@ function revealFile(request, response) {
       : process.platform === 'darwin' ? ['open', ['-R', target]]
         : ['xdg-open', [path.dirname(target)]];
     execFile(command, args, () => { });
+    focusExplorerWindow(path.basename(path.dirname(target)));
     send(response, 200, { ok: true });
   });
 }
@@ -392,7 +408,7 @@ const server = http.createServer((request, response) => {
   if (request.method === 'POST' && url.pathname === '/api/new-tree') return receiveNewTree(request, response);
   if (request.method === 'POST' && url.pathname === '/api/media') return receiveUpload(request, response);
   if (request.method === 'POST' && url.pathname === '/api/selections') return receiveSelections(request, response);
-  if (request.method === 'POST' && url.pathname === '/api/reveal') return revealFile(request, response);
+  if (request.method === 'POST' && url.pathname === '/api/reveal-file') return revealFile(request, response);
   if (request.method === 'POST' && url.pathname === '/api/media-delete') return deleteFile(request, response);
   if (request.method === 'POST' && url.pathname === '/api/media-organise') return receiveMediaOrganise(request, response);
   if (request.method === 'POST' && url.pathname === '/api/duplicates') return receiveDuplicates(request, response);
