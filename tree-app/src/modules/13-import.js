@@ -1578,6 +1578,25 @@
     });
   }
 
+  const treeManagementMenuButton = document.querySelector('#treeManagementMenuButton');
+  const treeManagementPanel = document.querySelector('#treeManagementPanel');
+  function setTreeManagementSubmenuOpen(open) {
+    treeManagementPanel.hidden = !open;
+    treeManagementMenuButton.setAttribute('aria-expanded', String(open));
+  }
+  treeManagementMenuButton.addEventListener('click', () => setTreeManagementSubmenuOpen(treeManagementPanel.hidden));
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('#treeManagementSubmenu')) setTreeManagementSubmenuOpen(false);
+  });
+  // Choosing an item closes the submenu and then the whole settings menu, the
+  // same way a top-level menu item does.
+  for (const item of treeManagementPanel.querySelectorAll('.menu-item:not(.menu-submenu-toggle)')) {
+    item.addEventListener('click', () => {
+      setTreeManagementSubmenuOpen(false);
+      window.setTimeout(() => setSettingsOpen(false), 0);
+    });
+  }
+
   document.querySelector('#duplicateRelationMenuButton').addEventListener('click', openDuplicateRelationFinder);
   document.querySelector('#duplicateRelationSelectAll').addEventListener('change', (event) => {
     const checked = event.target.checked;

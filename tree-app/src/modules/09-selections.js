@@ -528,7 +528,7 @@
       render();
       if (replacePortrait) {
         const selectedHeroImage = elements.details.querySelector('.detail-monogram-photo');
-        if (selectedHeroImage) selectedHeroImage.title = 'Click to view this photo larger';
+        if (selectedHeroImage) selectedHeroImage.title = 'Click to reframe this photo';
       }
       justAddedMedia = null;
       elements.details.querySelector('.is-just-added')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });

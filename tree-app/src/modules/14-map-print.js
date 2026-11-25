@@ -548,10 +548,10 @@
   }
   for (const item of topMenus) {
     item.button.addEventListener('click', () => setMenuOpen(item, item.panel.hidden));
-    // Any click inside the panel closes it, except interactions with the Theme
-    // submenu (its toggle and options), which manage their own opening state.
+    // Any click inside the panel closes it, except interactions with the
+    // submenus (their toggles and items), which manage their own opening state.
     item.panel.addEventListener('click', (event) => {
-      if (event.target.closest('#themeSubmenu')) return;
+      if (event.target.closest('#themeSubmenu') || event.target.closest('#treeManagementSubmenu')) return;
       window.setTimeout(() => setMenuOpen(item, false), 0);
     });
   }

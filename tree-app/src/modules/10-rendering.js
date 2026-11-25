@@ -1274,32 +1274,6 @@
 
 
 
-  // Full-screen preview of the card image, opened by clicking the portrait.
-  function showExpandedHeroImage(person) {
-    const cardImage = primaryImageFor(person);
-    if (!cardImage) return;
-    const overlay = document.createElement('dialog');
-    overlay.className = 'hero-expand-dialog';
-    const img = document.createElement('img');
-    img.className = 'hero-expand-image';
-    img.src = mediaUrl(cardImage.file);
-    img.alt = `${person.name} — enlarged card image`;
-    img.style.maxWidth = '92vw';
-    img.style.maxHeight = 'min(700px, 88vh)';
-    const shrink = document.createElement('button');
-    shrink.type = 'button';
-    shrink.className = 'hero-expand-shrink';
-    shrink.title = 'Shrink image back to normal size';
-    shrink.setAttribute('aria-label', 'Shrink the image back to normal size');
-    shrink.textContent = '⤡ Shrink';
-    const close = () => { overlay.close(); overlay.remove(); };
-    shrink.addEventListener('click', close);
-    overlay.addEventListener('click', (event) => { if (event.target === overlay) close(); });
-    overlay.append(img, shrink);
-    document.body.append(overlay);
-    overlay.showModal();
-  }
-
   // --- Hero image reframing -------------------------------------------------
   // Stores how the card image sits inside its square frame, per person, in
   // browser storage and the helper-backed selections file.
@@ -1309,7 +1283,13 @@
 
   function loadHeroFrameState(personId, fileName) {
     const saved = readSelection(heroFrameStorageKey(personId));
-    if (saved && saved.file === fileName && typeof saved.scale === 'number') return saved;
+    // Callers pass either the file's name or the File object; a File serialises
+    // to {} in JSON, so the stored side is always the name string.
+    const wanted = typeof fileName === 'string' ? fileName : fileName?.name;
+    // Older entries stored the File object itself, which serialises to {} in
+    // JSON; those match any file so the framing still shows rather than vanishing.
+    const savedFile = typeof saved?.file === 'string' ? saved.file : saved?.file?.name;
+    if (saved && (!savedFile || savedFile === wanted) && typeof saved.scale === 'number') return saved;
     return null;
   }
 
@@ -1378,7 +1358,9 @@
     const saved = loadHeroFrameState(person.id, cardImage.file);
     // 100% is the fully zoomed-out fit (the photo fills the square), so a
     // stored framing scales from there; the minimum is clamped to 1.
-    const working = saved ? { ...saved } : { file: cardImage.file, x: 0, y: 0, scale: 1 };
+    // The file is recorded by name (not the File object): the state is stored
+    // as JSON, and a File serialises to {}.
+    const working = saved ? { ...saved } : { file: cardImage.file.name, x: 0, y: 0, scale: 1 };
 
     const dialog = document.createElement('dialog');
     dialog.className = 'hero-frame-editor';
@@ -1466,7 +1448,7 @@
     dialog.querySelector('.dialog-close').addEventListener('click', close);
     dialog.addEventListener('click', (event) => { if (event.target === dialog) close(); });
     dialog.querySelector('.hero-frame-apply').addEventListener('click', async () => {
-      const stored = saveHeroFrameState(person.id, { ...frameRenderer.state, file: cardImage.file });
+      const stored = saveHeroFrameState(person.id, { ...frameRenderer.state, file: cardImage.file.name });
       close();
       renderDetails();
       if (!state.mapMode && !state.reportsMode && !state.mediaLibraryMode) renderGraph();
@@ -1485,7 +1467,7 @@
     reframe.className = 'detail-monogram-reframe';
     reframe.title = 'Reframe photo (move, zoom and pan inside the square)';
     reframe.setAttribute('aria-label', 'Reframe the card photo inside its square frame');
-    reframe.textContent = '⛶';
+    setButtonContent(reframe, 'edit', '');
     reframe.addEventListener('click', (event) => {
       event.stopPropagation();
       openHeroReframeEditor(person);
@@ -1622,10 +1604,10 @@
       const framing = loadHeroFrameState(person.id, cardImage.file) || { file: cardImage.file, x: 0, y: 0, scale: 1 };
       monogram.classList.add('hero-frame-applied');
       createHeroFrameRenderer(framing).paintHero(photo);
-      photo.title = 'Click to view this photo larger';
+      photo.title = 'Click to reframe this photo';
       photo.addEventListener('click', (event) => {
         event.stopPropagation();
-        showExpandedHeroImage(person);
+        openHeroReframeEditor(person);
       });
       const changeImage = document.createElement('button');
       changeImage.type = 'button';
@@ -1877,7 +1859,9 @@
         link.rel = 'noopener';
         link.title = mediaTitle(file, path);
         const image = document.createElement('img');
-        image.src = mediaUrl(file);
+        image.loading = 'lazy';
+        image.decoding = 'async';
+        image.src = mediaThumbnailUrl(file) || mediaUrl(file);
         image.alt = file.name;
         link.append(image);
         const isPrimary = primaryImage?.path === path;
@@ -2521,17 +2505,29 @@
     const fragment = document.createDocumentFragment();
     const tableMode = state.mediaLibraryView === 'table';
     elements.mediaLibraryContent.classList.toggle('is-table', tableMode);
+    const pageEntries = entries.slice(start, start + mediaLibraryPageSize);
     if (tableMode) {
       const table = createMediaLibraryTable();
       const body = table.querySelector('tbody');
-      for (const entry of entries.slice(start, start + mediaLibraryPageSize)) body.append(createMediaLibraryRow(entry));
+      for (const entry of pageEntries) body.append(createMediaLibraryRow(entry));
       fragment.append(table);
     } else {
-      for (const entry of entries.slice(start, start + mediaLibraryPageSize)) {
+      for (const entry of pageEntries) {
         fragment.append(createMediaLibraryCard(entry));
       }
     }
     elements.mediaLibraryContent.replaceChildren(fragment);
+    // Start the small-thumbnail conversions for this page. Each one that lands
+    // swaps its <img> over from the full-size source, so scrolling stays light.
+    for (const entry of pageEntries) {
+      if (!entry.file || !isImageFile(entry.file) || mediaThumbnailReady(entry.file)) continue;
+      requestMediaThumbnail(entry.file);
+    }
+    if (mediaThumbnailPending.size) {
+      Promise.allSettled([...mediaThumbnailPending.values()]).then(() => {
+        if (state.mediaLibraryMode) renderMediaLibrary();
+      });
+    }
   }
 
   function syncMediaLibraryViewButtons() {
@@ -2573,7 +2569,7 @@
       image.className = 'media-library-row-thumb';
       image.loading = 'lazy';
       image.decoding = 'async';
-      image.src = url;
+      image.src = mediaThumbnailUrl(entry.file) || mediaUrl(entry.file);
       image.alt = entry.file.name;
       link.append(image);
       return link;
@@ -2776,16 +2772,17 @@
     const preview = document.createElement('div');
     preview.className = 'media-library-preview';
     if (entry.file && isImageFile(entry.file)) {
-      const url = mediaUrl(entry.file);
       const link = document.createElement('a');
-      link.href = url;
+      link.href = mediaUrl(entry.file);
       link.target = '_blank';
       link.rel = 'noopener';
       link.setAttribute('aria-label', `View ${entry.file.name}`);
       const image = document.createElement('img');
       image.loading = 'lazy';
       image.decoding = 'async';
-      image.src = url;
+      // The downscaled thumbnail when it is ready; the full image is requested
+      // as the fallback, so the preview always shows something.
+      image.src = mediaThumbnailUrl(entry.file) || mediaUrl(entry.file);
       image.alt = entry.file.name;
       link.append(image);
       preview.append(link);

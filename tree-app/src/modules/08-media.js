@@ -51,6 +51,70 @@
     return state.mediaUrls.get(file);
   }
 
+  // --- Small thumbnails for the media library -------------------------------
+  // Scans are often several megabytes; decoding the full image for a 220px
+  // preview is what makes the library slow to scroll. Each image is decoded
+  // once, downscaled on an offscreen canvas, and the small result is cached as
+  // a blob URL keyed by name+size, so re-renders and re-scrolls are instant.
+  const mediaThumbnailCache = new Map(); // key -> blob URL
+  const mediaThumbnailPending = new Map(); // key -> Promise<blob URL>
+  const MEDIA_THUMB_EDGE = 240;
+
+  function mediaThumbnailKey(file) {
+    return `${file.name}:${file.size || 0}`;
+  }
+
+  function mediaThumbnailUrl(file) {
+    return mediaThumbnailCache.get(mediaThumbnailKey(file)) || null;
+  }
+
+  // Returns a URL for a downscaled thumbnail, or null while it is being made
+  // (the caller keeps showing the full image until a later render swaps it in).
+  function requestMediaThumbnail(file) {
+    const key = mediaThumbnailKey(file);
+    const cached = mediaThumbnailCache.get(key);
+    if (cached) return cached;
+    let pending = mediaThumbnailPending.get(key);
+    if (pending) return null;
+    // Only the helper/launcher files have a fetchable URL; a picked File is
+    // readable directly.
+    const sourceUrl = mediaUrl(file);
+    pending = (async () => {
+      try {
+        let blob;
+        if (file.kinshipUrl) blob = await (await fetch(sourceUrl)).blob();
+        else blob = file;
+        if (!globalThis.createImageBitmap) throw new Error('no createImageBitmap');
+        const bitmap = await createImageBitmap(blob, { resizeWidth: MEDIA_THUMB_EDGE, resizeQuality: 'medium' });
+        const canvas = document.createElement('canvas');
+        const scale = Math.min(1, MEDIA_THUMB_EDGE / Math.max(bitmap.width, bitmap.height || 1));
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        bitmap.close();
+        const thumbBlob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.8));
+        if (!thumbBlob) throw new Error('thumbnail encode failed');
+        const url = URL.createObjectURL(thumbBlob);
+        mediaThumbnailCache.set(key, url);
+        return url;
+      } catch {
+        // No thumbnail (unsupported type or API): fall back to the full image.
+        mediaThumbnailCache.set(key, sourceUrl);
+        return sourceUrl;
+      } finally {
+        mediaThumbnailPending.delete(key);
+      }
+    })();
+    mediaThumbnailPending.set(key, pending);
+    return null;
+  }
+
+  // A thumbnail is ready when the cache holds a URL for the file (the request
+  // path stores the fallback URL too, so this settles one way or the other).
+  function mediaThumbnailReady(file) {
+    return mediaThumbnailCache.has(mediaThumbnailKey(file));
+  }
+
   // Files that left the media folder (moved by "Organise media files" or deleted
   // as duplicates) drop out of the index when the folder is re-read, because the
   // index is rebuilt only from the files that are there now.
@@ -145,7 +209,10 @@
       for (const [personId, paths] of Object.entries(saved)) {
         const person = people.get(personId);
         if (!person || !Array.isArray(paths)) continue;
-        const validPaths = [...new Set(paths.filter((path) => typeof path === 'string' && path && !/[\\/]/.test(path)))];
+        // Person-folder links ("Person [I72]/photo.png") are kept as well as
+        // bare names: uploads through the local helper are saved in the
+        // person's own folder, so the link needs the folder to be found again.
+        const validPaths = [...new Set(paths.filter((path) => typeof path === 'string' && path.trim()))];
         if (!validPaths.length) continue;
         additionalMedia.set(personId, validPaths);
         for (const path of validPaths) if (!person.mediaPaths.includes(path)) person.mediaPaths.push(path);

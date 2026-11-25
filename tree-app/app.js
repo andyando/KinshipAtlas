@@ -1150,6 +1150,70 @@
     return state.mediaUrls.get(file);
   }
 
+  // --- Small thumbnails for the media library -------------------------------
+  // Scans are often several megabytes; decoding the full image for a 220px
+  // preview is what makes the library slow to scroll. Each image is decoded
+  // once, downscaled on an offscreen canvas, and the small result is cached as
+  // a blob URL keyed by name+size, so re-renders and re-scrolls are instant.
+  const mediaThumbnailCache = new Map(); // key -> blob URL
+  const mediaThumbnailPending = new Map(); // key -> Promise<blob URL>
+  const MEDIA_THUMB_EDGE = 240;
+
+  function mediaThumbnailKey(file) {
+    return `${file.name}:${file.size || 0}`;
+  }
+
+  function mediaThumbnailUrl(file) {
+    return mediaThumbnailCache.get(mediaThumbnailKey(file)) || null;
+  }
+
+  // Returns a URL for a downscaled thumbnail, or null while it is being made
+  // (the caller keeps showing the full image until a later render swaps it in).
+  function requestMediaThumbnail(file) {
+    const key = mediaThumbnailKey(file);
+    const cached = mediaThumbnailCache.get(key);
+    if (cached) return cached;
+    let pending = mediaThumbnailPending.get(key);
+    if (pending) return null;
+    // Only the helper/launcher files have a fetchable URL; a picked File is
+    // readable directly.
+    const sourceUrl = mediaUrl(file);
+    pending = (async () => {
+      try {
+        let blob;
+        if (file.kinshipUrl) blob = await (await fetch(sourceUrl)).blob();
+        else blob = file;
+        if (!globalThis.createImageBitmap) throw new Error('no createImageBitmap');
+        const bitmap = await createImageBitmap(blob, { resizeWidth: MEDIA_THUMB_EDGE, resizeQuality: 'medium' });
+        const canvas = document.createElement('canvas');
+        const scale = Math.min(1, MEDIA_THUMB_EDGE / Math.max(bitmap.width, bitmap.height || 1));
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        bitmap.close();
+        const thumbBlob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.8));
+        if (!thumbBlob) throw new Error('thumbnail encode failed');
+        const url = URL.createObjectURL(thumbBlob);
+        mediaThumbnailCache.set(key, url);
+        return url;
+      } catch {
+        // No thumbnail (unsupported type or API): fall back to the full image.
+        mediaThumbnailCache.set(key, sourceUrl);
+        return sourceUrl;
+      } finally {
+        mediaThumbnailPending.delete(key);
+      }
+    })();
+    mediaThumbnailPending.set(key, pending);
+    return null;
+  }
+
+  // A thumbnail is ready when the cache holds a URL for the file (the request
+  // path stores the fallback URL too, so this settles one way or the other).
+  function mediaThumbnailReady(file) {
+    return mediaThumbnailCache.has(mediaThumbnailKey(file));
+  }
+
   // Files that left the media folder (moved by "Organise media files" or deleted
   // as duplicates) drop out of the index when the folder is re-read, because the
   // index is rebuilt only from the files that are there now.
@@ -1244,7 +1308,10 @@
       for (const [personId, paths] of Object.entries(saved)) {
         const person = people.get(personId);
         if (!person || !Array.isArray(paths)) continue;
-        const validPaths = [...new Set(paths.filter((path) => typeof path === 'string' && path && !/[\\/]/.test(path)))];
+        // Person-folder links ("Person [I72]/photo.png") are kept as well as
+        // bare names: uploads through the local helper are saved in the
+        // person's own folder, so the link needs the folder to be found again.
+        const validPaths = [...new Set(paths.filter((path) => typeof path === 'string' && path.trim()))];
         if (!validPaths.length) continue;
         additionalMedia.set(personId, validPaths);
         for (const path of validPaths) if (!person.mediaPaths.includes(path)) person.mediaPaths.push(path);
@@ -1912,7 +1979,7 @@
       render();
       if (replacePortrait) {
         const selectedHeroImage = elements.details.querySelector('.detail-monogram-photo');
-        if (selectedHeroImage) selectedHeroImage.title = 'Click to view this photo larger';
+        if (selectedHeroImage) selectedHeroImage.title = 'Click to reframe this photo';
       }
       justAddedMedia = null;
       elements.details.querySelector('.is-just-added')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -3514,32 +3581,6 @@
 
 
 
-  // Full-screen preview of the card image, opened by clicking the portrait.
-  function showExpandedHeroImage(person) {
-    const cardImage = primaryImageFor(person);
-    if (!cardImage) return;
-    const overlay = document.createElement('dialog');
-    overlay.className = 'hero-expand-dialog';
-    const img = document.createElement('img');
-    img.className = 'hero-expand-image';
-    img.src = mediaUrl(cardImage.file);
-    img.alt = `${person.name} — enlarged card image`;
-    img.style.maxWidth = '92vw';
-    img.style.maxHeight = 'min(700px, 88vh)';
-    const shrink = document.createElement('button');
-    shrink.type = 'button';
-    shrink.className = 'hero-expand-shrink';
-    shrink.title = 'Shrink image back to normal size';
-    shrink.setAttribute('aria-label', 'Shrink the image back to normal size');
-    shrink.textContent = '⤡ Shrink';
-    const close = () => { overlay.close(); overlay.remove(); };
-    shrink.addEventListener('click', close);
-    overlay.addEventListener('click', (event) => { if (event.target === overlay) close(); });
-    overlay.append(img, shrink);
-    document.body.append(overlay);
-    overlay.showModal();
-  }
-
   // --- Hero image reframing -------------------------------------------------
   // Stores how the card image sits inside its square frame, per person, in
   // browser storage and the helper-backed selections file.
@@ -3549,7 +3590,13 @@
 
   function loadHeroFrameState(personId, fileName) {
     const saved = readSelection(heroFrameStorageKey(personId));
-    if (saved && saved.file === fileName && typeof saved.scale === 'number') return saved;
+    // Callers pass either the file's name or the File object; a File serialises
+    // to {} in JSON, so the stored side is always the name string.
+    const wanted = typeof fileName === 'string' ? fileName : fileName?.name;
+    // Older entries stored the File object itself, which serialises to {} in
+    // JSON; those match any file so the framing still shows rather than vanishing.
+    const savedFile = typeof saved?.file === 'string' ? saved.file : saved?.file?.name;
+    if (saved && (!savedFile || savedFile === wanted) && typeof saved.scale === 'number') return saved;
     return null;
   }
 
@@ -3618,7 +3665,9 @@
     const saved = loadHeroFrameState(person.id, cardImage.file);
     // 100% is the fully zoomed-out fit (the photo fills the square), so a
     // stored framing scales from there; the minimum is clamped to 1.
-    const working = saved ? { ...saved } : { file: cardImage.file, x: 0, y: 0, scale: 1 };
+    // The file is recorded by name (not the File object): the state is stored
+    // as JSON, and a File serialises to {}.
+    const working = saved ? { ...saved } : { file: cardImage.file.name, x: 0, y: 0, scale: 1 };
 
     const dialog = document.createElement('dialog');
     dialog.className = 'hero-frame-editor';
@@ -3706,7 +3755,7 @@
     dialog.querySelector('.dialog-close').addEventListener('click', close);
     dialog.addEventListener('click', (event) => { if (event.target === dialog) close(); });
     dialog.querySelector('.hero-frame-apply').addEventListener('click', async () => {
-      const stored = saveHeroFrameState(person.id, { ...frameRenderer.state, file: cardImage.file });
+      const stored = saveHeroFrameState(person.id, { ...frameRenderer.state, file: cardImage.file.name });
       close();
       renderDetails();
       if (!state.mapMode && !state.reportsMode && !state.mediaLibraryMode) renderGraph();
@@ -3725,7 +3774,7 @@
     reframe.className = 'detail-monogram-reframe';
     reframe.title = 'Reframe photo (move, zoom and pan inside the square)';
     reframe.setAttribute('aria-label', 'Reframe the card photo inside its square frame');
-    reframe.textContent = '⛶';
+    setButtonContent(reframe, 'edit', '');
     reframe.addEventListener('click', (event) => {
       event.stopPropagation();
       openHeroReframeEditor(person);
@@ -3862,10 +3911,10 @@
       const framing = loadHeroFrameState(person.id, cardImage.file) || { file: cardImage.file, x: 0, y: 0, scale: 1 };
       monogram.classList.add('hero-frame-applied');
       createHeroFrameRenderer(framing).paintHero(photo);
-      photo.title = 'Click to view this photo larger';
+      photo.title = 'Click to reframe this photo';
       photo.addEventListener('click', (event) => {
         event.stopPropagation();
-        showExpandedHeroImage(person);
+        openHeroReframeEditor(person);
       });
       const changeImage = document.createElement('button');
       changeImage.type = 'button';
@@ -4117,7 +4166,9 @@
         link.rel = 'noopener';
         link.title = mediaTitle(file, path);
         const image = document.createElement('img');
-        image.src = mediaUrl(file);
+        image.loading = 'lazy';
+        image.decoding = 'async';
+        image.src = mediaThumbnailUrl(file) || mediaUrl(file);
         image.alt = file.name;
         link.append(image);
         const isPrimary = primaryImage?.path === path;
@@ -4761,17 +4812,29 @@
     const fragment = document.createDocumentFragment();
     const tableMode = state.mediaLibraryView === 'table';
     elements.mediaLibraryContent.classList.toggle('is-table', tableMode);
+    const pageEntries = entries.slice(start, start + mediaLibraryPageSize);
     if (tableMode) {
       const table = createMediaLibraryTable();
       const body = table.querySelector('tbody');
-      for (const entry of entries.slice(start, start + mediaLibraryPageSize)) body.append(createMediaLibraryRow(entry));
+      for (const entry of pageEntries) body.append(createMediaLibraryRow(entry));
       fragment.append(table);
     } else {
-      for (const entry of entries.slice(start, start + mediaLibraryPageSize)) {
+      for (const entry of pageEntries) {
         fragment.append(createMediaLibraryCard(entry));
       }
     }
     elements.mediaLibraryContent.replaceChildren(fragment);
+    // Start the small-thumbnail conversions for this page. Each one that lands
+    // swaps its <img> over from the full-size source, so scrolling stays light.
+    for (const entry of pageEntries) {
+      if (!entry.file || !isImageFile(entry.file) || mediaThumbnailReady(entry.file)) continue;
+      requestMediaThumbnail(entry.file);
+    }
+    if (mediaThumbnailPending.size) {
+      Promise.allSettled([...mediaThumbnailPending.values()]).then(() => {
+        if (state.mediaLibraryMode) renderMediaLibrary();
+      });
+    }
   }
 
   function syncMediaLibraryViewButtons() {
@@ -4813,7 +4876,7 @@
       image.className = 'media-library-row-thumb';
       image.loading = 'lazy';
       image.decoding = 'async';
-      image.src = url;
+      image.src = mediaThumbnailUrl(entry.file) || mediaUrl(entry.file);
       image.alt = entry.file.name;
       link.append(image);
       return link;
@@ -5016,16 +5079,17 @@
     const preview = document.createElement('div');
     preview.className = 'media-library-preview';
     if (entry.file && isImageFile(entry.file)) {
-      const url = mediaUrl(entry.file);
       const link = document.createElement('a');
-      link.href = url;
+      link.href = mediaUrl(entry.file);
       link.target = '_blank';
       link.rel = 'noopener';
       link.setAttribute('aria-label', `View ${entry.file.name}`);
       const image = document.createElement('img');
       image.loading = 'lazy';
       image.decoding = 'async';
-      image.src = url;
+      // The downscaled thumbnail when it is ready; the full image is requested
+      // as the fallback, so the preview always shows something.
+      image.src = mediaThumbnailUrl(entry.file) || mediaUrl(entry.file);
       image.alt = entry.file.name;
       link.append(image);
       preview.append(link);
@@ -9911,6 +9975,25 @@
     });
   }
 
+  const treeManagementMenuButton = document.querySelector('#treeManagementMenuButton');
+  const treeManagementPanel = document.querySelector('#treeManagementPanel');
+  function setTreeManagementSubmenuOpen(open) {
+    treeManagementPanel.hidden = !open;
+    treeManagementMenuButton.setAttribute('aria-expanded', String(open));
+  }
+  treeManagementMenuButton.addEventListener('click', () => setTreeManagementSubmenuOpen(treeManagementPanel.hidden));
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('#treeManagementSubmenu')) setTreeManagementSubmenuOpen(false);
+  });
+  // Choosing an item closes the submenu and then the whole settings menu, the
+  // same way a top-level menu item does.
+  for (const item of treeManagementPanel.querySelectorAll('.menu-item:not(.menu-submenu-toggle)')) {
+    item.addEventListener('click', () => {
+      setTreeManagementSubmenuOpen(false);
+      window.setTimeout(() => setSettingsOpen(false), 0);
+    });
+  }
+
   document.querySelector('#duplicateRelationMenuButton').addEventListener('click', openDuplicateRelationFinder);
   document.querySelector('#duplicateRelationSelectAll').addEventListener('change', (event) => {
     const checked = event.target.checked;
@@ -11083,10 +11166,10 @@
   }
   for (const item of topMenus) {
     item.button.addEventListener('click', () => setMenuOpen(item, item.panel.hidden));
-    // Any click inside the panel closes it, except interactions with the Theme
-    // submenu (its toggle and options), which manage their own opening state.
+    // Any click inside the panel closes it, except interactions with the
+    // submenus (their toggles and items), which manage their own opening state.
     item.panel.addEventListener('click', (event) => {
-      if (event.target.closest('#themeSubmenu')) return;
+      if (event.target.closest('#themeSubmenu') || event.target.closest('#treeManagementSubmenu')) return;
       window.setTimeout(() => setMenuOpen(item, false), 0);
     });
   }

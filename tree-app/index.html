@@ -59,30 +59,40 @@
             Open GEDCOM
             <input id="gedcomInput" type="file" accept=".ged,.gedcom,text/plain">
           </label>
-          <button id="importGedcomButton" class="menu-item" type="button" role="menuitem" disabled title="Add new people related to this tree from another GEDCOM file">Import new GEDCOM records</button>
+          <div class="menu-submenu" id="treeManagementSubmenu">
+            <button id="treeManagementMenuButton" class="menu-item menu-submenu-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="treeManagementPanel">
+              <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 20v-6M12 20V8M18 20v-3"/><circle cx="6" cy="11" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="18" cy="14" r="2"/></svg>
+              Tree Management
+              <span class="menu-caret submenu-caret" aria-hidden="true">▸</span>
+            </button>
+            <div id="treeManagementPanel" class="settings-panel submenu-panel" role="menu" aria-label="Tree management" hidden>
+              <button id="importGedcomButton" class="menu-item" type="button" role="menuitem" disabled title="Add new people related to this tree from another GEDCOM file">Import new GEDCOM records</button>
+              <button id="mediaButton" class="menu-item media-button" type="button" role="menuitem" disabled>Select Media Folder</button>
+              <button id="mediaOrganiseMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Move every image and PDF into its person's own folder, copy files shared by several people, and archive files no person uses">
+                <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 7.5A2 2 0 0 1 5 5.5h3.6l1.6 2H19a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 13.5h6"/><path d="M12.5 11l2.5 2.5-2.5 2.5"/></svg>
+                Organise media files
+              </button>
+              <button id="duplicateMediaMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Find files whose contents are identical and remove or archive the extra copies">
+                <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="3" width="12" height="15" rx="1.5"/><path d="M10 21H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1h3"/><path d="M15 8h-4M15 12h-4"/></svg>
+                Find duplicate images
+              </button>
+              <button id="orphanRecordsMenuButton" class="menu-item" type="button" role="menuitem" disabled title="List people with no parents, children, spouses or siblings, and remove the ones you choose">
+                <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="9" cy="9" r="3.2"/><path d="M4 20v-1.2a5 5 0 0 1 10 0V20"/><path d="M16 6h5M16 6l3-3M16 6l3 3" stroke-dasharray="2 2"/></svg>
+                Orphan records
+              </button>
+              <button id="birthCountryMenuButton" class="menu-item" type="button" role="menuitem" disabled title="List people whose birth place does not identify a country, and fix them">People without a birth country</button>
+              <button id="duplicateFinderMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Find people who may have been entered more than once">Find duplicate people</button>
+              <button id="duplicateRelationMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Remove people connected more than once to the same parent or spouse">
+                <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M21 3 12 12"/><path d="M12 12 8 16"/><path d="M8 16 3.5 20.5"/><path d="M3.5 20.5c-1.4 1.4-1.4 3 0 3.9 1.4.9 3 .4 3.9-1l1.8-2.7-3-3z"/><path d="M6.2 17.7l3 3"/><path d="M9.2 14.7l3 3"/></svg>
+                Remove duplicate relationships
+              </button>
+              <button id="defaultsButton" class="menu-item" type="button" role="menuitem" title="Choose the GEDCOM file and media folder that open automatically">Update defaults</button>
+            </div>
+          </div>
           <input id="importGedcomInput" type="file" accept=".ged,.gedcom,text/plain" hidden>
-          <button id="mediaButton" class="menu-item media-button" type="button" role="menuitem" disabled>Select Media Folder</button>
           <input id="mediaInput" type="file" webkitdirectory directory multiple>
           <input id="mediaUploadInput" type="file" accept="image/*,.pdf,application/pdf" multiple>
           <button id="mediaLibraryMenuButton" class="menu-item" type="button" role="menuitem" disabled>Media library</button>
-          <button id="mediaOrganiseMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Move every image and PDF into its person's own folder, copy files shared by several people, and archive files no person uses">
-            <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 7.5A2 2 0 0 1 5 5.5h3.6l1.6 2H19a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 13.5h6"/><path d="M12.5 11l2.5 2.5-2.5 2.5"/></svg>
-            Organise media files
-          </button>
-          <button id="duplicateMediaMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Find files whose contents are identical and remove or archive the extra copies">
-            <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="3" width="12" height="15" rx="1.5"/><path d="M10 21H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1h3"/><path d="M15 8h-4M15 12h-4"/></svg>
-            Find duplicate images
-          </button>
-          <button id="orphanRecordsMenuButton" class="menu-item" type="button" role="menuitem" disabled title="List people with no parents, children, spouses or siblings, and remove the ones you choose">
-            <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="9" cy="9" r="3.2"/><path d="M4 20v-1.2a5 5 0 0 1 10 0V20"/><path d="M16 6h5M16 6l3-3M16 6l3 3" stroke-dasharray="2 2"/></svg>
-            Orphan records
-          </button>
-          <button id="birthCountryMenuButton" class="menu-item" type="button" role="menuitem" disabled title="List people whose birth place does not identify a country, and fix them">People without a birth country</button>
-          <button id="duplicateFinderMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Find people who may have been entered more than once">Find duplicate people</button>
-          <button id="duplicateRelationMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Remove people connected more than once to the same parent or spouse">
-            <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M21 3 12 12"/><path d="M12 12 8 16"/><path d="M8 16 3.5 20.5"/><path d="M3.5 20.5c-1.4 1.4-1.4 3 0 3.9 1.4.9 3 .4 3.9-1l1.8-2.7-3-3z"/><path d="M6.2 17.7l3 3"/><path d="M9.2 14.7l3 3"/></svg>
-            Remove duplicate relationships
-          </button>
           <div class="menu-submenu" id="themeSubmenu">
             <button id="themeMenuButton" class="menu-item menu-submenu-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="themePanel">
               <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.6"/></svg>
@@ -107,7 +117,6 @@
               </button>
             </div>
           </div>
-          <button id="defaultsButton" class="menu-item" type="button" role="menuitem" title="Choose the GEDCOM file and media folder that open automatically">Update defaults</button>
           <button id="updateAppButton" class="menu-item" type="button" role="menuitem">Check for application updates</button>
           <button id="clearButton" class="menu-item" type="button" role="menuitem" disabled>Start Again</button>
           <button id="exitButton" class="menu-item" type="button" role="menuitem">Exit Kinship Atlas</button>
@@ -618,7 +627,7 @@
       </div>
     </section>
   </dialog>
-  <dialog id="defaultsDialog" class="app-dialog" aria-labelledby="defaultsTitle">
+  <dialog id="defaultsDialog" class="app-dialog defaults-dialog" aria-labelledby="defaultsTitle">
     <form id="defaultsForm" class="dialog-panel new-gedcom-panel" method="dialog">
       <h2 id="defaultsTitle">Default GEDCOM and media folder</h2>
       <p>The app opens these automatically at start-up. The details are saved in <strong>kinship-defaults.json</strong> and the browser remembers access to the file and folder. Nothing is uploaded.</p>

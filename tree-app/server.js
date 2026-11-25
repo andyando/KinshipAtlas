@@ -103,23 +103,64 @@ function serveFile(response, root, relative) {
 // A media file for the page. The page asks for the file with a version of its
 // own ("?v=..."), so after a move or a delete the browser fetches the file
 // again instead of showing a cached image from the old path.
-function serveMediaFile(response, relative, version) {
+function serveMediaFile(request, response, relative, version) {
   const target = path.resolve(mediaDir, relative);
   if (!target.startsWith(mediaDir + path.sep)) return send(response, 404, { error: 'Not found' });
-  fs.readFile(target, (error, data) => {
-    if (error) {
+  // Streamed rather than read whole: scan images run to many megabytes, and
+  // buffering every one serialises the page's parallel thumbnail requests.
+  const headers = {
+    'Content-Type': types[path.extname(target).toLowerCase()] || 'application/octet-stream',
+    'Cache-Control': version ? 'public, max-age=31536000, immutable' : 'no-store, no-cache, must-revalidate',
+    'X-Content-Type-Options': 'nosniff',
+    'Accept-Ranges': 'bytes'
+  };
+  if (version) headers.ETag = `"${version}"`;
+  // The page tags every media URL with a ?v= content version, so a cached copy
+  // is always current: answering a matching If-None-Match with 304 skips the
+  // file read entirely on repeat views.
+  if (version && requestIfNoneMatchIs(request, version)) {
+    response.writeHead(304, { ETag: headers.ETag, 'Cache-Control': headers['Cache-Control'] });
+    return response.end();
+  }
+  fs.stat(target, (error, stats) => {
+    if (error || !stats.isFile()) {
       response.writeHead(404, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
       return response.end(JSON.stringify({ error: 'Not found' }));
     }
-    const headers = {
-      'Content-Type': types[path.extname(target).toLowerCase()] || 'application/octet-stream',
-      'Cache-Control': version ? 'public, max-age=31536000, immutable' : 'no-store, no-cache, must-revalidate',
-      'X-Content-Type-Options': 'nosniff'
-    };
-    if (version) headers.ETag = `"${version}"`;
+    headers['Content-Length'] = stats.size;
+    const range = version ? null : parseRangeHeader(request.headers?.range, stats.size);
+    if (range) {
+      const stream = fs.createReadStream(target, { start: range.start, end: range.end });
+      response.writeHead(206, { ...headers, 'Content-Range': `bytes ${range.start}-${range.end}/${stats.size}` });
+      stream.pipe(response);
+      return;
+    }
     response.writeHead(200, headers);
-    response.end(data);
+    fs.createReadStream(target).pipe(response);
   });
+}
+
+function requestIfNoneMatchIs(request, version) {
+  const header = request.headers?.['if-none-match'];
+  return typeof header === 'string' && header.split(',').some((tag) => tag.trim().replace(/^W\//, '') === `"${version}"`);
+}
+
+function parseRangeHeader(header, size) {
+  if (typeof header !== 'string') return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!match || (!match[1] && !match[2])) return null;
+  let start = match[1] === '' ? null : Number(match[1]);
+  let end = match[2] === '' ? null : Number(match[2]);
+  if (start === null) {
+    // Suffix range: the last N bytes.
+    const length = Math.min(end, size);
+    start = size - length;
+    end = size - 1;
+  } else {
+    end = end === null || end >= size ? size - 1 : end;
+  }
+  if (start > end || start >= size) return null;
+  return { start, end };
 }
 
 function receiveUpload(request, response) {
@@ -417,7 +458,7 @@ const server = http.createServer((request, response) => {
     // Any depth is accepted so files inside a person's folder can be previewed.
     const relative = decodeURIComponent(url.pathname.slice('/media/'.length));
     if (!relative || relative.split('/').some((segment) => !safeName(segment))) return send(response, 404, { error: 'Not found' });
-    return serveMediaFile(response, relative, url.searchParams.get('v') || '');
+    return serveMediaFile(request, response, relative, url.searchParams.get('v') || '');
   }
   if (request.method === 'GET') return serveFile(response, appDir, decodeURIComponent(url.pathname === '/' ? 'index.html' : url.pathname.slice(1)));
   send(response, 405, { error: 'Method not allowed' });
