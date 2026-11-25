@@ -46,7 +46,7 @@
   },
   "Posen": {
     "latitude": 52.4,
-    "longitude": 17,
+    "longitude": 17.0,
     "zoom": 7,
     "country": "Historic Region",
     "modernName": "Greater Poland Voivodeship",
@@ -55,7 +55,7 @@
   },
   "Province of Posen": {
     "latitude": 52.4,
-    "longitude": 17,
+    "longitude": 17.0,
     "zoom": 7,
     "country": "Historic Region",
     "modernName": "Greater Poland Voivodeship",
@@ -202,7 +202,7 @@
     "longitude": 19.5,
     "zoom": 6,
     "country": "Historic Region",
-    "modernName": "Prussia (Kingdom)",
+    "modernName": "Poland / Germany",
     "startYear": 1701,
     "endYear": 1918
   },
@@ -211,7 +211,7 @@
     "longitude": 19.5,
     "zoom": 6,
     "country": "Historic Region",
-    "modernName": "Prussia (Kingdom)",
+    "modernName": "Poland / Germany",
     "startYear": 1701,
     "endYear": 1918
   },
@@ -220,12 +220,12 @@
     "longitude": 19.5,
     "zoom": 6,
     "country": "Historic Region",
-    "modernName": "Prussia (Kingdom)",
+    "modernName": "Poland / Germany",
     "startYear": 1701,
     "endYear": 1918
   },
   "Province of Prussia": {
-    "latitude": 54,
+    "latitude": 54.0,
     "longitude": 19.5,
     "zoom": 7,
     "country": "Historic Region",
@@ -234,7 +234,7 @@
     "endYear": 1878
   },
   "German Empire": {
-    "latitude": 52,
+    "latitude": 52.0,
     "longitude": 14.5,
     "zoom": 5,
     "country": "Historic Region",
@@ -243,7 +243,7 @@
     "endYear": 1918
   },
   "Deutsches Reich": {
-    "latitude": 52,
+    "latitude": 52.0,
     "longitude": 14.5,
     "zoom": 5,
     "country": "Historic Region",
@@ -279,8 +279,8 @@
     "endYear": 1867
   },
   "Russian Empire": {
-    "latitude": 55,
-    "longitude": 32,
+    "latitude": 55.0,
+    "longitude": 32.0,
     "zoom": 4,
     "country": "Historic Region",
     "modernName": "Russia / Poland / Baltics",
@@ -289,7 +289,7 @@
   },
   "Pale of Settlement": {
     "latitude": 51.5,
-    "longitude": 26,
+    "longitude": 26.0,
     "zoom": 6,
     "country": "Historic Region",
     "modernName": "Belarus / Ukraine / Poland / Lithuania",
@@ -297,7 +297,7 @@
     "endYear": 1917
   },
   "Russian Poland": {
-    "latitude": 52,
+    "latitude": 52.0,
     "longitude": 20.5,
     "zoom": 7,
     "country": "Historic Region",
@@ -306,7 +306,7 @@
     "endYear": 1915
   },
   "Congress Poland": {
-    "latitude": 52,
+    "latitude": 52.0,
     "longitude": 20.5,
     "zoom": 7,
     "country": "Historic Region",
@@ -370,7 +370,7 @@
   },
   "Lorraine": {
     "latitude": 48.9,
-    "longitude": 6,
+    "longitude": 6.0,
     "zoom": 8,
     "country": "Historic Region",
     "modernName": "Grand Est, France",
@@ -415,7 +415,7 @@
   },
   "Ireland": {
     "latitude": 53.4,
-    "longitude": -8,
+    "longitude": -8.0,
     "zoom": 6,
     "country": "Historic Region",
     "modernName": "Ireland",
@@ -442,7 +442,7 @@
   },
   "Kingdom of Ireland": {
     "latitude": 53.4,
-    "longitude": -8,
+    "longitude": -8.0,
     "zoom": 6,
     "country": "Historic Region",
     "modernName": "Ireland",
