@@ -7,6 +7,13 @@
 window.KINSHIP_VERSION = {
   releases: [
     {
+      version: '1.18.2',
+      date: '2026-11-25',
+      changes: [
+        'Fixed test fixtures and Windows line-ending checks that prevented the installer from building.'
+      ]
+    },
+    {
       version: '1.18.1',
       date: '2026-11-22',
       changes: [
