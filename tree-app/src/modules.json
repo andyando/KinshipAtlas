@@ -1,6 +1,6 @@
 {
   "eol": "lf",
-  "totalLines": 12458,
+  "totalLines": 12957,
   "modules": [
     {
       "file": "00-header.js",
@@ -124,9 +124,16 @@
     {
       "file": "17-orphan-records.js",
       "from": 12203,
-      "to": 12458,
-      "lines": 256,
+      "to": 12457,
+      "lines": 255,
       "name": "Orphan records (people with no family links)"
+    },
+    {
+      "file": "18-historical-gazetteer.js",
+      "from": 12458,
+      "to": 12957,
+      "lines": 499,
+      "name": "Historical gazetteer (offline historic place resolution + admin tools)"
     }
   ]
 }

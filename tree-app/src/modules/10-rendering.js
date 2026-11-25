@@ -1073,17 +1073,35 @@
   }
 
   // The 📍 button itself. When the place is empty the button is not offered.
+  // The Historical Gazetteer resolves the recorded place first, so historic
+  // spellings (Königsberg, Danzig, Breslau…) open the modern location
+  // (Kaliningrad, Gdansk, Wroclaw) that actually exists on today's maps.
+  // Region-level places (East Prussia, Co. Clare) keep their historic text.
+  // The resolve call is one map read after the first lookup, so this is cheap.
   function makePlaceMapButton(place, className = 'event-place-map') {
     const clean = cleanEventDisplayText(place);
     if (!clean) return null;
     const button = makeButton('', className);
     button.type = 'button';
-    button.title = `Show "${clean}" on ${mapProviders[preferredMapProvider()].label}`;
+    const resolved = window.KinshipHistoricalGazetteer?.resolve?.(clean) || null;
+    // A town hit with a modern name replaces the historic text (Königsberg →
+    // Kaliningrad, Russia). Region hits keep the historic text: a region
+    // centroid is not the place the record named, and the historic spelling is
+    // the searchable one on the map site.
+    const isTownHit = resolved && resolved.precision !== 'region'
+      && (resolved.label || '') !== (resolved.historicalName || '');
+    const mapPlace = isTownHit
+      ? [resolved.label, resolved.country].filter(Boolean).join(', ')
+      : clean;
+    const historicalNote = isTownHit
+      ? ` (recorded as ${resolved.historicalName} — now ${resolved.label})`
+      : '';
+    button.title = `Show "${mapPlace}" on ${mapProviders[preferredMapProvider()].label}${historicalNote}`;
     button.setAttribute('aria-label', button.title);
     setButtonContent(button, 'mapPin', '');
     button.addEventListener('click', (event) => {
       event.stopPropagation();
-      openLocationOnMap(clean);
+      openLocationOnMap(mapPlace);
     });
     return button;
   }

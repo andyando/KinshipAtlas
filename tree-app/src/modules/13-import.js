@@ -1602,6 +1602,14 @@
   // same way a top-level menu item does. The map-provider select is a control
   // rather than a command, so it keeps the menu open.
   for (const item of treeManagementPanel.querySelectorAll('.menu-item:not(.menu-submenu-toggle):not(.menu-select-item)')) {
+    if (item.id === 'gazetteerMenuButton') {
+      item.addEventListener('click', () => {
+        setTreeManagementSubmenuOpen(false);
+        setSettingsOpen(false);
+        window.KinshipHistoricalGazetteer?.openDialog?.();
+      });
+      continue;
+    }
     item.addEventListener('click', () => {
       setTreeManagementSubmenuOpen(false);
       window.setTimeout(() => setSettingsOpen(false), 0);

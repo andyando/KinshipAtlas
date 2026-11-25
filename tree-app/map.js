@@ -125,6 +125,31 @@
     };
   }
 
+  // Historical-gazetteer pass. Runs after the GeoNames resolver inside the
+  // shared lookup below: the app module exposes the same shape as createGeocoder
+  // so map markers get the same {lat, lon, precision, label} either way.
+  function createHistoricalGeocoder() {
+    const resolve = window.KinshipHistoricalGazetteer?.resolve;
+    if (typeof resolve !== 'function') return null;
+    return (placeText) => {
+      const result = resolve(placeText);
+      return result ? { lat: result.latitude, lon: result.longitude, precision: result.precision, label: result.label } : null;
+    };
+  }
+
+  let sharedGeocoder = null;
+  let sharedHistoricalGeocoder = null;
+  function geocodePlace(placeText) {
+    if (!sharedGeocoder) sharedGeocoder = createGeocoder();
+    if (!sharedHistoricalGeocoder) sharedHistoricalGeocoder = createHistoricalGeocoder();
+    if (!sharedGeocoder && !sharedHistoricalGeocoder) return null;
+    // The historical gazetteer answers first: it holds the pre-WWII spellings
+    // GeoNames cannot resolve, and its data is authoritative for them.
+    const historical = sharedHistoricalGeocoder ? sharedHistoricalGeocoder(placeText) : null;
+    if (historical) return historical;
+    return sharedGeocoder ? sharedGeocoder(placeText) : null;
+  }
+
   const projectX = (lon) => (lon + 180) / 360 * WORLD;
   const projectY = (lat) => {
     const clamped = Math.max(-85, Math.min(85, lat)) * Math.PI / 180;
@@ -145,7 +170,7 @@
 
   function create(options) {
     const container = options.container;
-    const geocode = createGeocoder();
+    const geocode = geocodePlace;
     let svg; let landGroup; let markerGroup; let popup; let statusChip; let popupOwner = null;
     let width = 0; let height = 0; let k = 1; let tx = 0; let ty = 0; let minK = 1;
     let pins = [];

@@ -257,4 +257,3 @@ if (orphanDialog) {
   orphanDialog.querySelector('#orphanRecordsDeleteButton').addEventListener('click', deleteSelectedOrphanRecords);
   orphanDialog.querySelector('#orphanRecordsSelectAll').addEventListener('change', (event) => toggleOrphanSelectAll(event.target.checked));
 }
-})();
