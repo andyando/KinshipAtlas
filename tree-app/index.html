@@ -142,7 +142,7 @@
           <button class="menu-item" type="button" role="menuitem" data-help-topic="editing">Editing people &amp; saving</button>
           <button class="menu-item" type="button" role="menuitem" data-help-topic="media">Photos, documents &amp; media</button>
           <button class="menu-item" type="button" role="menuitem" data-help-topic="maps-reports">Map View, Reports &amp; data checks</button>
-          <button class="menu-item" type="button" role="menuitem" data-help-topic="defaults">Defaults &amp; home person</button>
+          <button class="menu-item" type="button" role="menuitem" data-help-topic="defaults">Defaults, tools &amp; home person</button>
           <hr class="menu-divider">
           <div class="menu-version" id="helpMenuVersion" role="presentation"></div>
           <button id="aboutMenuButton" class="menu-item" type="button" role="menuitem">About Kinship Atlas</button>
@@ -522,7 +522,7 @@
             <h3>Photos, documents &amp; media</h3>
             <h4>Link a media folder</h4>
             <ol>
-              <li>Choose <strong>Settings &gt; Select Media Folder</strong> (shown as <strong>Change media folder</strong> once one is linked).</li>
+              <li>Choose <strong>Settings &gt; Tree Management &gt; Select Media Folder</strong> (shown as <strong>Change media folder</strong> once one is linked).</li>
               <li>Choose <strong>Link existing folder</strong>, or <strong>Create new media folder</strong> to make one named after your GEDCOM.</li>
               <li>When the browser asks to let the site edit files, choose <strong>Allow</strong>. This is needed to add files to the folder, and the app only uses the folder you pick.</li>
             </ol>
@@ -531,16 +531,17 @@
             <ul>
               <li>In a person record, choose <strong>Add photo or PDF</strong>. The files are copied into the media folder (renamed if a file with the same name exists) and appear under <strong>Attached media</strong>.</li>
               <li>The trash icon on a media item unlinks it from that person. The file itself stays in the folder.</li>
-              <li>Hero photos use a square crop on the person record, Relationship Map and Pedigree. Reframe photo shows the full-width square crop; at 100% it cannot pan because the image already fills the frame.</li>
+              <li>Hero photos use a square crop on the person record, Relationship Map and Pedigree. Click the photo itself, or the pencil button in its corner, to open <strong>Reframe photo</strong>: drag to pan, zoom with the buttons or mouse wheel, then <strong>Apply &amp; close</strong>. The framing is remembered per person and per photo. <strong>Replace portrait</strong> uploads a new photo and makes it the card image.</li>
+              <li>Every life event with a recorded place shows a <strong>📍 map button</strong> beside the place name. Clicking it opens that location on a map site in a new tab. Historic place names (Königsberg, Danzig, Breslau, Lemberg…) are resolved through the offline Historical Gazetteer to their modern locations (Kaliningrad, Gdansk, Wroclaw, Lviv…) so the pin lands where the town is today. Choose which map site links open under <strong>Settings &gt; Tree Management &gt; Map links open</strong> (Google Maps or OpenStreetMap).</li>
             </ul>
             <h4>The media library</h4>
             <p>Choose <strong>Media</strong> in the top bar, or <strong>Settings &gt; Media library</strong>, to review every file referenced in the tree. Search by filename or person, filter by type, preview files, classify them, see who they are linked to, and choose card images. Files that are missing from the folder are listed but cannot be previewed until they are found. Deleting a file here removes it permanently, along with its GEDCOM links.</p>
             <p>The library displays up to 60 items per page. Use <strong>Previous</strong> and <strong>Next</strong> to browse. Search, filters and sorting apply to the full library. Checked items stay selected as you change pages, and <strong>Select all matches</strong> selects matching items across all pages.</p>
             <p><strong>Review profile card images</strong> finds people with attached Portrait-classified media whose current card image is not a Portrait, and suggests the first attached portrait. Select any combination or use Select all / Deselect all, then update the chosen profile cards.</p>
             <h4>Find faces</h4>
-            <p>Use the search and type filters first, then choose <strong>Scan faces</strong>. Kinship Atlas scans matching image files across all pages, entirely on this device, and shows progress while it works. When the scan finishes, review the images where a face was detected and apply the <strong>Portrait</strong> label to one image or to all checked images. Scanning does not change any classifications by itself.</p>
+            <p>Use the search and type filters first, then choose <strong>Scan faces</strong>. Kinship Atlas scans matching image files across all pages, entirely on this device, and shows progress while it works. When the scan finishes, the <strong>Faces detected</strong> screen lists only images that contain a face <em>and</em> are not already classified as Portrait. Tick the ones to relabel (or Select all), then choose <strong>Apply Portrait</strong> at the foot of the screen. If every face-bearing image is already Portrait, a message says there is nothing to update. Scanning does not change any classifications by itself.</p>
             <h4>Organise media files</h4>
-            <p><strong>Settings &gt; Organise media files</strong> tidies the media folder against the open GEDCOM. Choose <strong>Check media folder</strong> to see the plan first, then <strong>Organise media files</strong> to carry it out:</p>
+            <p><strong>Settings &gt; Tree Management &gt; Organise media files</strong> tidies the media folder against the open GEDCOM. Choose <strong>Check media folder</strong> to see the plan first, then <strong>Organise media files</strong> to carry it out:</p>
             <ul>
               <li>Every image or PDF linked to a person is moved into that person's own folder, named like <code>Ada Allnutt (1864-unknown) [I455]</code>. A missing folder is created.</li>
               <li>When one file is linked to several people, a copy is made for each of them, so no file is shared between folders.</li>
@@ -550,9 +551,9 @@
             </ul>
             <p>The archive folder name can be changed before organising. The same command is available from a terminal without the app: <code>node helpers/media-organise-cli.mjs "&lt;media folder&gt;" "&lt;gedcom file&gt;" --apply</code>.</p>
             <h4>Orphan records</h4>
-            <p><strong>Settings &gt; Orphan records</strong> lists people with no parent, child, spouse or sibling link, so they appear on no other person's card. Choose <strong>Scan for orphans</strong>, tick the records you mean to remove (or <strong>Select all</strong>), then <strong>Delete selected records</strong>. Deleting removes each person's record and life events; sources and media files are kept. A person who turns out to be linked after all is left alone.</p>
+            <p><strong>Settings &gt; Tree Management &gt; Orphan records</strong> lists people with no parent, child, spouse or sibling link, so they appear on no other person's card. Choose <strong>Scan for orphans</strong>, tick the records you mean to remove (or <strong>Select all</strong>), then <strong>Delete selected records</strong>. Deleting removes each person's record and life events; sources and media files are kept. A person who turns out to be linked after all is left alone.</p>
             <h4>Find duplicate images</h4>
-            <p><strong>Settings &gt; Find duplicate images</strong> compares the contents of every image and PDF in the media folder and lists exact copies, however they are named. Thumbnails and PDF links let you open each file before choosing.</p>
+            <p><strong>Settings &gt; Tree Management &gt; Find duplicate images</strong> compares the contents of every image and PDF in the media folder and lists exact copies, however they are named. Thumbnails and PDF links let you open each file before choosing.</p>
             <ul>
               <li>A group is skipped entirely when any of its files is used as a card image or attached to a life event, so a photo in use is never removed.</li>
               <li>Tick the copies to remove, then <strong>Delete selected</strong> (permanent) or <strong>Move selected to archive</strong> (into the archive folder, dated).</li>
@@ -595,10 +596,12 @@
             </ul>
             <h4>Other Settings options</h4>
             <ul>
-              <li><strong>Open GEDCOM</strong> and <strong>Import new GEDCOM records</strong> open a tree or preview related people to add from another file.</li>
+              <li><strong>Open GEDCOM</strong> opens a tree; <strong>Tree Management &gt; Import new GEDCOM records</strong> previews related people to add from another file.</li>
+              <li><strong>Tree Management</strong> groups the tree tools: import, media folder, organise media, duplicate images, orphan records, birth countries, duplicate people, duplicate relationships and Update defaults.</li>
               <li><strong>Select Media Folder</strong> links a folder for GEDCOM media; <strong>Media library</strong> reviews and manages attached files.</li>
+              <li><strong>Historical Gazetteer</strong> opens an offline reference of historic place names (1700-1970) — Prussian, Austro-Hungarian, Russian and British-isles spellings mapped to modern locations. Test-resolve a place, add your own aliases or towns, edit coordinates, and import/export the tables as JSON.</li>
               <li><strong>People without a birth country</strong> helps find and correct places; <strong>Find duplicate people</strong> lists possible duplicate records to review; <strong>Remove duplicate relationships</strong> lets you select repeated links to the same parent or spouse for removal. Deleting a duplicate link keeps the original connection.</li>
-              <li><strong>Dark mode</strong> and <strong>Light mode</strong> change the app's appearance.</li>
+              <li><strong>Theme</strong> offers five colour themes, each with its own title typeface.</li>
               <li><strong>Check for application updates</strong> checks for a newer published release. <strong>Start Again</strong> closes the current tree so you can open another one; unsaved edits are discarded. <strong>Exit Kinship Atlas</strong> saves preferences and stops the local helper, asking first if there are unsaved GEDCOM changes.</li>
             </ul>
             <h4>Finishing a session</h4>
