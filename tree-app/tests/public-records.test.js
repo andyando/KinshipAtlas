@@ -40,7 +40,9 @@ test('modal markup and a11y wiring', () => {
   assert.ok(html.includes('id="publicRecordsProviders"'), 'provider host');
   assert.ok(html.includes('id="searchAllPublicRecords"'), 'Search All Sources button');
   assert.ok(html.includes('aria-label="Close Search Public Records"'), 'close button labelled');
-  assert.ok(app.includes("addEventListener('click', () => {\n    elements.researchDialog.close();"), 'close handler');
+  const closeHandler = /addEventListener\('click', \(\) => \{\r?\n    elements\.researchDialog\.close\(\);/;
+  assert.match(app.replace(/\r\n/g, '\n'), closeHandler, 'close handler with LF');
+  assert.match(app.replace(/\r?\n/g, '\r\n'), closeHandler, 'close handler with CRLF');
 });
 
 test('provider registry exposes all six services with required endpoints', () => {
