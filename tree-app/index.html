@@ -87,6 +87,12 @@
                 Remove duplicate relationships
               </button>
               <button id="defaultsButton" class="menu-item" type="button" role="menuitem" title="Choose the GEDCOM file and media folder that open automatically">Update defaults</button>
+              <label class="menu-item menu-select-item" for="mapProviderSelect">Map links open
+                <select id="mapProviderSelect" aria-label="Which map website place links open">
+                  <option value="google">Google Maps</option>
+                  <option value="osm">OpenStreetMap</option>
+                </select>
+              </label>
             </div>
           </div>
           <input id="importGedcomInput" type="file" accept=".ged,.gedcom,text/plain" hidden>

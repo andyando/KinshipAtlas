@@ -1588,9 +1588,20 @@
   document.addEventListener('click', (event) => {
     if (!event.target.closest('#treeManagementSubmenu')) setTreeManagementSubmenuOpen(false);
   });
+  // Map provider preference: choosing one stores it and keeps the menu open
+  // (it is a control, not a command, so it must not close the menu).
+  const mapProviderSelect = document.querySelector('#mapProviderSelect');
+  if (mapProviderSelect && typeof setPreferredMapProvider === 'function' && typeof preferredMapProvider === 'function') {
+    mapProviderSelect.value = preferredMapProvider();
+    mapProviderSelect.addEventListener('change', () => {
+      setPreferredMapProvider(mapProviderSelect.value);
+      showToast(`Place links now open in ${mapProviderSelect.selectedOptions[0].textContent}.`);
+    });
+  }
   // Choosing an item closes the submenu and then the whole settings menu, the
-  // same way a top-level menu item does.
-  for (const item of treeManagementPanel.querySelectorAll('.menu-item:not(.menu-submenu-toggle)')) {
+  // same way a top-level menu item does. The map-provider select is a control
+  // rather than a command, so it keeps the menu open.
+  for (const item of treeManagementPanel.querySelectorAll('.menu-item:not(.menu-submenu-toggle):not(.menu-select-item)')) {
     item.addEventListener('click', () => {
       setTreeManagementSubmenuOpen(false);
       window.setTimeout(() => setSettingsOpen(false), 0);

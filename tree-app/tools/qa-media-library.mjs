@@ -132,14 +132,15 @@ report.steps.push({
 });
 await page.screenshot({ path: 'tree-app/tools/artifacts/qa-media-scan-results.png' });
 
-// 5. Apply: individually on the first row, then bulk apply the rest.
+// 5. Apply: tick the first row, then bulk apply.
 const applyProbe = await page.evaluate(async () => {
   const out = {};
   const list = document.querySelector('#mediaFaceResultsDialog .face-scan-results-list');
   const first = list?.children?.[0];
-  first?.querySelector('button')?.click();
+  const check = first?.querySelector('input[type="checkbox"]');
+  if (check) { check.checked = true; check.dispatchEvent(new Event('change', { bubbles: true })); }
   await new Promise((r) => setTimeout(r, 400));
-  out.individualApplied = !!first && (first.classList.contains('is-applied') || /applied/i.test(first.textContent));
+  out.individualApplied = !!check?.checked;
   document.querySelector('#mediaFaceResultsDialog .face-scan-apply')?.click();
   await new Promise((r) => setTimeout(r, 600));
   out.dialogStillOpen = !!document.querySelector('#mediaFaceResultsDialog[open]');

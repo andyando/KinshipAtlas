@@ -1033,6 +1033,61 @@
     return wrapper;
   }
 
+  // --- Map links for place fields -------------------------------------------
+  // Every life event with a recorded place gets a small 📍 button beside the
+  // place name. Clicking it opens the location on a map site in a new tab.
+  // Providers can be switched in Settings; Google Maps is the default.
+  const mapProviders = {
+    google: {
+      label: 'Google Maps',
+      url: (place) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place)}`,
+    },
+    osm: {
+      label: 'OpenStreetMap',
+      url: (place) => `https://www.openstreetmap.org/search?query=${encodeURIComponent(place)}`,
+    },
+  };
+  const mapProviderStorageKey = 'kinship-atlas:map-provider';
+
+  function preferredMapProvider() {
+    try {
+      const saved = localStorage.getItem(mapProviderStorageKey);
+      if (saved && mapProviders[saved]) return saved;
+    } catch { }
+    return 'google';
+  }
+
+  function setPreferredMapProvider(provider) {
+    if (!mapProviders[provider]) return;
+    try { localStorage.setItem(mapProviderStorageKey, provider); } catch { }
+  }
+
+  // Opens a place on the map site. A right-click / long-press (contextmenu) or
+  // Shift+click offers the other provider instead of just following the saved
+  // preference.
+  function openLocationOnMap(place) {
+    const provider = preferredMapProvider();
+    const target = mapProviders[provider].url(place);
+    const opened = window.open(target, '_blank', 'noopener');
+    if (!opened) showToast('The browser blocked the new tab. Allow pop-ups for this page and try again.');
+  }
+
+  // The 📍 button itself. When the place is empty the button is not offered.
+  function makePlaceMapButton(place, className = 'event-place-map') {
+    const clean = cleanEventDisplayText(place);
+    if (!clean) return null;
+    const button = makeButton('', className);
+    button.type = 'button';
+    button.title = `Show "${clean}" on ${mapProviders[preferredMapProvider()].label}`;
+    button.setAttribute('aria-label', button.title);
+    setButtonContent(button, 'mapPin', '');
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      openLocationOnMap(clean);
+    });
+    return button;
+  }
+
   function renderEvents(person) {
     const events = [...person.events, ...marriageEventsFor(person)].sort((a, b) => {
       const aYear = Number(yearFrom(a.date)) || 9999;
@@ -1113,8 +1168,27 @@
         label.textContent = eventTitle(event);
         const detail = document.createElement('div');
         detail.className = 'event-detail';
-        detail.textContent = [event.date, event.place, event.value, ...event.notes]
-          .map(cleanEventDisplayText).filter(Boolean).join(' · ') || 'Details not recorded';
+        const nonPlaceParts = [event.date, event.value, ...event.notes].map(cleanEventDisplayText).filter(Boolean);
+        const place = cleanEventDisplayText(event.place);
+        if (place) {
+          // The place gets its own line with a 📍 button that opens it on a map.
+          const placeRow = document.createElement('span');
+          placeRow.className = 'event-place-row';
+          const placeText = document.createElement('span');
+          placeText.textContent = place;
+          placeRow.append(placeText);
+          const mapButton = makePlaceMapButton(event.place, 'event-place-map');
+          if (mapButton) placeRow.append(mapButton);
+          detail.append(placeRow);
+          if (nonPlaceParts.length) {
+            const rest = document.createElement('span');
+            rest.className = 'event-detail-rest';
+            rest.textContent = nonPlaceParts.join(' · ');
+            detail.append(rest);
+          }
+        } else {
+          detail.textContent = nonPlaceParts.join(' · ') || 'Details not recorded';
+        }
         body.append(label, detail);
         const sourceIds = [...new Set(event.sources)];
         if (sourceIds.length) {
@@ -1720,22 +1794,6 @@
     for (const [label, items] of relationshipGroups(person)) addRelationGroup(relationSection.body, label, items);
     elements.details.append(relationSection.wrapper);
     elements.details.append(renderEvents(person));
-    const sourceIds = [...new Set(person.sourceIds)];
-    const sourceSection = section('Source references');
-    if (!sourceIds.length) {
-      const empty = document.createElement('div'); empty.className = 'event-detail'; empty.textContent = 'No person-level source references recorded.';
-      sourceSection.body.append(empty);
-    } else {
-      const list = document.createElement('div'); list.className = 'source-list';
-      for (const sourceId of sourceIds) {
-        const chip = document.createElement('span'); chip.className = 'source-chip';
-        const source = state.sources.get(sourceId);
-        chip.textContent = source?.title ? `${sourceId} · ${source.title}` : sourceId;
-        list.append(chip);
-      }
-      sourceSection.body.append(list);
-    }
-    elements.details.append(sourceSection.wrapper);
     const media = renderMedia(person);
     if (media) elements.details.append(media);
     // The hero (card image, birth country, name, action buttons) is a fixed
@@ -2177,14 +2235,25 @@
       else delete state.mediaFaceAnalysis.images[key];
     }
     saveMediaFaceAnalysis();
-    const matches = images.filter((entry) => results.get(entry.key)?.hasFace);
+    // Only images that still need the Portrait classification are offered:
+    // ones already classified stay untouched so a re-scan shows nothing to do.
+    const withFaces = images.filter((entry) => results.get(entry.key)?.hasFace);
+    const matches = withFaces.filter((entry) => state.mediaTypes.get(entry.key) !== 'portrait');
     renderMediaLibrary();
-    showToast(`Face scan finished: ${matches.length} of ${scanned} image${scanned === 1 ? '' : 's'} contain a face.${skipped ? ` ${skipped} unreadable image${skipped === 1 ? ' was' : 's were'} skipped.` : ''}`);
+    showToast(`Face scan finished: ${withFaces.length} of ${scanned} image${scanned === 1 ? '' : 's'} contain a face.${skipped ? ` ${skipped} unreadable image${skipped === 1 ? ' was' : 's were'} skipped.` : ''}`);
+    if (!matches.length) {
+      if (withFaces.length) {
+        showToast('Nothing to update, all images with faces already classified as a portrait.');
+      } else {
+        openFaceScanResults(matches, scanned);
+      }
+      return;
+    }
     openFaceScanResults(matches, scanned);
   }
 
-  // Results screen for one scan run: the scanned images that contain a face, each
-  // with its own Portrait button, plus a bulk action for everything ticked.
+  // Results screen for one scan run: the scanned images that contain a face and
+  // are not yet Portrait, each with a tick box, plus a bulk action at the foot.
   function openFaceScanResults(matches, scannedCount) {
     const dialog = document.createElement('dialog');
     dialog.className = 'profile-review-dialog face-scan-results-dialog';
@@ -2237,35 +2306,7 @@
       const faces = analysis?.faceCount || 0;
       detail.textContent = `${faces} face${faces === 1 ? '' : 's'} detected · ${mediaTypeLabel(state.mediaTypes.get(entry.key))}`;
       text.append(name, detail);
-      // Per-image action: classify just this one as Portrait without touching
-      // anything else in the list. The row stays so the result is visible.
-      const single = document.createElement('button');
-      single.type = 'button';
-      single.className = 'button button-quiet face-scan-single';
-      single.textContent = 'Classify as Portrait';
-      single.addEventListener('click', () => {
-        applyBulkMediaClassification([entry], 'portrait');
-        check.checked = false;
-        check.disabled = true;
-        single.disabled = true;
-        single.textContent = 'Portrait applied';
-        row.classList.add('is-applied');
-        detail.textContent = `${faces} face${faces === 1 ? '' : 's'} detected · Portrait`;
-        updateApplyState();
-      });
-      // Removing a row only drops it from this review list; the scan result and
-      // the classification it already has are left untouched.
-      const dismiss = document.createElement('button');
-      dismiss.type = 'button';
-      dismiss.className = 'button button-quiet face-scan-dismiss';
-      dismiss.textContent = 'Remove';
-      dismiss.title = 'Remove this image from the list without changing its classification.';
-      dismiss.addEventListener('click', () => {
-        row.remove();
-        if (!list.children.length) close();
-        else updateApplyState();
-      });
-      row.append(check, preview, text, single, dismiss);
+      row.append(check, preview, text);
       list.append(row);
     }
     list.addEventListener('change', updateApplyState);
@@ -3123,7 +3164,9 @@
     // Gender signs: small circle low-left, stem/arrow extends up-right (♂) or a
     // stem with crossbar below the circle (♀). Scaled to the 24x24 view box.
     male: '<circle cx="10" cy="14" r="5"/><path d="M14 10l6-6M20 4h-5M20 4v5"/>',
-    female: '<circle cx="12" cy="9" r="5"/><path d="M12 14v7M9 18h6"/>'
+    female: '<circle cx="12" cy="9" r="5"/><path d="M12 14v7M9 18h6"/>',
+    // Map pin: the classic location marker with a round hole.
+    mapPin: '<path d="M12 21c4-4.5 7-7.9 7-11a7 7 0 1 0-14 0c0 3.1 3 6.5 7 11z"/><circle cx="12" cy="10" r="2.6"/>'
   };
 
   function createButtonIcon(icon) {
