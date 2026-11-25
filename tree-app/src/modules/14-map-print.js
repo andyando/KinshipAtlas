@@ -563,6 +563,14 @@
     if (event.key === 'Escape' && open) { setMenuOpen(open, false); open.button.focus(); }
   });
   document.querySelector('#aboutMenuButton').addEventListener('click', openAboutDialog);
+  // The Help menu shows the running version at its foot, under the divider.
+  const helpMenuVersion = document.querySelector('#helpMenuVersion');
+  if (helpMenuVersion) {
+    const version = currentAppVersion();
+    helpMenuVersion.textContent = version
+      ? `Version ${version.version}${version.date ? ` · ${formatReleaseDate(version.date)}` : ''}`
+      : 'Version information unavailable';
+  }
 
   const helpDialog = document.querySelector('#helpDialog');
   const helpMenuIcons = { 'getting-started': 'book', gedcom: 'import', exploring: 'tree', editing: 'edit', media: 'media', 'maps-reports': 'chart', defaults: 'sliders' };

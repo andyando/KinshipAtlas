@@ -2668,11 +2668,12 @@
     node.append(button);
     for (const [direction, enabled] of [['up', canShiftUp], ['down', canShiftDown]]) {
       if (!enabled) continue;
-      const shiftButton = makeButton(direction === 'up' ? '↑' : '↓', `generation-shift generation-shift-${direction}`);
+      const shiftButton = makeButton('', `generation-shift generation-shift-${direction}`);
       shiftButton.dataset.personId = personId;
       shiftButton.dataset.treeShift = direction;
       shiftButton.setAttribute('aria-label', `Show one generation ${direction === 'up' ? 'above' : 'below'} through ${person.name}`);
       shiftButton.title = shiftButton.getAttribute('aria-label');
+      setButtonContent(shiftButton, direction === 'up' ? 'caretUp' : 'caretDown', '');
       node.append(shiftButton);
     }
     container.append(node);
@@ -5491,7 +5492,10 @@
     male: '<circle cx="10" cy="14" r="5"/><path d="M14 10l6-6M20 4h-5M20 4v5"/>',
     female: '<circle cx="12" cy="9" r="5"/><path d="M12 14v7M9 18h6"/>',
     // Map pin: the classic location marker with a round hole.
-    mapPin: '<path d="M12 21c4-4.5 7-7.9 7-11a7 7 0 1 0-14 0c0 3.1 3 6.5 7 11z"/><circle cx="12" cy="10" r="2.6"/>'
+    mapPin: '<path d="M12 21c4-4.5 7-7.9 7-11a7 7 0 1 0-14 0c0 3.1 3 6.5 7 11z"/><circle cx="12" cy="10" r="2.6"/>',
+    // Triangular carets for the generation-shift buttons on tree cards.
+    caretUp: '<path d="M12 5l8 12H4z" fill="currentColor" stroke="none"/>',
+    caretDown: '<path d="M12 19L4 7h16z" fill="currentColor" stroke="none"/>'
   };
 
   function createButtonIcon(icon) {
@@ -11261,6 +11265,14 @@
     if (event.key === 'Escape' && open) { setMenuOpen(open, false); open.button.focus(); }
   });
   document.querySelector('#aboutMenuButton').addEventListener('click', openAboutDialog);
+  // The Help menu shows the running version at its foot, under the divider.
+  const helpMenuVersion = document.querySelector('#helpMenuVersion');
+  if (helpMenuVersion) {
+    const version = currentAppVersion();
+    helpMenuVersion.textContent = version
+      ? `Version ${version.version}${version.date ? ` · ${formatReleaseDate(version.date)}` : ''}`
+      : 'Version information unavailable';
+  }
 
   const helpDialog = document.querySelector('#helpDialog');
   const helpMenuIcons = { 'getting-started': 'book', gedcom: 'import', exploring: 'tree', editing: 'edit', media: 'media', 'maps-reports': 'chart', defaults: 'sliders' };
