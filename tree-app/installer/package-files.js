@@ -9,7 +9,7 @@ const runtimeFiles = [
   'index.html', 'app.js', 'release-check.js', 'map.js', 'styles.css', 'version.js', 'face-scan.js',
   'favicon.svg', 'welcome-pattern.svg', 'server.js', 'Kinship Atlas.exe',
   'helpers/media-organise.js', 'helpers/media-organise-fs.js',
-  'THIRD-PARTY-NOTICES.md', 'data/world-data.js', 'launcher/kinship-atlas.ico',
+  'THIRD-PARTY-NOTICES.md', 'data/world-data.js', 'data/attachment-types.json', 'launcher/kinship-atlas.ico',
   'vendor/mediapipe/vision_bundle.mjs', 'vendor/mediapipe/wasm/vision_wasm_internal.js',
   'vendor/mediapipe/wasm/vision_wasm_internal.wasm',
   'vendor/mediapipe/wasm/vision_wasm_module_internal.js',

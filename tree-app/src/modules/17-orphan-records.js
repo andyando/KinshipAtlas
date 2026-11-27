@@ -248,9 +248,8 @@ function openOrphanRecordsDialog() {
   showModalFocused(ui.dialog);
 }
 
-const orphanMenuButton = document.querySelector('#orphanRecordsMenuButton');
+// Opened from the Tree Maintenance page (Settings > Tree Maintenance).
 const orphanDialog = document.querySelector('#orphanRecordsDialog');
-if (orphanMenuButton) orphanMenuButton.addEventListener('click', openOrphanRecordsDialog);
 if (orphanDialog) {
   orphanDialog.querySelector('#closeOrphanRecords').addEventListener('click', () => orphanDialog.close());
   orphanDialog.querySelector('#orphanRecordsScanButton').addEventListener('click', scanOrphanRecords);

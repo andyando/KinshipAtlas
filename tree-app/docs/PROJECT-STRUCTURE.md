@@ -10,7 +10,7 @@
 - `primary-data.js`, `kinship-defaults.json`, `kinship-selections.json`, GEDCOMs, and media folders — local/user data; do not move, publish, or package them.
 
 ## Maintainer files
-- `src/modules/`, `src/modules.json` — canonical ordered application sources and build manifest.
+- `src/modules/`, `src/modules.json` — canonical ordered application sources and build manifest. Module `00b-attachment-types.js` defines the supported attachment types and must stay before `01-state.js`; its JSON mirror `data/attachment-types.json` is what the local helper and the Windows launcher read, and a test fails if the two lists disagree. Modules `19-tree-maintenance.js`, `20-media-validation.js`, `21-attachment-preview.js` and `22-smart-match.js` must stay after the modules they call; `22-favourites.js` (the Favourites page and its heart buttons) follows them. The historical gazetteer stays last because it closes the application closure. The legacy Tree Management submenu was retired once the workspace covered every tool it held.
 - `tests/` — Node tests and the PowerShell runner. Run `node --test tree-app/tests/*.test.js` or `powershell -NoProfile -ExecutionPolicy Bypass -File tree-app/tests/run-tests.ps1` from the repository root.
 - `data/historical-gazetteer.json`, `data/place-aliases.json`, `data/historical-regions.json` — editable source tables for the offline Historical Gazetteer; `node data/build-historical-gazetteer.js` regenerates `data/historical-gazetteer.js` from them.
 - `installer/` — fixed runtime packaging list and installer build inputs.

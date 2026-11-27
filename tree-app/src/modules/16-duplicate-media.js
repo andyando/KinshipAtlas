@@ -134,7 +134,11 @@
       return {
         mediaPath: '',
         mediaFolder: state.mediaDirectoryHandle.name,
-        groups: core.groupDuplicates(files.map((file) => ({ ...file, personIds: organised.owners.get(file.key) || [] })), { heroKeys: [...heroKeys], eventKeys: [...eventKeys] }).map((group) => ({
+        groups: core.groupDuplicates(files.map((file) => ({ ...file, personIds: organised.owners.get(file.key) || [] })), {
+          heroKeys: [...heroKeys],
+          eventKeys: [...eventKeys],
+          archiveFolder: organised.archiveFolder
+        }).map((group) => ({
           hash: group.hash,
           bytes: group.bytes,
           protected: group.protected,
@@ -368,18 +372,19 @@
     const ui = duplicateElements();
     ui.list.replaceChildren();
     if (!groups.length) {
-      ui.summary.textContent = 'Scan complete: no duplicate images or PDFs found. Every file in the media folder differs from all the others.';
+      ui.summary.textContent = 'Scan complete: no duplicate images or PDFs found. No folder holds more than one copy of the same file.';
       showToast('Scan complete: no duplicate images or PDFs found.');
       return;
     }
     const extraCopies = groups.reduce((total, group) => total + group.files.length - 1, 0);
     const protectedGroups = groups.filter((group) => group.protected).length;
-    ui.summary.textContent = `${groups.length} group${groups.length === 1 ? '' : 's'} of identical files, ${extraCopies} extra cop${extraCopies === 1 ? 'y' : 'ies'}${protectedGroups ? `, ${protectedGroups} in use by a card image or life event so left alone` : ''}.`;
+    ui.summary.textContent = `${groups.length} group${groups.length === 1 ? '' : 's'} of identical files in the same folder, ${extraCopies} extra cop${extraCopies === 1 ? 'y' : 'ies'}${protectedGroups ? `, ${protectedGroups} in use by a card image or life event so left alone` : ''}.`;
     for (const group of groups) {
       const section = document.createElement('section');
       section.className = `duplicate-media-group${group.protected ? ' is-protected' : ''}`;
       const heading = document.createElement('h4');
-      heading.textContent = `${duplicateSize(group.bytes)} · ${group.files.length} copies${group.protected ? ' · in use, so it is left alone' : ''}`;
+      const where = duplicateFolderLabel(group.folder || group.keeper.folder || '');
+      heading.textContent = `${duplicateSize(group.bytes)} · ${group.files.length} copies in ${where}${group.protected ? ' · in use, so it is left alone' : ''}`;
       section.append(heading);
       for (const file of group.files) {
         const row = document.createElement('label');
@@ -521,7 +526,7 @@
     duplicateSelected.clear();
     ui.list.replaceChildren();
     ui.archive.value = 'Archive';
-    ui.summary.textContent = 'Looks for exact copies (the same bytes, any file name) among the images and PDFs in the media folder.';
+    ui.summary.textContent = 'Looks for exact copies (the same bytes, any file name) sitting in the same folder: duplicate copies in a person\'s own folder, in the media folder root and in the archive folder are reported.';
     ui.status.replaceChildren();
     ui.applyDelete.disabled = true;
     ui.applyArchive.disabled = true;
@@ -536,9 +541,8 @@
     showModalFocused(ui.dialog);
   }
 
-  const duplicateMenuButton = document.querySelector('#duplicateMediaMenuButton');
+  // Opened from the Tree Maintenance page (Settings > Tree Maintenance).
   const duplicateDialog = document.querySelector('#duplicateMediaDialog');
-  if (duplicateMenuButton) duplicateMenuButton.addEventListener('click', openDuplicateMediaDialog);
   if (duplicateDialog) {
     duplicateDialog.querySelector('#closeDuplicateMedia').addEventListener('click', () => duplicateDialog.close());
     duplicateDialog.querySelector('#duplicateMediaScanButton').addEventListener('click', scanDuplicateMedia);

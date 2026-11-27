@@ -1,0 +1,22 @@
+{
+  "note": "Supported attachment types. Mirrors KINSHIP_ATTACHMENT_TYPES in src/modules/00b-attachment-types.js; a test fails if the two disagree.",
+  "images": [
+    "jpg",
+    "jpeg",
+    "png",
+    "gif",
+    "webp",
+    "bmp",
+    "tif",
+    "tiff"
+  ],
+  "documents": [
+    "pdf",
+    "txt",
+    "doc",
+    "docx",
+    "rtf",
+    "html",
+    "htm"
+  ]
+}

@@ -34,6 +34,7 @@
           <option value="pedigree">Pedigree View</option>
           <option value="reports">Reports</option>
           <option value="media">Media</option>
+          <option value="favourites">Favourites</option>
         </select>
       </label>
       <button id="mapViewButton" class="button button-quiet" type="button" aria-pressed="false" disabled hidden>Map View</button>
@@ -60,46 +61,24 @@
             Open GEDCOM
             <input id="gedcomInput" type="file" accept=".ged,.gedcom,text/plain">
           </label>
-          <div class="menu-submenu" id="treeManagementSubmenu">
-            <button id="treeManagementMenuButton" class="menu-item menu-submenu-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="treeManagementPanel">
-              <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 20v-6M12 20V8M18 20v-3"/><circle cx="6" cy="11" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="18" cy="14" r="2"/></svg>
-              Tree Management
-              <span class="menu-caret submenu-caret" aria-hidden="true">▸</span>
-            </button>
-            <div id="treeManagementPanel" class="settings-panel submenu-panel" role="menu" aria-label="Tree management" hidden>
-              <button id="importGedcomButton" class="menu-item" type="button" role="menuitem" disabled title="Add new people related to this tree from another GEDCOM file">Import new GEDCOM records</button>
-              <button id="mediaButton" class="menu-item media-button" type="button" role="menuitem" disabled>Select Media Folder</button>
-              <button id="mediaOrganiseMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Move every image and PDF into its person's own folder, copy files shared by several people, and archive files no person uses">
-                <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 7.5A2 2 0 0 1 5 5.5h3.6l1.6 2H19a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 13.5h6"/><path d="M12.5 11l2.5 2.5-2.5 2.5"/></svg>
-                Organise media files
-              </button>
-              <button id="duplicateMediaMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Find files whose contents are identical and remove or archive the extra copies">
-                <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="3" width="12" height="15" rx="1.5"/><path d="M10 21H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1h3"/><path d="M15 8h-4M15 12h-4"/></svg>
-                Find duplicate images
-              </button>
-              <button id="orphanRecordsMenuButton" class="menu-item" type="button" role="menuitem" disabled title="List people with no parents, children, spouses or siblings, and remove the ones you choose">
-                <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="9" cy="9" r="3.2"/><path d="M4 20v-1.2a5 5 0 0 1 10 0V20"/><path d="M16 6h5M16 6l3-3M16 6l3 3" stroke-dasharray="2 2"/></svg>
-                Orphan records
-              </button>
-              <button id="birthCountryMenuButton" class="menu-item" type="button" role="menuitem" disabled title="List people whose birth place does not identify a country, and fix them">People without a birth country</button>
-              <button id="duplicateFinderMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Find people who may have been entered more than once">Find duplicate people</button>
-              <button id="duplicateRelationMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Remove people connected more than once to the same parent or spouse">
-                <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M21 3 12 12"/><path d="M12 12 8 16"/><path d="M8 16 3.5 20.5"/><path d="M3.5 20.5c-1.4 1.4-1.4 3 0 3.9 1.4.9 3 .4 3.9-1l1.8-2.7-3-3z"/><path d="M6.2 17.7l3 3"/><path d="M9.2 14.7l3 3"/></svg>
-                Remove duplicate relationships
-              </button>
-              <button id="defaultsButton" class="menu-item" type="button" role="menuitem" title="Choose the GEDCOM file and media folder that open automatically">Update defaults</button>
-              <button id="gazetteerMenuButton" class="menu-item" type="button" role="menuitem" title="Search, add, edit and import/export historic place names (1700-1970)">Historical Gazetteer</button>
-              <label class="menu-item menu-select-item" for="mapProviderSelect">Map links open
-                <select id="mapProviderSelect" aria-label="Which map website place links open">
-                  <option value="google">Google Maps</option>
-                  <option value="osm">OpenStreetMap</option>
-                </select>
-              </label>
-            </div>
-          </div>
+          <button id="treeMaintenanceMenuButton" class="menu-item" type="button" role="menuitem" disabled title="Open the tree maintenance dashboard: data quality, media, repair, optimisation and statistics">
+            <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 21h18"/><path d="M7 21v-5M12 21v-9M17 21v-3"/><path d="M14.5 6.5l3 3M17.5 6.5l-3 3"/></svg>
+            Tree Maintenance
+          </button>
+          <button id="gazetteerTopMenuButton" class="menu-item" type="button" role="menuitem" title="Search, add, edit and import/export historic-to-modern place name translations">Historic City Names List</button>
+          <label class="menu-item menu-select-item" for="mapProviderTopSelect">Select Map Provider
+            <select id="mapProviderTopSelect" aria-label="Which map website place links open">
+              <option value="google">Google Maps</option>
+              <option value="osm">OpenStreetMap</option>
+              <option value="bing">Bing Maps</option>
+              <option value="mapquest">MapQuest</option>
+            </select>
+          </label>
+          <button id="importGedcomButton" class="menu-item" type="button" role="menuitem" disabled title="Add new people related to this tree from another GEDCOM file">Import new GEDCOM records</button>
+          <button id="mediaButton" class="menu-item media-button" type="button" role="menuitem" disabled>Select Media Folder</button>
           <input id="importGedcomInput" type="file" accept=".ged,.gedcom,text/plain" hidden>
           <input id="mediaInput" type="file" webkitdirectory directory multiple>
-          <input id="mediaUploadInput" type="file" accept="image/*,.pdf,application/pdf" multiple>
+          <input id="mediaUploadInput" type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/bmp,image/tiff,.pdf,.txt,.doc,.docx,.rtf,.html,.htm" multiple>
           <button id="mediaLibraryMenuButton" class="menu-item" type="button" role="menuitem" disabled>Media library</button>
           <div class="menu-submenu" id="themeSubmenu">
             <button id="themeMenuButton" class="menu-item menu-submenu-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="themePanel">
@@ -123,6 +102,28 @@
               <button class="menu-item theme-option" type="button" role="menuitemradio" data-theme-choice="royal" aria-checked="false">
                 <span class="theme-swatch" style="background:#5f6bd7" aria-hidden="true"></span> Royal Archive
               </button>
+              <button id="customThemeMenuButton" class="menu-item menu-submenu-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="customThemePanel">
+                <svg class="button-icon menu-item-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18c1.4 0 2-.9 2-2 0-.6-.3-1-.6-1.4-.3-.4-.6-.8-.6-1.4 0-1.1.9-2 2-2h2.3A4.9 4.9 0 0 0 21 10.5C21 6.4 17 3 12 3Z"/><circle cx="7.5" cy="11" r="1.2"/><circle cx="10.5" cy="7" r="1.2"/><circle cx="14.5" cy="6.5" r="1.2"/></svg>
+                Custom Theme
+                <span class="menu-caret submenu-caret" aria-hidden="true">▸</span>
+              </button>
+              <div id="customThemePanel" class="settings-panel submenu-panel custom-theme-panel" role="menu" aria-label="Custom theme" hidden>
+                <p class="custom-theme-hint">Pick colours for the interface. Changes apply immediately and are remembered.</p>
+                <div class="custom-theme-colors">
+                  <label class="custom-theme-color" for="customThemeInk">Text<input id="customThemeInk" type="color" value="#17352f"></label>
+                  <label class="custom-theme-color" for="customThemePaper">Background<input id="customThemePaper" type="color" value="#f3f5f2"></label>
+                  <label class="custom-theme-color" for="customThemeGreen">Accent<input id="customThemeGreen" type="color" value="#2f786a"></label>
+                  <label class="custom-theme-color" for="customThemeCoral">Highlight<input id="customThemeCoral" type="color" value="#c9694e"></label>
+                  <label class="custom-theme-color" for="customThemeBlue">Link blue<input id="customThemeBlue" type="color" value="#5a88a1"></label>
+                  <label class="custom-theme-color" for="customThemeGold">Gold<input id="customThemeGold" type="color" value="#c58f34"></label>
+                </div>
+                <label class="custom-theme-color custom-theme-banner" for="customThemeBannerInput">Top banner image<input id="customThemeBannerInput" type="file" accept="image/png,image/jpeg,image/webp"></label>
+                <p class="custom-theme-hint">The banner image repeats behind the top bar at half opacity, so text and buttons stay readable.</p>
+                <div class="custom-theme-actions">
+                  <button id="customThemeBannerClear" class="menu-item" type="button" role="menuitem">Remove banner image</button>
+                  <button id="customThemeReset" class="menu-item" type="button" role="menuitem">Reset to Heritage</button>
+                </div>
+              </div>
             </div>
           </div>
           <button id="updateAppButton" class="menu-item" type="button" role="menuitem">Check for application updates</button>
@@ -243,6 +244,60 @@
         </div>
       </div>
       <footer class="graph-footer"><span id="graphSummary">NO TREE LOADED</span><span class="graph-footer-right">SELECT A PERSON TO RECENTER</span></footer>
+      <section id="treeMaintenanceView" class="tree-maintenance-view" aria-labelledby="treeMaintenanceTitle" hidden>
+        <div class="maintenance-heading">
+          <div>
+            <div class="eyebrow">TREE MAINTENANCE <span class="eyebrow-rule"></span><span id="treeMaintenanceFileName"></span></div>
+            <h1 id="treeMaintenanceTitle">Maintenance workspace</h1>
+            <p id="treeMaintenanceSubtitle">Every cleanup, repair and verification tool for this tree, in one place.</p>
+          </div>
+          <button id="treeMaintenanceBackButton" class="button button-secondary" type="button">Back to tree</button>
+        </div>
+        <div class="maintenance-body">
+          <section id="maintenanceOverview" class="maintenance-overview" aria-label="Maintenance centre overview">
+            <div class="maintenance-overview-heading">
+              <h2>Maintenance centre</h2>
+              <span id="maintenanceOverviewStatus" class="maintenance-overview-status"></span>
+            </div>
+            <dl class="maintenance-overview-grid" id="maintenanceOverviewGrid"></dl>
+          </section>
+          <section class="maintenance-section" aria-labelledby="maintenanceDataQualityTitle">
+            <div class="maintenance-section-heading">
+              <h2 id="maintenanceDataQualityTitle">Data Quality</h2>
+              <p>Identify problems in person records.</p>
+            </div>
+            <div class="maintenance-cards" id="maintenanceDataQualityCards"></div>
+          </section>
+          <section class="maintenance-section" aria-labelledby="maintenanceMediaTitle">
+            <div class="maintenance-section-heading">
+              <h2 id="maintenanceMediaTitle">Media Maintenance</h2>
+              <p>Manage and clean media files.</p>
+            </div>
+            <div class="maintenance-cards" id="maintenanceMediaCards"></div>
+          </section>
+          <section class="maintenance-section" aria-labelledby="maintenanceRepairTitle">
+            <div class="maintenance-section-heading">
+              <h2 id="maintenanceRepairTitle">Tree Repair</h2>
+              <p>Structural corrections.</p>
+            </div>
+            <div class="maintenance-cards" id="maintenanceRepairCards"></div>
+          </section>
+          <section class="maintenance-section" aria-labelledby="maintenanceOptimiseTitle">
+            <div class="maintenance-section-heading">
+              <h2 id="maintenanceOptimiseTitle">Optimisation</h2>
+              <p>Improve data quality and consistency in a single pass.</p>
+            </div>
+            <div class="maintenance-cards maintenance-cards-single" id="maintenanceOptimiseCards"></div>
+          </section>
+          <section class="maintenance-section" aria-labelledby="maintenanceStatsTitle">
+            <div class="maintenance-section-heading">
+              <h2 id="maintenanceStatsTitle">Statistics</h2>
+              <p>What this tree currently contains.</p>
+            </div>
+            <dl class="maintenance-statistics" id="maintenanceStatistics"></dl>
+          </section>
+        </div>
+      </section>
     </main>
 
     <aside class="details-panel" aria-label="Selected person details">
@@ -271,6 +326,17 @@
       </label>
       <label class="media-library-filter" for="mediaLibraryTypeFilter">Type
         <select id="mediaLibraryTypeFilter"><option value="">All types</option></select>
+      </label>
+      <label class="media-library-filter" for="mediaLibraryFileKindFilter">File type
+        <select id="mediaLibraryFileKindFilter">
+          <option value="">All file types</option>
+          <option value="image">Images</option>
+          <option value="pdf">PDF</option>
+          <option value="word">Word documents</option>
+          <option value="text">Text files</option>
+          <option value="html">HTML files</option>
+          <option value="document">Other documents</option>
+        </select>
       </label>
       <label class="media-library-filter" for="mediaLibrarySort">Sort by
         <select id="mediaLibrarySort">
@@ -308,6 +374,39 @@
       <span class="media-library-page-status"></span>
       <button class="button button-secondary" type="button" data-media-page="1" aria-controls="mediaLibraryContent">Next</button>
     </nav>
+  </section>
+  <section id="favouritesView" class="favourites-view" aria-labelledby="favouritesTitle" hidden>
+    <!-- KINSHIP_ATLAS_MARKERS: favourites page anchor. Content is rendered by
+         22-favourites.js, which finds this element by id, so the page still
+         appears in a build that predates its markup (for example a stale
+         index.html beside a new app.js). -->
+    <div class="favourites-heading">
+      <div>
+        <div class="eyebrow">FAVOURITES <span class="eyebrow-rule"></span><span id="favouritesFileName"></span></div>
+        <h1 id="favouritesTitle">Favourites</h1>
+        <p>Quick access to your most important people.</p>
+      </div>
+      <button id="favouritesBackButton" class="button button-secondary" type="button">Back to tree</button>
+    </div>
+    <div class="favourites-toolbar">
+      <label class="favourites-search" for="favouritesSearch">Search people
+        <input id="favouritesSearch" type="search" placeholder="Name or GEDCOM ID" autocomplete="off">
+      </label>
+      <label class="favourites-sort" for="favouritesSort">Sort by
+        <select id="favouritesSort">
+          <option value="added-desc">Recently Added (Newest First)</option>
+          <option value="added-asc">Recently Added (Oldest First)</option>
+          <option value="surname-asc">Surname A–Z</option>
+          <option value="surname-desc">Surname Z–A</option>
+          <option value="given-asc">First Name A–Z</option>
+          <option value="given-desc">First Name Z–A</option>
+          <option value="year-asc">Year Born Earliest First</option>
+          <option value="year-desc">Year Born Latest First</option>
+        </select>
+      </label>
+      <span id="favouritesCount" class="favourites-count"></span>
+    </div>
+    <div id="favouritesContent" class="favourites-content"></div>
   </section>
   <section id="reportsView" class="reports-view" aria-labelledby="reportsTitle" hidden>
     <div class="reports-heading">
@@ -836,7 +935,7 @@
       </div>
     </section>
   </dialog>
-  <dialog id="personSummaryDialog" class="app-dialog" aria-labelledby="personSummaryTitle">
+  <dialog id="personSummaryDialog" class="app-dialog person-summary-dialog" aria-labelledby="personSummaryTitle">
     <form id="personSummaryForm" class="dialog-panel new-gedcom-panel">
       <h2 id="personSummaryTitle">Edit person details</h2>
       <p>Update the name, sex, and life dates shown in this Person Record. Enter GEDCOM dates such as ABT 1883, or use the calendar for an exact date.</p>
@@ -931,9 +1030,9 @@
   <dialog id="duplicateMediaDialog" class="app-dialog media-organise-dialog" aria-labelledby="duplicateMediaTitle">
     <section class="dialog-panel">
       <h2 id="duplicateMediaTitle">Find duplicate images</h2>
-      <p id="duplicateMediaSummary">Looks for exact copies (the same bytes, any file name) among the images and PDFs in the media folder.</p>
+      <p id="duplicateMediaSummary">Looks for exact copies (the same bytes, any file name) sitting in the same folder: duplicate copies in a person's own folder, in the media folder root and in the archive folder are reported.</p>
       <p id="duplicateMediaFolder" class="duplicate-media-folder" hidden></p>
-      <p class="dialog-hint">A file used as a card image or attached to a life event is never offered, and neither are the other copies in its group. The kept file stays linked; the removed files are unlinked from every person record.</p>
+      <p class="dialog-hint">One copy of a file is always kept: a file used as a card image or attached to a life event is preferred, and if two such files remain the group is left alone. Copies in different people's folders are not reported, because one photo can legitimately belong to several people. The kept file stays linked; the removed files are unlinked from every person record.</p>
       <label class="media-organise-archive" for="duplicateMediaArchive">Archive folder
         <input id="duplicateMediaArchive" type="text" value="Archive" maxlength="60" autocomplete="off" spellcheck="false">
       </label>
@@ -965,20 +1064,49 @@
       </div>
     </section>
   </dialog>
+  <dialog id="mediaValidationDialog" class="app-dialog media-organise-dialog" aria-labelledby="mediaValidationTitle">
+    <section class="dialog-panel">
+      <h2 id="mediaValidationTitle">Media validation</h2>
+      <p id="mediaValidationSummary">Checks every media path recorded in the GEDCOM against the files in the linked media folder.</p>
+      <p class="dialog-hint">A missing file is recorded but not in the media folder. An invalid path is a recorded path the app cannot safely link to the folder, such as an empty FILE line, a network or web address, or a folder outside the media folder. A broken link is a reference that resolves to no file in the folder. Nothing here changes the tree.</p>
+      <div id="mediaValidationSummaryBox" class="media-validation-summary" hidden></div>
+      <label class="media-validation-filter" for="mediaValidationSearch"><span class="search-glyph" aria-hidden="true">⌕</span><input id="mediaValidationSearch" type="search" placeholder="Filter by file, folder or person" autocomplete="off"></label>
+      <div id="mediaValidationList" class="media-organise-list" aria-live="polite"></div>
+      <p id="mediaValidationStatus" class="media-organise-status" role="status"></p>
+      <div class="dialog-actions">
+        <span id="mediaValidationCount" class="media-organise-pending"></span>
+        <button id="mediaValidationScanButton" class="dialog-button dialog-button-primary" type="button">Scan media</button>
+        <button id="closeMediaValidation" class="dialog-button dialog-button-quiet" type="button">Close</button>
+      </div>
+    </section>
+  </dialog>
+  <dialog id="attachmentPreviewDialog" class="app-dialog attachment-preview-dialog" aria-labelledby="attachmentPreviewTitle">
+    <section class="dialog-panel">
+      <h2 id="attachmentPreviewTitle">Attachment</h2>
+      <p id="attachmentPreviewMeta" class="attachment-preview-meta"></p>
+      <div id="attachmentPreviewBody" class="attachment-preview-body"></div>
+      <div class="dialog-actions">
+        <button id="attachmentPreviewOpenExternal" class="dialog-button" type="button">Open in a new tab</button>
+        <button id="attachmentPreviewLocate" class="dialog-button" type="button" hidden>Locate file</button>
+        <button id="closeAttachmentPreview" class="dialog-button dialog-button-quiet" type="button">Close</button>
+      </div>
+    </section>
+  </dialog>
   <dialog id="addRelativeDialog" class="app-dialog" aria-labelledby="addRelativeTitle">
     <form id="addRelativeForm" class="dialog-panel new-gedcom-panel">
       <h2 id="addRelativeTitle">Add a relative</h2>
-      <p>Create a new relative, or choose <strong>Select existing person</strong> when adding a parent or partner/spouse. Search by name or GEDCOM ID, then select the matching record (dates and IDs distinguish people with the same name). For a parent, choose a family with a vacant role or create a separate parent family. Existing people are linked without changing their recorded details.</p>
+      <p>Create a new relative, or choose <strong>Select existing person</strong> when adding a parent or partner/spouse. Search by name, then select the matching record (dates distinguish people with the same name). For a parent, choose a family with a vacant role or create a separate parent family. Existing people are linked without changing their recorded details.</p>
       <div class="new-gedcom-fields">
         <label class="new-gedcom-field" for="relativeType">Relationship<select id="relativeType"><option value="PARENT">Parent</option><option value="CHILD">Child</option><option value="SIBLING">Sibling</option><option value="PARTNER">Partner</option></select></label>
         <label class="new-gedcom-field" for="relativeParentRole">Parent role<select id="relativeParentRole"><option value="HUSB">Father / HUSB</option><option value="WIFE">Mother / WIFE</option></select></label>
         <label id="relativeModeField" class="new-gedcom-field" for="relativeMode">Person<select id="relativeMode"><option value="NEW">Create new person</option><option value="EXISTING">Select existing person</option></select></label>
+        <label id="relativeFamilyField" class="new-gedcom-field" for="relativeFamily">Existing parent (applies to all children in that family)<select id="relativeFamily"></select></label>
+        <label id="relativeSpouseField" class="new-gedcom-field" for="relativeSpouse">Other parent from a spouse relationship (optional)<select id="relativeSpouse"></select></label>
         <div id="relativeExistingFields" hidden>
-          <label class="new-gedcom-field" for="relativeSearch">Search existing people<input id="relativeSearch" type="search" placeholder="Name or GEDCOM ID"></label>
+          <label class="new-gedcom-field" for="relativeSearch">Search existing people<input id="relativeSearch" type="search" placeholder="Name"></label>
           <label class="new-gedcom-field" for="relativeExistingPerson">Select person<select id="relativeExistingPerson" size="6" aria-describedby="relativeSearchCount"></select></label>
           <p id="relativeSearchCount" role="status"></p>
         </div>
-        <label id="relativeFamilyField" class="new-gedcom-field" for="relativeFamily">Parent family (applies to all children in that family)<select id="relativeFamily"></select></label>
         <label class="new-gedcom-field" for="relativeGivenName">Given name(s)<input id="relativeGivenName" type="text" required maxlength="120"></label>
         <label class="new-gedcom-field" for="relativeSurname">Surname<input id="relativeSurname" type="text" maxlength="120"></label>
         <label class="new-gedcom-field" for="relativeSex">Sex<select id="relativeSex"><option value="">Not recorded</option><option value="F">Female</option><option value="M">Male</option></select></label>

@@ -39,7 +39,21 @@
     'ORDN', 'PROB', 'WILL', 'SSN', 'EVEN'
   ]);
 
-  const MEDIA_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'pdf'];
+  // Every supported attachment type, from the one shared list
+  // (data/attachment-types.json, mirrored by src/modules/00b-attachment-types.js).
+  // Images and PDFs keep their original behaviour; .txt, .doc, .docx, .rtf,
+  // .html and .htm are attachments the same as an image is.
+  const ATTACHMENT_TYPE_TABLE = (() => {
+    try {
+      if (typeof require === 'function') return require('../data/attachment-types.json');
+    } catch { }
+    return global.KINSHIP_ATTACHMENT_TYPES || null;
+  })();
+  const ATTACHMENT_IMAGES = (ATTACHMENT_TYPE_TABLE?.images || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tif', 'tiff']).map((value) => String(value).toLocaleLowerCase());
+  const ATTACHMENT_DOCUMENTS = (ATTACHMENT_TYPE_TABLE?.documents || ['pdf', 'txt', 'doc', 'docx', 'rtf', 'html', 'htm']).map((value) => String(value).toLocaleLowerCase());
+  const MEDIA_EXTENSIONS = [...new Set([...ATTACHMENT_IMAGES, ...ATTACHMENT_DOCUMENTS])];
+  // The GEDCOM's own file, never a media attachment.
+  const GEDCOM_FILE_EXTENSIONS = ['ged', 'gedcom'];
   const ARCHIVE_FOLDER = 'Archive';
   const ARCHIVE_FOLDER_ALIASES = ['archive', 'unknown', 'unlinked', 'unsorted', 'orphaned', 'misc', 'miscellaneous', 'duplicates'];
 
@@ -76,7 +90,7 @@
     return key === relative || key.endsWith(`/${relative}`) || relative.endsWith(`/${key}`);
   }
 
-  // True for an image or PDF, by its extension whatever the case.
+  // True for any supported attachment, by its extension whatever the case.
   function isMediaFile(name) {
     const base = String(name || '');
     if (!base || base.startsWith('.')) return false;
@@ -214,15 +228,20 @@
     return value;
   }
 
-  // True when a GEDCOM FILE path names an image or PDF, whatever its case.
+  // True when a GEDCOM FILE path names a supported attachment.
   function hasMediaExtension(path) {
     return isMediaFile(mediaFileName(path));
   }
 
-  // A FILE line naming something that is not an image or PDF - a document the
-  // GEDCOM attaches, or the GEDCOM file itself - is not ours to move.
+  // A FILE line naming the GEDCOM file itself is not ours to move. Every other
+  // path is an attachment, whatever its type: a .txt or .docx the tree links
+  // belongs to its person just as a .jpg does.
   function isGedcomFileReference(path) {
-    return Boolean(mediaFileName(path)) && !hasMediaExtension(path);
+    const name = mediaFileName(path);
+    if (!name) return false;
+    const dot = name.lastIndexOf('.');
+    const extension = dot > 0 ? name.slice(dot + 1).toLocaleLowerCase() : '';
+    return GEDCOM_FILE_EXTENSIONS.includes(extension);
   }
 
   // Works out where every file in the media folder belongs and what the GEDCOM
@@ -767,32 +786,36 @@
     return Boolean(entry) && !entry.err && hasMediaExtension(entry.relativePath || entry.name);
   }
 
-  // Groups files whose contents are identical. One file is kept: a file used as
-  // a card image or attached to a life event if the group has one (and then the
-  // whole group is left alone), else the first linked file, else the first in
-  // path order. The others are the extra copies the user may remove.
+  // Groups files whose contents are identical and that sit in the same folder.
+  // A duplicate is more than one copy of one file within a single folder: the
+  // media folder root, one person's own subfolder, or the archive folder. Copies
+  // in different people's folders are never duplicates, even with identical
+  // bytes, because one photo can legitimately be attached to several people.
+  // One file is kept: a file used as a card image or attached to a life event if
+  // there is one in the folder (and then the whole group is left alone), else the
+  // first linked file, else the first in path order. `options.archiveFolder`
+  // names the archive folder so it is included.
   function groupDuplicates(entries, options = {}) {
     const hero = new Set([...(options.heroKeys || [])].map((key) => normalizeMediaPath(key)).filter(Boolean));
     const event = new Set([...(options.eventKeys || [])].map((key) => normalizeMediaPath(key)).filter(Boolean));
+    // One group per identical content inside one folder.
     const groups = new Map();
     for (const entry of entries || []) {
       if (!isDuplicateCandidate(entry)) continue;
       const hash = String(entry.hash || '').toLocaleLowerCase();
       if (!hash) continue;
-      if (!groups.has(hash)) groups.set(hash, []);
-      groups.get(hash).push(entry);
+      const groupKey = `${hash}\u0000${normalizeMediaPath(mediaFolderOf(entry.relativePath))}`;
+      if (!groups.has(groupKey)) groups.set(groupKey, { hash, files: [] });
+      groups.get(groupKey).files.push(entry);
     }
     const duplicates = [];
-    for (const [hash, files] of groups) {
+    for (const { hash, files } of groups.values()) {
       if (files.length < 2) continue;
-      const linked = (entry) => Boolean(entry.linked || entry.personIds?.length || entry.owners?.length);
-      // An identical file linked to several people is a valid share: a photo
-      // with several people in it belongs under each person's folder. Such a
-      // group is left alone, so the copies are not offered for removal.
-      const personIdsOf = (entry) => entry.personIds || entry.owners || [];
-      if (files.length > 1 && files.every((entry) => linked(entry) && personIdsOf(entry).length > 1)) continue;
-      // A protected file is never offered: its group keeps every copy.
+      files.sort((left, right) => String(left.relativePath).localeCompare(String(right.relativePath)));
+      // A file used as a card image or life event photo is never offered: its
+      // group keeps every copy.
       const protectedFile = files.find((entry) => hero.has(entry.key) || event.has(entry.key));
+      const linked = (entry) => Boolean(entry.linked || entry.personIds?.length || entry.owners?.length);
       const keeper = protectedFile || files.find((entry) => linked(entry)) || files[0];
       duplicates.push({
         hash,
@@ -800,6 +823,7 @@
         files,
         others: files.filter((entry) => entry !== keeper),
         bytes: Number(keeper.size) || 0,
+        folder: mediaFolderOf(keeper.relativePath),
         // True while any copy is a card image or life-event photo.
         protected: Boolean(protectedFile) || files.some((entry) => linked(entry) && (hero.has(entry.key) || event.has(entry.key))),
         linked: files.some((entry) => linked(entry))

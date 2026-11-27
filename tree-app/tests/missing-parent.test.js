@@ -11,10 +11,11 @@ function harness() {
   const nodes = new Map();
   function node(tag = 'div') {
     let value = '';
-    return {
+    const element = {
       tag, children: [], dataset: {}, hidden: false,
       get value() { return value; },
       set value(next) { value = next; },
+      get options() { return element.children; },
       append(...children) {
         this.children.push(...children);
         if (tag === 'select' && children.length && this.children.length === children.length) value = children[0].value;
@@ -25,9 +26,10 @@ function harness() {
       setAttribute(name, next) { this[name] = next; },
       focus() {}
     };
+    return element;
   }
   const field = (id) => {
-    if (!nodes.has(id)) nodes.set(id, node(id === 'relativeFamily' ? 'select' : 'input'));
+    if (!nodes.has(id)) nodes.set(id, node(['relativeFamily', 'relativeSpouse'].includes(id) ? 'select' : 'input'));
     return nodes.get(id);
   };
   const people = new Map(['A', 'C', 'D', 'B'].map((id) => [id, {

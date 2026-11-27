@@ -1,0 +1,2 @@
+bad folders: 748
+MOVED: 2645  DEDUP: 0  CLASHES: 0  NOMATCH: 0  FOLDERS REMOVED: 748  bad folders remaining: 0

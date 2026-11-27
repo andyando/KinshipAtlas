@@ -448,8 +448,9 @@
     return typeof window.showDirectoryPicker === 'function' ? 'none' : 'unsupported';
   }
 
+  // Every supported attachment type can be stored (images, PDFs and documents).
   function isSupportedMediaFile(file) {
-    return isImageFile(file) || file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+    return Boolean(file) && (isSupportedAttachment(file.name) || attachmentKind(file.type) !== '');
   }
 
   // Writes one file into the person's own folder in the selected media folder (or

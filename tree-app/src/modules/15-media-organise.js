@@ -720,9 +720,8 @@ This cannot be undone.`)) return;
     return changed;
   }
 
-  const mediaOrganiseButton = document.querySelector('#mediaOrganiseMenuButton');
+  // Opened from the Tree Maintenance page (Settings > Tree Maintenance).
   const mediaOrganiseDialog = mediaOrganiseDialogElement();
-  if (mediaOrganiseButton) mediaOrganiseButton.addEventListener('click', openMediaOrganiseDialog);
   if (mediaOrganiseDialog) {
     mediaOrganiseDialog.querySelector('#closeMediaOrganise').addEventListener('click', () => mediaOrganiseDialog.close());
     mediaOrganiseDialog.querySelector('#mediaOrganiseCheck').addEventListener('click', checkMediaOrganise);

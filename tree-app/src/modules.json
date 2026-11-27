@@ -1,137 +1,179 @@
 {
   "eol": "lf",
-  "totalLines": 12957,
+  "totalLines": 15902,
   "modules": [
     {
       "file": "00-header.js",
       "from": 1,
-      "to": 27,
-      "lines": 27,
+      "to": 29,
+      "lines": 29,
       "name": "File header and organisation notes"
     },
     {
+      "file": "00b-attachment-types.js",
+      "from": 30,
+      "to": 126,
+      "lines": 97,
+      "name": "Supported attachment types (single source of truth)"
+    },
+    {
       "file": "01-state.js",
-      "from": 28,
-      "to": 108,
+      "from": 127,
+      "to": 207,
       "lines": 81,
       "name": "Constants and application state"
     },
     {
       "file": "02-dom.js",
-      "from": 109,
-      "to": 180,
-      "lines": 72,
+      "from": 208,
+      "to": 280,
+      "lines": 73,
       "name": "Cached DOM elements"
     },
     {
       "file": "03-gedcom-primitives.js",
-      "from": 181,
-      "to": 320,
+      "from": 281,
+      "to": 420,
       "lines": 140,
       "name": "GEDCOM primitives (parsing, serialising, record helpers)"
     },
     {
       "file": "04-session.js",
-      "from": 321,
-      "to": 402,
+      "from": 421,
+      "to": 502,
       "lines": 82,
       "name": "Session persistence (IndexedDB)"
     },
     {
       "file": "05-gedcom-parse.js",
-      "from": 403,
-      "to": 607,
+      "from": 503,
+      "to": 707,
       "lines": 205,
       "name": "GEDCOM parsing"
     },
     {
       "file": "06-kinship.js",
-      "from": 608,
-      "to": 855,
-      "lines": 248,
+      "from": 708,
+      "to": 963,
+      "lines": 256,
       "name": "Kinship graph and relationship terms"
     },
     {
       "file": "07-public-records.js",
-      "from": 856,
-      "to": 1099,
+      "from": 964,
+      "to": 1207,
       "lines": 244,
       "name": "Search Public Records (multi-provider external lookups)"
     },
     {
       "file": "08-media.js",
-      "from": 1100,
-      "to": 1359,
-      "lines": 260,
+      "from": 1208,
+      "to": 1569,
+      "lines": 362,
       "name": "Media handling (index, storage, resolution)"
     },
     {
       "file": "09-selections.js",
-      "from": 1360,
-      "to": 2190,
-      "lines": 831,
+      "from": 1570,
+      "to": 2426,
+      "lines": 857,
       "name": "Selections and per-tree storage keys"
     },
     {
       "file": "10-rendering.js",
-      "from": 2191,
-      "to": 6139,
-      "lines": 3949,
+      "from": 2427,
+      "to": 6761,
+      "lines": 4335,
       "name": "Rendering (tree, roster, details, media library, reports)"
     },
     {
       "file": "11-editors.js",
-      "from": 6140,
-      "to": 7270,
+      "from": 6762,
+      "to": 7892,
       "lines": 1131,
       "name": "Editors and dialogs (person, life events, relationships, deletion)"
     },
     {
       "file": "12-directory.js",
-      "from": 7271,
-      "to": 8210,
+      "from": 7893,
+      "to": 8832,
       "lines": 940,
       "name": "Directory, duplicate finder and birth-country suggestions"
     },
     {
       "file": "13-import.js",
-      "from": 8211,
-      "to": 10368,
-      "lines": 2158,
+      "from": 8833,
+      "to": 11227,
+      "lines": 2395,
       "name": "GEDCOM import, merging and saving"
     },
     {
       "file": "14-map-print.js",
-      "from": 10369,
-      "to": 11246,
-      "lines": 878,
+      "from": 11228,
+      "to": 12124,
+      "lines": 897,
       "name": "Map, print, defaults, about/help and startup wiring"
     },
     {
       "file": "15-media-organise.js",
-      "from": 11247,
-      "to": 11665,
-      "lines": 419,
+      "from": 12125,
+      "to": 12854,
+      "lines": 730,
       "name": "Media folder organisation (person folders, archive, GEDCOM rewrite)"
     },
     {
       "file": "16-duplicate-media.js",
-      "from": 11666,
-      "to": 12202,
-      "lines": 537,
+      "from": 12855,
+      "to": 13406,
+      "lines": 552,
       "name": "Duplicate media files (exact copies, archive or delete)"
     },
     {
       "file": "17-orphan-records.js",
-      "from": 12203,
-      "to": 12457,
-      "lines": 255,
+      "from": 13407,
+      "to": 13664,
+      "lines": 258,
       "name": "Orphan records (people with no family links)"
     },
     {
+      "file": "19-tree-maintenance.js",
+      "from": 13665,
+      "to": 14232,
+      "lines": 568,
+      "name": "Tree Maintenance (dashboard: data quality, media, repair, optimisation, statistics)"
+    },
+    {
+      "file": "20-media-validation.js",
+      "from": 14233,
+      "to": 14610,
+      "lines": 378,
+      "name": "Media validation (missing files, invalid paths, broken links)"
+    },
+    {
+      "file": "21-attachment-preview.js",
+      "from": 14611,
+      "to": 14838,
+      "lines": 228,
+      "name": "Attachment preview (text, safe HTML, external documents)"
+    },
+    {
+      "file": "22-smart-match.js",
+      "from": 14839,
+      "to": 14965,
+      "lines": 127,
+      "name": "Smart file matching (suggest a person for an unlinked file)"
+    },
+    {
+      "file": "22-favourites.js",
+      "from": 14966,
+      "to": 15403,
+      "lines": 438,
+      "name": "Favourites (bookmarked people and the Favourites page)"
+    },
+    {
       "file": "18-historical-gazetteer.js",
-      "from": 12458,
-      "to": 12957,
+      "from": 15404,
+      "to": 15902,
       "lines": 499,
       "name": "Historical gazetteer (offline historic place resolution + admin tools)"
     }

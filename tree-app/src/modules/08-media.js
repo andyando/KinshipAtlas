@@ -32,8 +32,18 @@
     return bestScore && !tied ? bestFile : null;
   }
 
+  // True for a file the browser can draw as a picture. TIF/TIFF are supported
+  // attachments but no browser decodes them, so they are shown with a type icon
+  // instead of a broken <img>.
   function isImageFile(file) {
-    return file.type.startsWith('image/') || /\.(avif|bmp|gif|jpe?g|png|webp)$/i.test(file.name);
+    if (!file) return false;
+    if (attachmentKind(file.name) === 'image') return isRenderableImage(file.name);
+    return file.type.startsWith('image/') || /^image\/(jpeg|png|gif|webp|bmp)$/i.test(file.type || '');
+  }
+
+  // True for any supported attachment file object, whatever its type.
+  function isAttachmentFile(file) {
+    return Boolean(file) && (isSupportedAttachment(file.name) || isImageFile(file) || attachmentKind(file.type) !== '');
   }
 
   // A media item's address, with a version of its own, so a file that moved or

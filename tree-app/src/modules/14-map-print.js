@@ -224,7 +224,10 @@
   });
 
   function updateDefaultsButton() {
-    setButtonContent(document.querySelector('#defaultsButton'), 'sliders', 'Update defaults');
+    // Update defaults now lives on the Tree Maintenance page, so the button is
+    // optional; the tree label in the top bar opens the same dialog.
+    const button = document.querySelector('#defaultsButton');
+    if (button) setButtonContent(button, 'sliders', 'Update defaults');
   }
 
   function syncDefaultsDialog() {
@@ -549,9 +552,12 @@
   for (const item of topMenus) {
     item.button.addEventListener('click', () => setMenuOpen(item, item.panel.hidden));
     // Any click inside the panel closes it, except interactions with the
-    // submenus (their toggles and items), which manage their own opening state.
+    // submenus (their toggles and items), which manage their own opening state,
+    // and with a select control such as Select Map Provider: opening a dropdown
+    // is not a command, and closing the menu would take the dropdown with it.
     item.panel.addEventListener('click', (event) => {
-      if (event.target.closest('#themeSubmenu') || event.target.closest('#treeManagementSubmenu')) return;
+      if (event.target.closest('#themeSubmenu')) return;
+      if (event.target.closest('select, .menu-select-item')) return;
       window.setTimeout(() => setMenuOpen(item, false), 0);
     });
   }
@@ -600,9 +606,8 @@
     if (button) showHelpTopic(button.dataset.helpNav);
   });
 
-  document.querySelector('#defaultsButton').addEventListener('click', openDefaultsDialog);
+  document.querySelector('#treeLabel').addEventListener('click', openDefaultsDialog);
   elements.updateAppButton.addEventListener('click', checkApplicationUpdates);
-  elements.treeLabel.addEventListener('click', openDefaultsDialog);
 
   const gedcomImport = {
     button: document.querySelector('#importGedcomButton'), input: document.querySelector('#importGedcomInput'),
@@ -825,11 +830,9 @@
   setButtonContent(elements.reportsButton, 'chart', 'Reports');
   setButtonContent(elements.mediaLibraryButton, 'media', 'Media');
   setButtonContent(document.querySelector('#mediaLibraryMenuButton'), 'media', 'Media library');
-  setButtonContent(document.querySelector('#birthCountryMenuButton'), 'map', 'People without a birth country');
-  setButtonContent(document.querySelector('#duplicateFinderMenuButton'), 'search', 'Find duplicate people');
   setButtonContent(document.querySelector('#exitButton'), 'exit', 'Exit Kinship Atlas');
   setButtonContent(document.querySelector('#aboutMenuButton'), 'info', 'About Kinship Atlas');
-  setButtonContent(document.querySelector('#defaultsButton'), 'sliders', 'Update defaults');
+  updateDefaultsButton();
   setButtonContent(elements.updateAppButton, 'update', 'Check for application updates');
   syncMediaButton();
   setButtonContent(elements.clear, 'restart', 'Start Again');

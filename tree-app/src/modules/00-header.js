@@ -18,6 +18,8 @@
  *  13. GEDCOM import, merging and saving
  *  14. Map, print, defaults, about/help and startup wiring
  *  15. Media folder organisation (person folders, archive, GEDCOM rewrite)
+ *  16-18. Duplicate media, orphan records, historical gazetteer
+ *  19. Tree Maintenance (Settings dashboard for the tools above)
  *
  * Section banners below match this list. Functions within a section keep their historical
  * ordering because the automated test suite locates some helpers by exact source position.

@@ -7,6 +7,55 @@
 window.KINSHIP_VERSION = {
   releases: [
     {
+      version: '1.20.0',
+      date: '2026-11-27',
+      changes: [
+        'Added Favourites: bookmark people with Add to Favourites on any person record and reach them from the new Favourites view in the View dropdown.',
+        'The Favourites page shows a responsive card for each person, with photo or initials, lifespan, birth place, GEDCOM ID and when they were added; click a card to open that person, or remove them straight from the card.',
+        'Favourites can be searched by name or GEDCOM ID and sorted by recently added, surname, first name or birth year; the sort choice is remembered.',
+        'Favourites are saved with the tree and survive a refresh, a restart and a GEDCOM reload; records saved by an older version as a plain list of ids are migrated automatically.',
+        'A small heart marks favourite people in the directory and on pedigree cards.',
+        'Fixed Tree Maintenance opening from the Media library or Reports: the page was shown but the app shell stayed hidden, so nothing appeared. It now closes those views first and always restores the shell, and the menu entry is wired once by delegation so it cannot go dead.',
+        'The View dropdown now lists Favourites.'
+      ]
+    },
+    {
+      version: '1.19.0',
+      date: '2026-11-27',
+      changes: [
+        'Documents are now first-class attachments: .txt, .doc, .docx, .rtf, .html and .htm files in the media folder are indexed, listed, linked, searched and validated like images and PDFs, and TIF/TIFF images are supported too.',
+        'Media Validation no longer reports a document as a missing file solely because of its type; unsupported types are counted separately and only a file that is genuinely absent is listed as missing.',
+        'The person record section Attached media is now Attached files and shows documents with a type icon, their type and who they belong to.',
+        'TXT files preview inline and HTML files preview in a sanitised, script-free viewer; Word and RTF documents open in their default application.',
+        'The Media Library gains a File type filter (Images, PDF, Word documents, Text files, HTML files) and searches type names as well as filenames.',
+        'Files with no recorded link are matched to a likely person by name and offered as a suggestion; nothing is linked until you confirm.',
+        'One central list (data/attachment-types.json) now defines the supported attachment types for the app, the local helper and the Windows launcher.'
+      ]
+    },
+    {
+      version: '1.18.3',
+      date: '2026-11-27',
+      changes: [
+        'Added Settings > Tree Maintenance: a maintenance workspace listing every cleanup, repair and verification tool as a card, with a Maintenance centre overview and tree statistics.',
+        'Smart Cleanup runs orphan, duplicate-people, duplicate-relationship and missing-country checks in one pass; each count opens the tool that fixes those findings.',
+        'Added Media Validation, which checks every recorded media path and reports missing files, invalid paths and broken links.',
+        'Find duplicate images now reports a file only when it has more than one copy in the same folder: a person\'s own folder, the media folder root or the archive folder. Copies in different people\'s folders are no longer flagged.',
+        'Settings gained Historic City Names List and Select Map Provider (now including Bing Maps and MapQuest) as direct menu items.',
+        'The Select Map Provider dropdown keeps the Settings menu open while it is used, and every place link names the newly chosen provider.',
+        'Removed the old Tree Management submenu: all of its tools now live in Tree Maintenance.'
+      ]
+    },
+    {
+      version: '1.18.2',
+      date: '2026-11-26',
+      changes: [
+        'Relationship-map parent lines now take their colour from the parent couple, so children with the same two parents share one colour even when their links come from separate family records.',
+        'Add Relative gained an optional other-parent field: adding a child to someone with a spouse offers that spouse (pre-selected when there is exactly one), and the same option appears when adding a parent without a family.',
+        'On the Add Relative screen the birth place sits under the birth date and the death place under the death date.',
+        'Selecting an existing person on Add Relative searches and lists by name and dates only; GEDCOM IDs are no longer shown.'
+      ]
+    },
+    {
       version: '1.18.1',
       date: '2026-11-22',
       changes: [

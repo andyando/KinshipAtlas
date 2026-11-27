@@ -32,14 +32,23 @@ if (!process.argv[2] && !process.env.MEDIA_DIR) {
 }
 fs.mkdirSync(mediaDir, { recursive: true });
 
+const attachmentTypes = require('./data/attachment-types.json');
+const supportedExtensions = [...attachmentTypes.images, ...attachmentTypes.documents];
+
 const types = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
   '.webp': 'image/webp', '.avif': 'image/avif', '.bmp': 'image/bmp', '.pdf': 'application/pdf',
+  // Attachment documents. Text is served as text so it previews in the tab;
+  // HTML is sent as source, never as a page the browser would run.
+  '.txt': 'text/plain; charset=utf-8', '.htm': 'text/plain; charset=utf-8',
+  '.doc': 'application/msword', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.rtf': 'application/rtf', '.tif': 'image/tiff', '.tiff': 'image/tiff',
   '.wasm': 'application/wasm', '.tflite': 'application/octet-stream'
 };
-const uploadExtensions = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.bmp', '.pdf']);
+// Uploads accept every supported attachment type.
+const uploadExtensions = new Set(supportedExtensions.map((extension) => `.${extension}`));
 
 function send(response, status, body, contentType = 'application/json') {
   response.writeHead(status, { 'Content-Type': contentType, 'Cache-Control': 'no-store, no-cache, must-revalidate', 'Pragma': 'no-cache', 'X-Content-Type-Options': 'nosniff' });

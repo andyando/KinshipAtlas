@@ -30,6 +30,14 @@
       const partnerId = family.husbandId === personId ? family.wifeId : family.husbandId;
       if (partnerId && state.people.has(partnerId)) partners.set(partnerId, family);
     }
+    // Some trees record the partnership on only one side (FAMS on one INDI,
+    // HUSB/WIFE in the FAM). Scan the family records too so partners are found
+    // even when this person's own INDI lacks the FAMS line.
+    for (const family of state.families.values()) {
+      if (family.husbandId !== personId && family.wifeId !== personId) continue;
+      const partnerId = family.husbandId === personId ? family.wifeId : family.husbandId;
+      if (partnerId && state.people.has(partnerId) && !partners.has(partnerId)) partners.set(partnerId, family);
+    }
     return [...partners.entries()].map(([id, family]) => ({ id, family }));
   }
 

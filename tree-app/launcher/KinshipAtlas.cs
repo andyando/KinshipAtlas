@@ -9,7 +9,8 @@ using System.Windows.Forms;
 // Opens index.html (next to this exe) in the user's default browser.
 static class KinshipAtlasLauncher
 {
-    static readonly string[] MediaExtensions = { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".bmp", ".pdf" };
+    // Every supported attachment type, mirroring data/attachment-types.json.
+    static readonly string[] MediaExtensions = { ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".pdf", ".txt", ".doc", ".docx", ".rtf", ".html", ".htm" };
     const int GedcomBackupsKept = 10;
 
     static string Js(string value)
@@ -30,7 +31,18 @@ static class KinshipAtlasLauncher
         {
             case ".pdf": return "application/pdf";
             case ".jpg": case ".jpeg": return "image/jpeg";
-            default: return "image/" + ext.TrimStart('.');
+            case ".png": return "image/png";
+            case ".gif": return "image/gif";
+            case ".webp": return "image/webp";
+            case ".bmp": return "image/bmp";
+            case ".tif": case ".tiff": return "image/tiff";
+            // Attachment documents. Text and HTML are sent as source so they
+            // preview in the app; HTML is never served as a page to run.
+            case ".txt": case ".htm": return "text/plain; charset=utf-8";
+            case ".doc": return "application/msword";
+            case ".docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            case ".rtf": return "application/rtf";
+            default: return "application/octet-stream";
         }
     }
 
@@ -737,6 +749,13 @@ static class KinshipAtlasLauncher
     {
         string ext = Path.GetExtension(name ?? "").ToLowerInvariant();
         return (name ?? "").Length > 0 && !name.StartsWith(".") && Array.IndexOf(MediaExtensions, ext) >= 0;
+    }
+
+    // The GEDCOM's own file, never an attachment to organise.
+    static bool IsGedcomExtension(string name)
+    {
+        string ext = Path.GetExtension(name ?? "").ToLowerInvariant();
+        return ext == ".ged" || ext == ".gedcom";
     }
 
     static bool IsAbsoluteMediaPath(string path)
@@ -1619,17 +1638,6 @@ static class KinshipAtlasLauncher
         foreach (KeyValuePair<string, List<MediaEntry>> group in groups)
         {
             List<MediaEntry> files = group.Value;
-            // An identical file linked to several people is a valid share: a
-            // photo naming several people belongs under each person's folder.
-            // Such a group is left alone, so the copies are not offered.
-            bool sharedGroup = true;
-            foreach (MediaEntry file in files)
-            {
-                List<string> ids;
-                state.Owners.TryGetValue(file.Key, out ids);
-                if (ids == null || ids.Count < 2) { sharedGroup = false; break; }
-            }
-            if (sharedGroup) continue;
             bool protectedGroup = false;
             foreach (MediaEntry file in files) if (hero.Contains(file.Key) || events.Contains(file.Key)) protectedGroup = true;
             MediaEntry keeper = files[0];
@@ -1717,8 +1725,12 @@ static class KinshipAtlasLauncher
         return "{\"ok\":true,\"removed\":" + removed + ",\"failed\":" + failed + ",\"gedcomText\":" + Js(gedcomText) + "}";
     }
 
-    // Files with identical contents, grouped by their hash. A group whose files
-    // are a card image or a life event photo is marked protected, never offered.
+    // Groups of identical files that sit in the same folder. A duplicate is more
+    // than one copy of one file within a single folder: the media folder root,
+    // one person's own subfolder, or the archive folder. Copies in different
+    // people's folders are never duplicates, because one photo can legitimately
+    // be attached to several people. A group whose files are a card image or a
+    // life event photo is marked protected and never offered.
     static List<KeyValuePair<string, List<MediaEntry>>> DuplicateGroups(List<MediaEntry> files, HashSet<string> hero, HashSet<string> events)
     {
         var byHash = new Dictionary<string, List<MediaEntry>>(StringComparer.OrdinalIgnoreCase);
@@ -1736,8 +1748,11 @@ static class KinshipAtlasLauncher
             {
                 string hash;
                 try { hash = Sha256Hex(File.ReadAllBytes(file.Full)); } catch { continue; }
-                if (!byHash.ContainsKey(hash)) byHash[hash] = new List<MediaEntry>();
-                byHash[hash].Add(file);
+                // The folder is part of the key, so identical bytes in two
+                // different folders form two groups of one file each.
+                string groupKey = hash + "\u0000" + MediaNormalize(MediaFolderOf(file.Relative));
+                if (!byHash.ContainsKey(groupKey)) byHash[groupKey] = new List<MediaEntry>();
+                byHash[groupKey].Add(file);
             }
         }
         var groups = new List<KeyValuePair<string, List<MediaEntry>>>();
@@ -1745,7 +1760,11 @@ static class KinshipAtlasLauncher
         {
             if (group.Value.Count < 2) continue;
             group.Value.Sort((left, right) => string.Compare(left.Relative, right.Relative, StringComparison.OrdinalIgnoreCase));
-            groups.Add(group);
+            // The hash alone is what the dialog shows.
+            string hash = group.Key;
+            int split = hash.IndexOf('\u0000');
+            if (split >= 0) hash = hash.Substring(0, split);
+            groups.Add(new KeyValuePair<string, List<MediaEntry>>(hash, group.Value));
         }
         groups.Sort((left, right) => string.Compare(left.Value[0].Relative, right.Value[0].Relative, StringComparison.OrdinalIgnoreCase));
         return groups;

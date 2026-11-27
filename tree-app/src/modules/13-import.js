@@ -360,9 +360,17 @@
 
   function existingRelativeCandidates(query) {
     const words = normalizeDirectoryName(query).split(/\s+/).filter(Boolean);
-    return [...state.people.values()].filter((person) => person.id !== state.selectedId
-      && words.every((word) => normalizeDirectoryName(`${person.name} ${person.id}`).includes(word)))
-      .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    const matches = (person) => words.every((word) => normalizeDirectoryName(person.name).includes(word));
+    // When adding a parent, the selected person's recorded partners come first:
+    // they are the likely other parent, so they top the suggestion list.
+    const partnerIds = elements.relativeType.value === 'PARENT'
+      ? partnersOf(state.selectedId).map((partner) => partner.id) : [];
+    const partners = [...state.people.values()].filter((person) => partnerIds.includes(person.id)
+      && person.id !== state.selectedId && matches(person));
+    const others = [...state.people.values()].filter((person) => !partnerIds.includes(person.id)
+      && person.id !== state.selectedId && matches(person));
+    const byName = (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
+    return [...partners.sort(byName), ...others.sort(byName)];
   }
 
   function syncExistingRelativeChoices() {
@@ -377,7 +385,9 @@
     for (const person of people.slice(0, 100)) {
       const option = document.createElement('option');
       option.value = person.id;
-      option.textContent = `${person.name} · ${lifespan(person)} · @${person.id}@`;
+      const isPartner = elements.relativeType.value === 'PARENT'
+        && partnersOf(state.selectedId).some((partner) => partner.id === person.id);
+      option.textContent = isPartner ? `${person.name} · ${lifespan(person)} — spouse of this person` : `${person.name} · ${lifespan(person)}`;
       select.append(option);
     }
     select.value = [...select.options].some((option) => option.value === selectedId) ? selectedId : '';
@@ -400,6 +410,9 @@
     document.querySelector('#relativeModeField').hidden = !supportsExisting;
     const existing = supportsExisting && document.querySelector('#relativeMode').value === 'EXISTING';
     document.querySelector('#relativeExistingFields').hidden = !existing;
+    // The other-parent field is shown for PARENT and CHILD; it must stay
+    // enabled in the create-new-person flow too, where `existing` is false.
+    document.querySelector('#relativeSpouse').disabled = !['PARENT', 'CHILD'].includes(elements.relativeType.value);
     for (const id of ['relativeGivenName', 'relativeSurname', 'relativeSex', 'relativeBirthDate',
       'relativeBirthPlace', 'relativeDeathDate', 'relativeDeathPlace']) {
       const field = document.getElementById(id).closest('label');
@@ -411,17 +424,50 @@
     document.querySelector('#relativeDuplicateConfirmationLabel').hidden = true;
     document.querySelector('#relativeError').hidden = true;
     document.querySelector('#relativeFamilyField').hidden = elements.relativeType.value !== 'PARENT';
+    // The other-parent field shows whenever a parent is being added: the
+    // candidates come from the existing parent of the chosen family (its
+    // spouse), falling back to the selected person's own partners.
+    document.querySelector('#relativeSpouseField').hidden = !['PARENT', 'CHILD'].includes(elements.relativeType.value);
+    const spouseSelect = document.querySelector('#relativeSpouse');
+    const selectedSpouseId = spouseSelect.value;
+    spouseSelect.replaceChildren();
+    const spousePlaceholder = document.createElement('option');
+    spousePlaceholder.value = '';
+    spousePlaceholder.textContent = 'None - record this parent only';
+    spouseSelect.append(spousePlaceholder);
+    // Partners of the selected person…
+    const spouseCandidates = new Map(partnersOf(state.selectedId).map((partner) => [partner.id, 'spouse of this person']));
+    // …plus the spouse of the existing parent in each vacant-role family, which
+    // is who the new parent would be joining.
+    const role = elements.relativeParentRole.value;
+    for (const family of [...state.families.values()].filter((entry) => entry.childIds.includes(state.selectedId))) {
+      const existingParentId = role === 'HUSB' ? family.wifeId : family.husbandId;
+      if (existingParentId && state.people.has(existingParentId)) {
+        for (const partner of partnersOf(existingParentId)) {
+          if (partner.id !== state.selectedId) spouseCandidates.set(partner.id, `spouse of ${state.people.get(existingParentId)?.name || 'the other parent'}`);
+        }
+      }
+    }
+    for (const [partnerId, relationNote] of spouseCandidates) {
+      const person = state.people.get(partnerId);
+      if (!person) continue;
+      const option = document.createElement('option');
+      option.value = partnerId;
+      option.textContent = `${person.name} · ${lifespan(person)} — ${relationNote}`;
+      spouseSelect.append(option);
+    }
+    spouseSelect.value = [...spouseSelect.options].some((option) => option.value === selectedSpouseId)
+      ? selectedSpouseId : '';
     const familySelect = document.querySelector('#relativeFamily');
     const selectedFamilyId = familySelect.value;
     familySelect.replaceChildren();
-    const role = elements.relativeParentRole.value;
     const families = [...state.families.values()].filter((family) => family.childIds.includes(state.selectedId)
       && !(role === 'HUSB' ? family.husbandId : family.wifeId));
     for (const family of families) {
       const option = document.createElement('option');
       option.value = family.id;
       const other = state.people.get(role === 'HUSB' ? family.wifeId : family.husbandId);
-      option.textContent = `@${family.id}@ · ${other?.name || 'No other parent recorded'}`;
+      option.textContent = other?.name || 'No other parent recorded';
       familySelect.append(option);
     }
     const newFamily = document.createElement('option');
@@ -436,10 +482,10 @@
     if (existing) syncExistingRelativeChoices();
   }
 
-  function linkExistingRelative(personId, relation, parentRole, parentFamilyId) {
+  function linkExistingRelative(personId, relation, parentRole, parentFamilyId, spouseId = '') {
     const selectedId = state.selectedId;
     if (!['PARENT', 'PARTNER'].includes(relation) || !state.people.has(personId) || personId === selectedId) {
-      throw new Error('Select a different existing person for this relationship.');
+      throw new Error('Pick someone in the “Select person” list first, and make sure it is not the person you are adding to.');
     }
     const selected = state.people.get(selectedId);
     const person = state.people.get(personId);
@@ -493,6 +539,15 @@
     } else {
       familyId = nextGedcomXref('F', 'FAM');
       familyRecord = { xref: familyId, tag: 'FAM', lines: [`0 @${familyId}@ FAM`] };
+      // Optional spouse recorded as the other parent of this new parent family.
+      if (relation === 'PARENT' && state.people.has(spouseId) && spouseId !== personId && spouseId !== selectedId) {
+        const spouseRole = role === 'HUSB' ? 'WIFE' : 'HUSB';
+        const spouseRecord = record(spouseId, 'INDI');
+        if (spouseRecord) {
+          appendRecordLine(familyRecord, `1 ${spouseRole} @${spouseId}@`);
+          appendRecordLine(spouseRecord, `1 FAMS @${familyId}@`);
+        }
+      }
     }
     appendRecordLine(familyRecord, `1 ${role} @${personId}@`);
     appendRecordLine(familyRecord, relation === 'PARENT'
@@ -510,8 +565,15 @@
       && document.querySelector('#relativeMode').value === 'EXISTING') {
       const errorBox = document.querySelector('#relativeError');
       try {
-        const personId = linkExistingRelative(document.querySelector('#relativeExistingPerson').value,
-          elements.relativeType.value, elements.relativeParentRole.value, document.querySelector('#relativeFamily').value);
+        // If the user picked someone only in the other-parent dropdown, treat
+        // that person as the one being added (the common "add my father's
+        // wife as my mother" flow).
+        let chosenId = document.querySelector('#relativeExistingPerson').value;
+        const spouseChoice = cleanGedcomValue(document.querySelector('#relativeSpouse').value);
+        if (!chosenId && spouseChoice && state.people.has(spouseChoice)) chosenId = spouseChoice;
+        const personId = linkExistingRelative(chosenId,
+          elements.relativeType.value, elements.relativeParentRole.value, document.querySelector('#relativeFamily').value,
+          cleanGedcomValue(document.querySelector('#relativeSpouse').value));
         refreshAfterGedcomMutation(personId);
         elements.addRelativeDialog.close();
         elements.addRelativeForm.reset();
@@ -589,12 +651,28 @@
         addFamilyRecord = false;
       } else {
         familyLines.push(`1 ${parentRole} @${personId}@`, `1 CHIL @${selected.id}@`);
+        // Optional spouse picked as the other parent of this separate family.
+        const spouseId = cleanGedcomValue(document.querySelector('#relativeSpouse').value);
+        if (state.people.has(spouseId) && spouseId !== personId && spouseId !== selected.id) {
+          const spouseRole = parentRole === 'HUSB' ? 'WIFE' : 'HUSB';
+          familyLines.push(`1 ${spouseRole} @${spouseId}@`);
+          const spouseRecord = state.gedcomRecords.find((record) => record.tag === 'INDI' && record.xref === spouseId);
+          if (spouseRecord) spouseRecord.lines.push(`1 FAMS @${familyId}@`);
+        }
         newPersonLines.push(`1 FAMS @${familyId}@`);
         selectedRecord.lines.push(`1 FAMC @${familyId}@`);
       }
     } else if (relation === 'CHILD') {
       const selectedRole = selected.sex === 'F' ? 'WIFE' : 'HUSB';
+      const otherRole = selectedRole === 'HUSB' ? 'WIFE' : 'HUSB';
       familyLines.push(`1 ${selectedRole} @${selected.id}@`, `1 CHIL @${personId}@`);
+      // Optional spouse picked as the child's other parent.
+      const spouseId = cleanGedcomValue(document.querySelector('#relativeSpouse').value);
+      if (state.people.has(spouseId) && spouseId !== selected.id) {
+        familyLines.push(`1 ${otherRole} @${spouseId}@`);
+        const spouseRecord = state.gedcomRecords.find((record) => record.tag === 'INDI' && record.xref === spouseId);
+        if (spouseRecord) spouseRecord.lines.push(`1 FAMS @${familyId}@`);
+      }
       newPersonLines.push(`1 FAMC @${familyId}@`);
       selectedRecord.lines.push(`1 FAMS @${familyId}@`);
     } else if (relation === 'SIBLING') {
@@ -1257,9 +1335,6 @@
     elements.mediaLibraryButton.disabled = false;
     const menuButton = document.querySelector('#mediaLibraryMenuButton');
     if (menuButton) menuButton.disabled = false;
-    // Picking the folder also lets entries be checked for duplicates.
-    const duplicateButton = document.querySelector('#duplicateMediaMenuButton');
-    if (duplicateButton) duplicateButton.disabled = false;
   }
 
   elements.mediaButton.addEventListener('click', showMediaFolderDialog);
@@ -1290,8 +1365,12 @@
     openLibraryOnMediaImport();
     const byName = new Map();
     // Files picked from the folder are Media Library entries in their own right,
-    // even when no GEDCOM person references them.
+    // even when no GEDCOM person references them. Every supported attachment
+    // type is kept here - images, PDFs and documents - so a folder pick indexes
+    // a .txt or .docx exactly as it indexes a .jpg.
     const folderFiles = new Map();
+    // Files the app cannot show at all are counted, not silently dropped.
+    let unsupportedFiles = 0;
     for (const file of files) {
       // Index by bare name and, when the picker supplies it, the relative path.
       for (const key of new Set([file.name, file.webkitRelativePath])) {
@@ -1299,8 +1378,9 @@
         if (!name) continue;
         if (!byName.has(name)) byName.set(name, []);
         byName.get(name).push(file);
-        if (typeof isImageFile === 'function' ? isImageFile(file) : /^image\//.test(file.type || '')) folderFiles.set(name, file);
+        if (isSupportedMediaFile(file)) folderFiles.set(name, file);
       }
+      if (!isSupportedMediaFile(file)) unsupportedFiles += 1;
     }
     state.folderMediaFiles = folderFiles;
     state.mediaIndex = { byName };
@@ -1316,24 +1396,25 @@
       }
     }
     render();
-    showToast(`Matched ${matched.toLocaleString()} of ${references.toLocaleString()} media references. This browser cannot write to folders, so media is view-only here. Use Edge or Chrome to add files.`);
+    const attachments = folderFiles.size;
+    showToast(unsupportedFiles
+      ? `Indexed ${attachments.toLocaleString()} attachment${attachments === 1 ? '' : 's'} and matched ${matched.toLocaleString()} of ${references.toLocaleString()} references. ${unsupportedFiles.toLocaleString()} file${unsupportedFiles === 1 ? ' is' : 's are'} not a supported type and were skipped.`
+      : `Indexed ${attachments.toLocaleString()} attachment${attachments === 1 ? '' : 's'} and matched ${matched.toLocaleString()} of ${references.toLocaleString()} references. This browser cannot write to folders, so media is view-only here. Use Edge or Chrome to add files.`);
   });
 
   elements.clear.addEventListener('click', () => {
     if (state.mediaLibraryMode) setMediaLibraryMode(false);
     if (state.mapMode) setMapMode(false);
     if (state.reportsMode) setReportsMode(false);
+    if (state.treeMaintenanceMode) setTreeMaintenanceMode(false);
+    if (favouritesModeIsOn()) setFavouritesMode(false);
     elements.mapViewButton.disabled = true;
     elements.reportsButton.disabled = true;
     elements.mediaLibraryButton.disabled = true;
     const viewSwitch = document.querySelector('#viewSwitch');
     if (viewSwitch) { viewSwitch.disabled = true; viewSwitch.value = 'tree'; }
     document.querySelector('#mediaLibraryMenuButton').disabled = true;
-    document.querySelector('#birthCountryMenuButton').disabled = true;
-    document.querySelector('#duplicateFinderMenuButton').disabled = true;
-    document.querySelector('#mediaOrganiseMenuButton').disabled = true;
-    document.querySelector('#duplicateMediaMenuButton').disabled = true;
-    document.querySelector('#orphanRecordsMenuButton').disabled = true;
+    document.querySelector('#treeMaintenanceMenuButton').disabled = true;
     releaseMediaUrls(); state.mediaIndex = null; state.mediaFolderPicked = false;
     state.mediaRelativePaths = new WeakMap(); state.folderMediaFiles = new Map(); state.mediaDirectoryHandle = null; state.pendingUploadPersonId = null; state.pendingPortraitReplacement = null;
     syncMediaButton();
@@ -1384,6 +1465,9 @@
   }
   document.querySelector('#viewSwitch').addEventListener('change', (event) => {
     const mode = event.target.value;
+    // Leaving the Favourites page is what restores the app shell, so it comes
+    // first whatever the chosen view is.
+    if (favouritesModeIsOn()) setFavouritesMode(false);
     if (mode === 'tree') {
       if (state.pedigreeMode) setPedigreeMode(false);
       if (state.mediaLibraryMode) setMediaLibraryMode(false);
@@ -1409,6 +1493,12 @@
       if (state.pedigreeMode) setPedigreeMode(false);
       if (state.reportsMode) setReportsMode(false);
       setMediaLibraryMode(true);
+    } else if (mode === 'favourites') {
+      if (state.mapMode) setMapMode(false);
+      if (state.pedigreeMode) setPedigreeMode(false);
+      if (state.reportsMode) setReportsMode(false);
+      if (state.mediaLibraryMode) setMediaLibraryMode(false);
+      setFavouritesMode(true);
     }
   });
   elements.mapViewButton.addEventListener('click', () => {
@@ -1419,7 +1509,6 @@
   elements.reportsButton.addEventListener('click', () => setReportsMode(!state.reportsMode));
   elements.mediaLibraryButton.addEventListener('click', () => setMediaLibraryMode(!state.mediaLibraryMode));
   document.querySelector('#mediaLibraryMenuButton').addEventListener('click', () => setMediaLibraryMode(true));
-  document.querySelector('#birthCountryMenuButton').addEventListener('click', openBirthCountryDialog);
   document.querySelector('#birthCountrySearch').addEventListener('input', renderBirthCountryList);
   document.querySelector('#birthCountryList').addEventListener('input', (event) => {
     const input = event.target.closest('input[data-birth-country-person]');
@@ -1447,7 +1536,6 @@
     saveBirthCountries();
   });
   document.querySelector('#closeBirthCountries').addEventListener('click', closeBirthCountryDialog);
-  document.querySelector('#duplicateFinderMenuButton').addEventListener('click', openDuplicateFinder);
   document.querySelector('#duplicateThreshold').addEventListener('input', (event) => {
     document.querySelector('#duplicateThresholdLabel').textContent = event.target.value;
     renderDuplicateFinder();
@@ -1578,45 +1666,97 @@
     });
   }
 
-  const treeManagementMenuButton = document.querySelector('#treeManagementMenuButton');
-  const treeManagementPanel = document.querySelector('#treeManagementPanel');
-  function setTreeManagementSubmenuOpen(open) {
-    treeManagementPanel.hidden = !open;
-    treeManagementMenuButton.setAttribute('aria-expanded', String(open));
+  // ---------- Custom theme (colour pickers + top banner image) ----------
+  // Each picker sets one CSS custom property on :root; the banner image is read
+  // with FileReader into a data URL so it survives without server storage.
+  // Everything is remembered in localStorage and re-applied on startup.
+  const customThemeStorageKey = 'kinship-atlas:custom-theme';
+  const customThemeVariables = {
+    customThemeInk: '--ink', customThemePaper: '--paper', customThemeGreen: '--green',
+    customThemeCoral: '--coral', customThemeBlue: '--blue', customThemeGold: '--gold'
+  };
+  const customThemeMenuButton = document.querySelector('#customThemeMenuButton');
+  const customThemePanel = document.querySelector('#customThemePanel');
+  function setCustomThemeSubmenuOpen(open) {
+    customThemePanel.hidden = !open;
+    customThemeMenuButton.setAttribute('aria-expanded', String(open));
   }
-  treeManagementMenuButton.addEventListener('click', () => setTreeManagementSubmenuOpen(treeManagementPanel.hidden));
+  customThemeMenuButton.addEventListener('click', () => setCustomThemeSubmenuOpen(customThemePanel.hidden));
   document.addEventListener('click', (event) => {
-    if (!event.target.closest('#treeManagementSubmenu')) setTreeManagementSubmenuOpen(false);
+    if (!event.target.closest('#customThemePanel') && event.target !== customThemeMenuButton
+      && !event.target.closest('#customThemeMenuButton')) setCustomThemeSubmenuOpen(false);
   });
-  // Map provider preference: choosing one stores it and keeps the menu open
-  // (it is a control, not a command, so it must not close the menu).
-  const mapProviderSelect = document.querySelector('#mapProviderSelect');
-  if (mapProviderSelect && typeof setPreferredMapProvider === 'function' && typeof preferredMapProvider === 'function') {
-    mapProviderSelect.value = preferredMapProvider();
-    mapProviderSelect.addEventListener('change', () => {
-      setPreferredMapProvider(mapProviderSelect.value);
-      showToast(`Place links now open in ${mapProviderSelect.selectedOptions[0].textContent}.`);
-    });
-  }
-  // Choosing an item closes the submenu and then the whole settings menu, the
-  // same way a top-level menu item does. The map-provider select is a control
-  // rather than a command, so it keeps the menu open.
-  for (const item of treeManagementPanel.querySelectorAll('.menu-item:not(.menu-submenu-toggle):not(.menu-select-item)')) {
-    if (item.id === 'gazetteerMenuButton') {
-      item.addEventListener('click', () => {
-        setTreeManagementSubmenuOpen(false);
-        setSettingsOpen(false);
-        window.KinshipHistoricalGazetteer?.openDialog?.();
-      });
-      continue;
+  function applyCustomTheme(custom, { remember = true } = {}) {
+    if (!custom || typeof custom !== 'object') return;
+    for (const [inputId, variable] of Object.entries(customThemeVariables)) {
+      const value = typeof custom[inputId] === 'string' && /^#[0-9a-f]{6}$/i.test(custom[inputId]) ? custom[inputId] : '';
+      document.getElementById(inputId).value = value || document.getElementById(inputId).defaultValue;
+      document.documentElement.style.setProperty(variable, value || '');
     }
-    item.addEventListener('click', () => {
-      setTreeManagementSubmenuOpen(false);
-      window.setTimeout(() => setSettingsOpen(false), 0);
+    const banner = typeof custom.banner === 'string' && custom.banner.startsWith('data:image/') ? custom.banner : '';
+    const topbar = document.querySelector('.topbar');
+    if (banner) {
+      document.documentElement.style.setProperty('--topbar-banner', `url("${banner}")`);
+      topbar?.classList.add('custom-banner');
+    } else {
+      document.documentElement.style.removeProperty('--topbar-banner');
+      topbar?.classList.remove('custom-banner');
+    }
+    if (remember) {
+      try { localStorage.setItem(customThemeStorageKey, JSON.stringify(custom)); } catch { }
+    }
+  }
+  function currentCustomTheme() {
+    const custom = {};
+    for (const inputId of Object.keys(customThemeVariables)) custom[inputId] = document.getElementById(inputId).value;
+    const banner = document.documentElement.style.getPropertyValue('--topbar-banner').trim();
+    const match = banner.match(/^url\("(.+)"\)$/);
+    if (match) custom.banner = match[1];
+    return custom;
+  }
+  for (const inputId of Object.keys(customThemeVariables)) {
+    document.getElementById(inputId).addEventListener('input', (event) => {
+      const custom = currentCustomTheme();
+      custom[inputId] = event.target.value;
+      applyCustomTheme(custom);
     });
   }
+  document.querySelector('#customThemeBannerInput').addEventListener('change', (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const custom = currentCustomTheme();
+      custom.banner = String(reader.result || '');
+      applyCustomTheme(custom);
+    };
+    reader.readAsDataURL(file);
+  });
+  document.querySelector('#customThemeBannerClear').addEventListener('click', () => {
+    const custom = currentCustomTheme();
+    delete custom.banner;
+    applyCustomTheme(custom);
+  });
+  document.querySelector('#customThemeReset').addEventListener('click', () => {
+    try { localStorage.removeItem(customThemeStorageKey); } catch { }
+    for (const inputId of Object.keys(customThemeVariables)) {
+      document.getElementById(inputId).value = document.getElementById(inputId).defaultValue;
+      document.documentElement.style.removeProperty(customThemeVariables[inputId]);
+    }
+    document.documentElement.style.removeProperty('--topbar-banner');
+    document.querySelector('.topbar')?.classList.remove('custom-banner');
+    applyTheme('heritage');
+  });
+  try {
+    const savedCustom = JSON.parse(localStorage.getItem(customThemeStorageKey) || 'null');
+    if (savedCustom) applyCustomTheme(savedCustom, { remember: false });
+  } catch { }
 
-  document.querySelector('#duplicateRelationMenuButton').addEventListener('click', openDuplicateRelationFinder);
+  // Tree Maintenance opens through its own delegated handler in module 19, which
+  // closes the menu itself; a second listener here would close it twice.
+  document.querySelector('#gazetteerTopMenuButton').addEventListener('click', () => setSettingsOpen(false));
+
   document.querySelector('#duplicateRelationSelectAll').addEventListener('change', (event) => {
     const checked = event.target.checked;
     for (const box of document.querySelectorAll('#duplicateRelationList input[data-relation-delete]')) box.checked = checked;
@@ -1675,6 +1815,13 @@
     state.mediaLibraryPage = 0;
     renderMediaLibrary();
   });
+  const mediaFileKindFilter = document.querySelector('#mediaLibraryFileKindFilter');
+  if (mediaFileKindFilter) {
+    mediaFileKindFilter.addEventListener('change', () => {
+      state.mediaLibraryPage = 0;
+      renderMediaLibrary();
+    });
+  }
   document.querySelector('#mediaLibrarySort').addEventListener('change', (event) => {
     state.mediaLibrarySort = event.target.value || 'name-asc';
     state.mediaLibraryPage = 0;
@@ -1931,6 +2078,13 @@
   elements.primaryHomeButton.addEventListener('click', () => {
     showPrimaryPersonRelationshipMap();
   });
+  // The brand mark / heading in the top-left navigates back to the welcome
+  // screen: no person selected, showing the tree welcome (or start screen when
+  // no tree is open).
+  document.querySelector('.brand').addEventListener('click', (event) => {
+    event.preventDefault();
+    if (state.fileName) showTreeWelcome();
+  });
   elements.addGedcomField.addEventListener('click', () => appendGedcomFieldRow());
   elements.personFieldsEditor.addEventListener('click', (event) => {
     const removeButton = event.target.closest('.gedcom-field-remove');
@@ -2178,6 +2332,7 @@
   });
   document.querySelector('#relativeMode').addEventListener('change', syncRelativeEntryMode);
   elements.relativeParentRole.addEventListener('change', syncRelativeEntryMode);
+  document.querySelector('#relativeFamily').addEventListener('change', syncRelativeEntryMode);
   document.querySelector('#relativeSearch').addEventListener('input', syncExistingRelativeChoices);
   document.querySelector('#relationshipForm').addEventListener('submit', (event) => {
     event.preventDefault();

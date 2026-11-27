@@ -51,6 +51,7 @@
   ].sort((a, b) => b[0].length - a[0].length);
   const state = {
     mapMode: false, mapStats: null, directoryMatches: [], reportsMode: false, mediaLibraryMode: false, pedigreeMode: false, pedigreeZoom: 1,
+    treeMaintenanceMode: false,
     people: new Map(), families: new Map(), sources: new Map(), selectedId: null,
     fileName: '', searchText: '', history: [], historyIndex: -1, zoom: 1, showSiblings: false,
     mediaIndex: null, mediaUrls: new Map(), mediaRelativePaths: new WeakMap(), folderMediaFiles: new Map(), mediaDirectoryHandle: null,
@@ -78,4 +79,3 @@
     mediaPersonFolders: new Map(),
     mediaOrganiseUidMap: new Map()
   };
-

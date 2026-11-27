@@ -183,7 +183,7 @@ async function findDuplicates(mediaDir, request) {
   const eventKeys = eventMediaPaths(records);
   const hashed = await hashGroups(mediaDir, files);
   const withLinks = hashed.map((file) => ({ ...file, key: core.normalizeMediaPath(file.relativePath), personIds: (state.owners.get(core.normalizeMediaPath(file.relativePath)) || []) }));
-  const groups = core.groupDuplicates(withLinks, { heroKeys, eventKeys });
+  const groups = core.groupDuplicates(withLinks, { heroKeys, eventKeys, archiveFolder: state.archiveFolder });
   const linkPaths = new Map();
   for (const record of records) {
     for (const line of record.lines || []) {

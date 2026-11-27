@@ -18,6 +18,8 @@
  *  13. GEDCOM import, merging and saving
  *  14. Map, print, defaults, about/help and startup wiring
  *  15. Media folder organisation (person folders, archive, GEDCOM rewrite)
+ *  16-18. Duplicate media, orphan records, historical gazetteer
+ *  19. Tree Maintenance (Settings dashboard for the tools above)
  *
  * Section banners below match this list. Functions within a section keep their historical
  * ordering because the automated test suite locates some helpers by exact source position.
@@ -25,6 +27,103 @@
 (() => {
   'use strict';
 
+/**
+ * Kinship Atlas supported attachment types.
+ *
+ * One list for the whole application: the folder scanner, the GEDCOM import,
+ * the Media Library, Media Validation, the organiser, server.js, the Windows
+ * launcher and the tests all derive from these two arrays. A new file type is
+ * added here and nowhere else (`helpers/media-organise.js` and the C# launcher
+ * read the same arrays through `attachment-types.json`, so the lists cannot
+ * drift).
+ *
+ * TIF/TIFF are images that browsers cannot decode: they are counted, listed and
+ * validated like other attachments but shown with a type icon instead of a
+ * thumbnail, rather than as a broken image.
+ */
+const KINSHIP_ATTACHMENT_TYPES = Object.freeze({
+  images: Object.freeze(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tif', 'tiff']),
+  documents: Object.freeze(['pdf', 'txt', 'doc', 'docx', 'rtf', 'html', 'htm'])
+});
+
+const kinshipAttachmentTypeConfig = Object.freeze({
+  // Which family each type belongs to. Anything not listed is unsupported.
+  kinds: Object.freeze({
+    jpg: 'image', jpeg: 'image', png: 'image', gif: 'image', webp: 'image', bmp: 'image', tif: 'image', tiff: 'image',
+    pdf: 'pdf', txt: 'text', doc: 'word', docx: 'word', rtf: 'document', html: 'html', htm: 'html'
+  }),
+  // Images a browser can show as a picture. TIF/TIFF are images but get an icon.
+  renderableImages: Object.freeze(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp']),
+  // How a card describes the type: "Type: HTML Document".
+  kindLabels: Object.freeze({
+    image: 'Image', pdf: 'PDF Document', text: 'Text File', word: 'Word Document',
+    document: 'Rich Text Document', html: 'HTML Document'
+  }),
+  // Short badge text for a card or list row.
+  badges: Object.freeze({
+    jpg: 'JPG', jpeg: 'JPG', png: 'PNG', gif: 'GIF', webp: 'WEBP', bmp: 'BMP', tif: 'TIF', tiff: 'TIF',
+    pdf: 'PDF', txt: 'TXT', doc: 'DOC', docx: 'DOCX', rtf: 'RTF', html: 'HTML', htm: 'HTM'
+  }),
+  // The icon drawn for each kind (see buttonIcons in module 10).
+  kindIcons: Object.freeze({ image: 'photo', pdf: 'document', text: 'document', word: 'wordDoc', document: 'document', html: 'webPage' }),
+  // "All / Images / PDF / Word documents / …" for the library's type filter.
+  filters: Object.freeze([
+    { value: '', label: 'All file types' },
+    { value: 'image', label: 'Images' },
+    { value: 'pdf', label: 'PDF' },
+    { value: 'word', label: 'Word documents' },
+    { value: 'text', label: 'Text files' },
+    { value: 'html', label: 'HTML files' },
+    { value: 'document', label: 'Other documents' }
+  ])
+});
+
+function attachmentExtension(value) {
+  const name = String(value || '').split(/[?#]/)[0].trim().replace(/^"|"$/g, '');
+  const match = /\.([a-z0-9]+)$/i.exec(name);
+  return match ? match[1].toLocaleLowerCase() : '';
+}
+
+// Every supported extension, lower-case, as a Set for quick membership tests.
+const supportedAttachmentExtensions = new Set([...KINSHIP_ATTACHMENT_TYPES.images, ...KINSHIP_ATTACHMENT_TYPES.documents]);
+
+function attachmentExtensionOf(value) {
+  return attachmentExtension(value);
+}
+
+// 'image' | 'pdf' | 'text' | 'word' | 'document' | 'html', or '' when unsupported.
+function attachmentKind(value) {
+  return kinshipAttachmentTypeConfig.kinds[attachmentExtension(value)] || '';
+}
+
+function isSupportedAttachment(value) {
+  return supportedAttachmentExtensions.has(attachmentExtension(value));
+}
+
+// True only for images a browser can actually draw (so TIF/TIFF are excluded).
+function isRenderableImage(value) {
+  return kinshipAttachmentTypeConfig.renderableImages.includes(attachmentExtension(value));
+}
+
+function attachmentKindLabel(value) {
+  const kind = attachmentKind(value);
+  return kind ? kinshipAttachmentTypeConfig.kindLabels[kind] : 'Unsupported file';
+}
+
+function attachmentBadge(value) {
+  return kinshipAttachmentTypeConfig.badges[attachmentExtension(value)] || attachmentExtension(value).toLocaleUpperCase().slice(0, 4) || 'FILE';
+}
+
+function attachmentKindIcon(value) {
+  return kinshipAttachmentTypeConfig.kindIcons[attachmentKind(value)] || 'document';
+}
+
+// True for a file that can be shown inline in the attachment viewer.
+function attachmentHasInlinePreview(value) {
+  return ['text', 'html'].includes(attachmentKind(value));
+}
+
+window.KINSHIP_ATTACHMENT_TYPES = KINSHIP_ATTACHMENT_TYPES;
   // ---------------------------------------------------------------------------
   // 1. Constants and application state
   // ---------------------------------------------------------------------------
@@ -78,6 +177,7 @@
   ].sort((a, b) => b[0].length - a[0].length);
   const state = {
     mapMode: false, mapStats: null, directoryMatches: [], reportsMode: false, mediaLibraryMode: false, pedigreeMode: false, pedigreeZoom: 1,
+    treeMaintenanceMode: false,
     people: new Map(), families: new Map(), sources: new Map(), selectedId: null,
     fileName: '', searchText: '', history: [], historyIndex: -1, zoom: 1, showSiblings: false,
     mediaIndex: null, mediaUrls: new Map(), mediaRelativePaths: new WeakMap(), folderMediaFiles: new Map(), mediaDirectoryHandle: null,
@@ -105,7 +205,6 @@
     mediaPersonFolders: new Map(),
     mediaOrganiseUidMap: new Map()
   };
-
   // ---------------------------------------------------------------------------
   // 2. Cached DOM elements
   // ---------------------------------------------------------------------------
@@ -148,6 +247,7 @@
     createGedcomForm: document.querySelector('#createGedcomForm'),
     clear: document.querySelector('#clearButton'), mapViewButton: document.querySelector('#mapViewButton'),
     reportsButton: document.querySelector('#reportsButton'), reportsView: document.querySelector('#reportsView'),
+    treeMaintenanceView: document.querySelector('#treeMaintenanceView'),
     mediaLibraryButton: document.querySelector('#mediaLibraryButton'), mediaLibraryView: document.querySelector('#mediaLibraryView'),
     mediaLibraryContent: document.querySelector('#mediaLibraryContent'),
     mediaLibraryCardsButton: document.querySelector('#mediaLibraryCardsButton'), mediaLibraryTableButton: document.querySelector('#mediaLibraryTableButton'),
@@ -636,6 +736,14 @@
       if (!family) continue;
       const partnerId = family.husbandId === personId ? family.wifeId : family.husbandId;
       if (partnerId && state.people.has(partnerId)) partners.set(partnerId, family);
+    }
+    // Some trees record the partnership on only one side (FAMS on one INDI,
+    // HUSB/WIFE in the FAM). Scan the family records too so partners are found
+    // even when this person's own INDI lacks the FAMS line.
+    for (const family of state.families.values()) {
+      if (family.husbandId !== personId && family.wifeId !== personId) continue;
+      const partnerId = family.husbandId === personId ? family.wifeId : family.husbandId;
+      if (partnerId && state.people.has(partnerId) && !partners.has(partnerId)) partners.set(partnerId, family);
     }
     return [...partners.entries()].map(([id, family]) => ({ id, family }));
   }
@@ -1131,8 +1239,18 @@
     return bestScore && !tied ? bestFile : null;
   }
 
+  // True for a file the browser can draw as a picture. TIF/TIFF are supported
+  // attachments but no browser decodes them, so they are shown with a type icon
+  // instead of a broken <img>.
   function isImageFile(file) {
-    return file.type.startsWith('image/') || /\.(avif|bmp|gif|jpe?g|png|webp)$/i.test(file.name);
+    if (!file) return false;
+    if (attachmentKind(file.name) === 'image') return isRenderableImage(file.name);
+    return file.type.startsWith('image/') || /^image\/(jpeg|png|gif|webp|bmp)$/i.test(file.type || '');
+  }
+
+  // True for any supported attachment file object, whatever its type.
+  function isAttachmentFile(file) {
+    return Boolean(file) && (isSupportedAttachment(file.name) || isImageFile(file) || attachmentKind(file.type) !== '');
   }
 
   // A media item's address, with a version of its own, so a file that moved or
@@ -1899,8 +2017,9 @@
     return typeof window.showDirectoryPicker === 'function' ? 'none' : 'unsupported';
   }
 
+  // Every supported attachment type can be stored (images, PDFs and documents).
   function isSupportedMediaFile(file) {
-    return isImageFile(file) || file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+    return Boolean(file) && (isSupportedAttachment(file.name) || attachmentKind(file.type) !== '');
   }
 
   // Writes one file into the person's own folder in the selected media folder (or
@@ -2311,6 +2430,12 @@
 
   function setLoaded(fileName, data, storageKey, gedcomText = '') {
     releaseMediaUrls();
+    // Counts on the Tree Maintenance page belong to the tree that was open.
+    for (const key of Object.keys(treeMaintenanceStats)) treeMaintenanceStats[key] = null;
+    treeMaintenanceMediaNotes.organise = '';
+    treeMaintenanceMediaNotes.duplicates = '';
+    treeMaintenanceSmartState.summary = '';
+    treeMaintenanceSmartState.results = [];
     state.mediaIndex = null;
     state.mediaFolderPicked = false;
     state.mediaRelativePaths = new WeakMap();
@@ -2357,12 +2482,10 @@
     elements.mediaLibraryButton.disabled = false;
     document.querySelector('#viewSwitch').disabled = false;
     document.querySelector('#mediaLibraryMenuButton').disabled = false;
-    document.querySelector('#birthCountryMenuButton').disabled = false;
-    document.querySelector('#duplicateFinderMenuButton').disabled = false;
-    document.querySelector('#duplicateRelationMenuButton').disabled = false;
-    document.querySelector('#mediaOrganiseMenuButton').disabled = false;
-    document.querySelector('#duplicateMediaMenuButton').disabled = false;
-    document.querySelector('#orphanRecordsMenuButton').disabled = false;
+    document.querySelector('#treeMaintenanceMenuButton').disabled = false;
+    // A different tree may have different favourites, so the page and its count
+    // are rebuilt from the saved record for this file name.
+    if (typeof loadFavourites === 'function') loadFavourites();
     elements.printMapButton.disabled = false;
     elements.showSiblings.disabled = false;
     document.querySelector('#openGedcomLabel').hidden = true;
@@ -2842,6 +2965,15 @@
     requestAnimationFrame(() => drawConnectors(svg, nodeKeys, selected.id, partners));
   }
 
+  // Parent-link colours are keyed by the parent couple, not the FAM record, so
+  // children sharing the same two parents keep the same line colour even when
+  // separate family records exist for them.
+  function familyColorKey(familyId) {
+    const family = state.families.get(familyId);
+    const parents = family ? [family.husbandId, family.wifeId].filter(Boolean).sort().join('+') : '';
+    return parents || `family:${familyId}`;
+  }
+
   function drawConnectors(svg, nodeKeys, selectedId, partners) {
     const canvas = elements.canvas;
     const canvasRect = canvas.getBoundingClientRect();
@@ -2872,7 +3004,9 @@
       path.setAttribute('d', d);
       path.setAttribute('class', className);
       if (className === 'parent-link') {
-        const groupKey = `${generation}:${familyId}`;
+        // Same couple, same colour: colour follows the parent pair, not the
+        // individual FAM record, so children of the same parents match.
+        const groupKey = `${generation}:${familyColorKey(familyId)}`;
         if (!familyColors.has(groupKey)) {
           const hue = (familyColors.size * 137.508) % 360;
           familyColors.set(groupKey, `hsl(${hue.toFixed(1)} 62% 42%)`);
@@ -3032,6 +3166,15 @@
         const name = document.createElement('span');
         name.className = 'roster-name';
         name.textContent = person.name;
+        if (isFavourite(person.id)) {
+          button.classList.add('is-favourite');
+          const heart = document.createElement('span');
+          heart.className = 'roster-favourite';
+          heart.setAttribute('aria-label', 'Favourite');
+          heart.title = 'Favourite';
+          heart.append(createButtonIcon('heart'));
+          name.append(heart);
+        }
         const dates = document.createElement('span');
         dates.className = 'roster-years';
         dates.textContent = lifespan(person).replace(' — ', '–');
@@ -3354,6 +3497,14 @@
       label: 'OpenStreetMap',
       url: (place) => `https://www.openstreetmap.org/search?query=${encodeURIComponent(place)}`,
     },
+    bing: {
+      label: 'Bing Maps',
+      url: (place) => `https://www.bing.com/maps?q=${encodeURIComponent(place)}`,
+    },
+    mapquest: {
+      label: 'MapQuest',
+      url: (place) => `https://www.mapquest.com/search/results?query=${encodeURIComponent(place)}`,
+    }
   };
   const mapProviderStorageKey = 'kinship-atlas:map-provider';
 
@@ -3368,6 +3519,15 @@
   function setPreferredMapProvider(provider) {
     if (!mapProviders[provider]) return;
     try { localStorage.setItem(mapProviderStorageKey, provider); } catch { }
+  }
+
+  // After the provider changes, every rendered place button names the new site.
+  function refreshMapProviderLabels() {
+    const label = mapProviders[preferredMapProvider()].label;
+    for (const button of document.querySelectorAll('.event-place-map[data-map-place]')) {
+      button.title = `Show "${button.dataset.mapPlace}" on ${label}${button.dataset.mapNote || ''}`;
+      button.setAttribute('aria-label', button.title);
+    }
   }
 
   // Opens a place on the map site. A right-click / long-press (contextmenu) or
@@ -3406,6 +3566,10 @@
       : '';
     button.title = `Show "${mapPlace}" on ${mapProviders[preferredMapProvider()].label}${historicalNote}`;
     button.setAttribute('aria-label', button.title);
+    // Kept so changing Select Map Provider can refresh the tooltip without
+    // re-rendering the person.
+    button.dataset.mapPlace = mapPlace;
+    button.dataset.mapNote = historicalNote;
     setButtonContent(button, 'mapPin', '');
     button.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -4088,6 +4252,20 @@
       ? 'Stop using this person as the primary person'
       : state.primaryPersonId ? `Replace ${personName(state.primaryPersonId)} as the primary person` : 'Show relationships to this person and add a Home Person button';
     personActions.append(primaryPersonButton);
+    // Add to / Remove from favourites, beside the primary-person button and in
+    // the same button style. The label changes with the person's state.
+    const favourite = isFavourite(person.id);
+    const favouriteButton = makeButton('', `research-button favourite-toggle${favourite ? ' is-favourite' : ''}`);
+    favouriteButton.type = 'button';
+    favouriteButton.dataset.favouriteToggle = person.id;
+    favouriteButton.setAttribute('aria-pressed', String(favourite));
+    favouriteButton.title = favourite ? 'Remove this person from favourites' : 'Add this person to favourites';
+    favouriteButton.append(createButtonIcon('heart'));
+    const favouriteLabel = document.createElement('span');
+    favouriteLabel.className = 'favourite-toggle-label';
+    favouriteLabel.textContent = favourite ? 'Remove Favourite' : 'Add to Favourites';
+    favouriteButton.append(favouriteLabel);
+    personActions.append(favouriteButton);
     const printButton = iconButton('print', 'Print record');
     printButton.dataset.printPerson = person.id;
     printButton.title = 'Print this person record on A4 (attached media is left out)';
@@ -4148,7 +4326,7 @@
     chevron.append(chevronPath);
     const headingLabel = document.createElement('span');
     headingLabel.className = 'detail-section-label';
-    headingLabel.textContent = `Attached media (${person.mediaPaths.length})`;
+    headingLabel.textContent = `Attached files (${person.mediaPaths.length})`;
     heading.append(chevron, headingLabel);
     const mediaBody = document.createElement('div');
     mediaBody.className = 'detail-section-body';
@@ -4163,13 +4341,13 @@
     actions.className = 'media-actions';
     const saveMode = mediaSaveMode();
     if (saveMode !== 'unsupported') {
-      const addButton = makeButton('Add photo or PDF', 'media-add-button');
+      const addButton = makeButton('Add file', 'media-add-button');
       addButton.dataset.addMediaFor = person.id;
       addButton.disabled = saveMode === 'none';
       addButton.title = saveMode === 'folder'
-        ? 'Add photo or PDF to the selected folder'
+        ? 'Add a photo, PDF or document to the selected folder'
         : saveMode === 'helper'
-          ? `Add photo or PDF; saved by the local helper to ${state.mediaHelper.folder}`
+          ? `Add a photo, PDF or document; saved by the local helper to ${state.mediaHelper.folder}`
           : 'Select a media folder before adding files';
       actions.append(addButton);
     }
@@ -4187,7 +4365,7 @@
     if (!person.mediaPaths.length) {
       const note = document.createElement('div');
       note.className = 'event-detail';
-      note.textContent = 'No media attached yet.';
+      note.textContent = 'No files attached yet.';
       mediaBody.append(note);
       return mediaSection;
     }
@@ -4268,21 +4446,32 @@
         mediaItems.push(item);
         grid.append(item);
       } else {
+        // A document, a PDF or a TIF: an icon tile that opens the attachment
+        // viewer (text and HTML inline, PDF in the browser, Word externally).
         const item = document.createElement('div');
-        item.className = 'media-file-item';
-        const link = document.createElement('a');
-        link.className = 'media-file-link';
-        link.href = mediaUrl(file);
-        link.target = '_blank';
-        link.rel = 'noopener';
-        link.textContent = file.name;
-        link.title = mediaTitle(file, path);
+        item.className = 'media-document-item';
+        item.dataset.documentItem = path;
+        const open = document.createElement('button');
+        open.type = 'button';
+        open.className = 'media-document-open';
+        open.title = mediaTitle(file, path);
+        open.append(attachmentTypeBadge(file.name, 'attachment-type-icon-small'));
+        const label = document.createElement('span');
+        label.className = 'media-document-name';
+        label.textContent = file.name;
+        const type = document.createElement('span');
+        type.className = 'media-document-type';
+        type.textContent = attachmentKindLabel(file.name);
+        open.append(label, type);
+        open.addEventListener('click', () => {
+          openAttachmentPreview({ file, path, name: file.name, people: [person.name], event: [...(linkedEvents.get(path) || [])].join(', ') });
+        });
         const unlinkButton = makeButton('🗑', 'media-remove-button');
         unlinkButton.dataset.personId = person.id;
         unlinkButton.dataset.unlinkMedia = path;
-        unlinkButton.setAttribute('aria-label', 'Unlink media from this person; file will remain in the media folder');
+        unlinkButton.setAttribute('aria-label', 'Unlink this file from this person; the file remains in the media folder');
         unlinkButton.title = 'Unlink from person (file remains in folder)';
-        item.append(link, unlinkButton);
+        item.append(open, unlinkButton);
         item.append(mediaClassifyControl(path, file.name));
         markJustAdded(item, path);
         item.hidden = mediaItems.length >= 4;
@@ -4433,7 +4622,10 @@
     const result = [...entries.values()].sort((a, b) => (a.file?.name || a.path).localeCompare(b.file?.name || b.path, undefined, { sensitivity: 'base' }));
     for (const entry of result) {
       const names = [...entry.people.values()].map(({ person }) => person.name).join(' ');
-      entry.searchText = `${entry.file?.name || entry.path} ${names}`.toLocaleLowerCase();
+      // The type wording is searchable too, so "word" finds a .docx and "html"
+      // finds a page without typing its extension.
+      const name = entry.file?.name || entry.path;
+      entry.searchText = `${name} ${names} ${attachmentKindLabel(name)} ${attachmentBadge(name)}`.toLocaleLowerCase();
     }
     state.mediaLibraryCache = result;
     state.mediaLibraryCacheKey = cacheKey;
@@ -4798,6 +4990,8 @@
     const search = (searchInput?.value || '').trim().toLocaleLowerCase();
     const typeInput = document.querySelector('#mediaLibraryTypeFilter');
     const selectedType = typeInput?.value || '';
+    const kindInput = document.querySelector('#mediaLibraryFileKindFilter');
+    const selectedKind = kindInput?.value || '';
     const sortInput = document.querySelector('#mediaLibrarySort');
     // The dropdown is the only source of truth while the page is shown; the copy
     // in state merely keeps the choice across re-renders and tree switches.
@@ -4805,6 +4999,12 @@
     const entries = allEntries.filter((entry) => {
       const type = state.mediaTypes.get(entry.key) || 'unclassified';
       if (selectedType && type !== selectedType) return false;
+      // The file-kind filter is by attachment type (image, PDF, Word, text…),
+      // separate from the classification filter above.
+      if (selectedKind) {
+        const kind = attachmentKind(entry.file?.name || entry.path || '');
+        if (kind !== selectedKind) return false;
+      }
       return !search || entry.searchText.includes(search);
     });
     const nameOf = (entry) => (entry.file?.name || entry.path || '').toLocaleLowerCase();
@@ -4941,11 +5141,13 @@
       link.append(image);
       return link;
     }
-    const placeholder = document.createElement('span');
-    placeholder.className = 'media-library-row-thumb is-document';
-    placeholder.textContent = entry.file ? 'PDF' : '—';
-    placeholder.title = entry.file ? 'Document' : 'File not found';
-    return placeholder;
+    // Every non-image type gets its icon and extension in the thumbnail column,
+    // so a table row reads as a document at a glance.
+    const name = entry.file?.name || entry.path || '';
+    const badge = attachmentTypeBadge(name, 'media-library-row-badge');
+    badge.title = entry.file ? attachmentKindLabel(name) : 'File not found';
+    if (!entry.file) badge.classList.add('is-missing');
+    return badge;
   }
 
   function createMediaLibraryTable() {
@@ -5121,6 +5323,74 @@
     target.scrollIntoView({ block: 'nearest' });
   }
 
+  // A document's preview tile: the type icon, a short extension badge, the file
+  // name and who it belongs to, with Open (the viewer) and Locate File. It uses
+  // the same card shell as images, so it inherits every theme.
+  function mediaLibraryDocumentTile(entry, kind, missing = false) {
+    const name = entry.file?.name || entry.path.split(/[\\/]/).pop() || entry.path;
+    const tile = document.createElement('div');
+    tile.className = `media-library-document-tile${missing ? ' is-missing' : ''}`;
+    tile.append(attachmentTypeBadge(name, 'attachment-type-icon-large'));
+    const copy = document.createElement('div');
+    copy.className = 'media-library-document-copy';
+    // The card heading already names the file, so the tile shows what the
+    // heading cannot: the type and who it belongs to.
+    const type = document.createElement('span');
+    type.className = 'media-library-document-type';
+    type.textContent = attachmentKindLabel(name);
+    copy.append(type);
+    const owners = [...entry.people.values()].map(({ person }) => person.name);
+    if (owners.length) {
+      const linked = document.createElement('span');
+      linked.className = 'media-library-document-linked';
+      linked.textContent = `Linked to: ${owners.join(', ')}`;
+      copy.append(linked);
+    }
+    tile.append(copy);
+    const actions = document.createElement('div');
+    actions.className = 'media-library-document-actions';
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'button button-secondary';
+    open.textContent = missing ? 'Reveal expected file' : 'Open';
+    open.title = missing ? 'Check where this file is expected in the media folder' : `Open ${name}`;
+    open.addEventListener('click', (event) => {
+      event.preventDefault();
+      if (missing) { openMediaFolderInTab(entry.path); return; }
+      openPersonFilePreview(entry, name, kind);
+    });
+    actions.append(open);
+    if (!missing) {
+      const locate = document.createElement('button');
+      locate.type = 'button';
+      locate.className = 'button button-quiet';
+      locate.textContent = 'Locate File';
+      locate.title = 'Open the media folder in a new tab at this file\'s place';
+      locate.addEventListener('click', (event) => {
+        event.preventDefault();
+        openMediaFolderInTab(entry.path);
+      });
+      actions.append(locate);
+    }
+    tile.append(actions);
+    return tile;
+  }
+
+  // Opens the shared attachment viewer for one Media Library entry.
+  function openPersonFilePreview(entry, name, kind) {
+    const people = [...entry.people.values()].map(({ person }) => person.name);
+    // HTML and text preview inline; anything with no inline renderer opens in
+    // its default application directly, which is what "Open" promises there.
+    if (kind === 'word' || kind === 'document') {
+      if (entry.file) {
+        const opened = window.open(mediaUrl(entry.file), '_blank', 'noopener');
+        if (!opened) showToast('The browser blocked the new tab. Allow pop-ups for this page and try again.');
+        return;
+      }
+    }
+    openAttachmentPreview({ file: entry.file, path: entry.path, name, people });
+  }
+
   function createMediaLibraryCard(entry) {
     const card = document.createElement('article');
     card.className = 'media-library-card';
@@ -5138,6 +5408,8 @@
     card.classList.toggle('is-selected', selectBox.checked);
     const preview = document.createElement('div');
     preview.className = 'media-library-preview';
+    const entryName = entry.file?.name || entry.path || '';
+    const entryKind = attachmentKind(entryName);
     if (entry.file && isImageFile(entry.file)) {
       const link = document.createElement('a');
       link.href = mediaUrl(entry.file);
@@ -5154,13 +5426,11 @@
       link.append(image);
       preview.append(link);
     } else if (entry.file) {
-      const link = document.createElement('a');
-      link.className = 'media-library-document';
-      link.href = mediaUrl(entry.file);
-      link.target = '_blank';
-      link.rel = 'noopener';
-      link.textContent = 'Open document';
-      preview.append(link);
+      // Documents and TIF/TIFF: an icon tile naming the type, which opens the
+      // attachment viewer (text and HTML preview inline; Word opens externally).
+      preview.append(mediaLibraryDocumentTile(entry, entryKind));
+    } else if (entryKind) {
+      preview.append(mediaLibraryDocumentTile(entry, entryKind, true));
     } else {
       const missing = document.createElement('span');
       missing.className = 'media-library-missing';
@@ -5168,14 +5438,16 @@
       preview.append(missing);
     }
     // Face-scan and person-link state, both visible at a glance on the image.
+    // A document tile already names its people, so the badge would repeat it.
     const badges = document.createElement('div');
     badges.className = 'media-library-badges';
+    const isDocumentTile = !(entry.file && isImageFile(entry.file));
     if (entry.people.size) {
       const linkedBadge = document.createElement('span');
       linkedBadge.className = 'media-library-badge is-linked';
       linkedBadge.textContent = entry.people.size === 1 ? 'Linked to 1 person' : `Linked to ${entry.people.size} people`;
       linkedBadge.title = [...entry.people.values()].map(({ person }) => person.name).join(', ');
-      badges.append(linkedBadge);
+      if (!isDocumentTile) badges.append(linkedBadge);
     } else {
       const unlinkedBadge = document.createElement('span');
       unlinkedBadge.className = 'media-library-badge is-unlinked';
@@ -5272,6 +5544,29 @@
       none.className = 'media-library-unlinked';
       none.textContent = 'No person link recorded';
       peopleList.append(none);
+      // A filename that plainly names one person is offered as a suggestion.
+      // Nothing is linked until the user presses the button.
+      const suggestions = smartMatchSuggestions(entry.file?.name || entry.path || '', 1);
+      const best = suggestions[0];
+      if (best) {
+        const suggestion = document.createElement('div');
+        suggestion.className = 'media-library-suggestion';
+        const text = document.createElement('span');
+        text.textContent = `Suggested match: ${best.person.name}`;
+        const link = document.createElement('button');
+        link.type = 'button';
+        link.className = 'button button-secondary media-library-suggestion-link';
+        link.textContent = 'Link';
+        link.title = `Attach ${entry.file?.name || entry.path} to ${best.person.name}`;
+        link.addEventListener('click', (event) => {
+          event.preventDefault();
+          if (!window.confirm(`Link “${entry.file?.name || entry.path}” to ${best.person.name}?`)) return;
+          linkAttachmentToPerson(best.person.id, entry.path);
+          showToast(`Linked ${entry.file?.name || entry.path} to ${best.person.name}.`);
+        });
+        suggestion.append(text, link);
+        peopleList.append(suggestion);
+      }
     }
     linked.append(peopleList);
     details.append(linked);
@@ -5468,6 +5763,10 @@
     // Check media folder: a magnifier over a folder.
     checkFolder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="11" cy="12" r="2.5"/><path d="M13 14l3 3"/>',
     book: '<path d="M4 5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2z"/><path d="M4 20a2 2 0 0 0 2 1h13v-3"/><path d="M9 8h6"/>',
+    // Attachment type icons: a word processing page with a W, a browser window
+    // with its address bar, and a generic document page.
+    wordDoc: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/><path d="M9.5 17l1.2-4.5 1.1 3.2 1.2-3.2 1.2 4.5"/>',
+    webPage: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M6 6.5h.01M8.5 6.5h.01"/><path d="M8 13h8M8 16h5"/>',
     // Birth: a baby — round head with a hair curl, smile, and a swaddled body below.
     birth: '<circle cx="12" cy="8" r="4"/><path d="M12 4c.3-1.3 1.9-1.3 2-.1"/><path d="M10.8 9.4c.7.6 1.7.6 2.4 0"/><path d="M8 21v-2a4 4 0 0 1 8 0v2"/>',
     death: '<path d="M8 8a4 4 0 1 1 8 0v10H8V8z"/><path d="M12 8v4"/><path d="M10 10h4"/><path d="M6 21h12"/>',
@@ -5495,7 +5794,12 @@
     mapPin: '<path d="M12 21c4-4.5 7-7.9 7-11a7 7 0 1 0-14 0c0 3.1 3 6.5 7 11z"/><circle cx="12" cy="10" r="2.6"/>',
     // Triangular carets for the generation-shift buttons on tree cards.
     caretUp: '<path d="M12 5l8 12H4z" fill="currentColor" stroke="none"/>',
-    caretDown: '<path d="M12 19L4 7h16z" fill="currentColor" stroke="none"/>'
+    caretDown: '<path d="M12 19L4 7h16z" fill="currentColor" stroke="none"/>',
+    // Tree Maintenance cards: an unlinked record and a doubled link.
+    orphan: '<circle cx="9" cy="9" r="3.2"/><path d="M4 20v-1.2a5 5 0 0 1 10 0V20"/><path d="M16 6h5M16 6l3-3M16 6l3 3" stroke-dasharray="2 2"/>',
+    duplicateRelation: '<path d="M21 3 12 12"/><path d="M12 12 8 16"/><path d="M8 16 3.5 20.5"/><path d="M3.5 20.5c-1.4 1.4-1.4 3 0 3.9 1.4.9 3 .4 3.9-1l1.8-2.7-3-3z"/><path d="M6.2 17.7l3 3"/><path d="M9.2 14.7l3 3"/>',
+    // A heart. Outline by default; a favourite fills it from currentColor.
+    heart: '<path d="M12 20s-7-4.3-7-9.3A4.2 4.2 0 0 1 12 7.6 4.2 4.2 0 0 1 19 10.7c0 5-7 9.3-7 9.3z"/>'
   };
 
   function createButtonIcon(icon) {
@@ -5516,6 +5820,15 @@
   function setMapMode(on) {
     const map = on ? getMapInstance() : mapInstance;
     if (on && !map) { showToast('The map component could not be loaded.'); return; }
+    if (on) {
+      setTreeMaintenanceMode(false);
+      if (favouritesModeIsOn()) setFavouritesMode(false);
+      // Coming from Reports or the Media library, the hidden main panel
+      // reappears with its tree layout.
+      elements.viewport.hidden = false;
+      document.querySelector('.main-panel .main-heading').hidden = false;
+      document.querySelector('.graph-footer').hidden = false;
+    }
     state.mapMode = on;
     setButtonContent(elements.mapViewButton, on ? 'tree' : 'map', on ? 'Relationship View' : 'Map View');
     elements.mapViewButton.setAttribute('aria-pressed', String(on));
@@ -5536,6 +5849,8 @@
 
   function setReportsMode(on) {
     if (on && !state.people.size) return;
+    if (on) setTreeMaintenanceMode(false);
+    if (on && favouritesModeIsOn()) setFavouritesMode(false);
     state.reportsMode = on;
     if (on && state.mediaLibraryMode) {
       state.mediaLibraryMode = false;
@@ -5555,6 +5870,8 @@
 
   function setMediaLibraryMode(on) {
     if (on && !state.people.size && !(state.folderMediaFiles && state.folderMediaFiles.size)) return;
+    if (on) setTreeMaintenanceMode(false);
+    if (on && favouritesModeIsOn()) setFavouritesMode(false);
     if (!on) {
       clearTimeout(state.mediaLibrarySearchDebounce);
       state.mediaLibrarySearchDebounce = 0;
@@ -5574,6 +5891,39 @@
       state.mediaLibraryPage = 0;
       renderMediaLibrary();
       elements.mediaLibraryView.scrollTop = 0;
+    }
+  }
+
+  // Settings > Tree Maintenance: the dashboard replaces the main panel's contents
+  // (heading, graph and footer) rather than hiding the whole shell, so the roster
+  // and the person details stay usable beside it. It is not a View-switch
+  // destination, so syncViewSwitch() keeps reporting the underlying tree view.
+  //
+  // Opening it must also leave any other full-page view cleanly: Reports and the
+  // Media library hide the whole app shell, and opening the dashboard from them
+  // used to leave it hidden, so the dashboard was rendered but invisible. Those
+  // views are closed first, which restores the shell, and the shell is also
+  // forced visible here so a stale hidden flag can never blank the page again.
+  function setTreeMaintenanceMode(on) {
+    if (on && !state.people.size) {
+      showToast('Open a GEDCOM first: tree maintenance works on the tree that is open.');
+      return;
+    }
+    if (on) {
+      if (state.reportsMode) setReportsMode(false);
+      if (state.mediaLibraryMode) setMediaLibraryMode(false);
+      if (state.mapMode) setMapMode(false);
+      elements.appShell.hidden = false;
+    }
+    state.treeMaintenanceMode = Boolean(on);
+    elements.treeMaintenanceView.hidden = !on;
+    elements.viewport.hidden = Boolean(on);
+    document.querySelector('.main-panel .main-heading').hidden = Boolean(on);
+    document.querySelector('.graph-footer').hidden = Boolean(on);
+    document.querySelector('.main-panel').classList.toggle('maintenance-mode', Boolean(on));
+    if (on) {
+      setButtonContent(document.querySelector('#treeMaintenanceBackButton'), 'tree', 'Back to tree');
+      renderTreeMaintenance();
     }
   }
 
@@ -5649,6 +5999,15 @@
     const name = document.createElement('div');
     name.className = 'pedigree-card-name';
     name.textContent = person.name;
+    if (isFavourite(person.id)) {
+      // A small heart marks a favourited person wherever their card appears.
+      const heart = document.createElement('span');
+      heart.className = 'pedigree-card-favourite';
+      heart.setAttribute('aria-label', 'Favourite');
+      heart.title = 'Favourite';
+      heart.append(createButtonIcon('heart'));
+      name.append(heart);
+    }
     card.append(name);
     const birth = person.events.find((event) => event.type === 'BIRT');
     const death = person.events.find((event) => event.type === 'DEAT');
@@ -5827,6 +6186,14 @@
       if (state.mediaLibraryMode) setMediaLibraryMode(false);
       if (state.reportsMode) setReportsMode(false);
       if (state.mapMode) setMapMode(false);
+      // The pedigree is drawn inside the viewport, so the dashboard must stand down.
+      setTreeMaintenanceMode(false);
+      if (favouritesModeIsOn()) setFavouritesMode(false);
+      // Coming from Reports or the Media library, the hidden main panel
+      // reappears with its tree layout.
+      elements.viewport.hidden = false;
+      document.querySelector('.main-panel .main-heading').hidden = false;
+      document.querySelector('.graph-footer').hidden = false;
     }
     // The pedigree is drawn inside the relationship-map viewport, so the app
     // shell (topbar, directory, person record) stays visible around it.
@@ -5858,9 +6225,12 @@
   }
 
   // Keeps the top-bar dropdown matching whichever view is currently active.
+  // The Favourites page is its own full-page view, so it wins when it is open
+  // (see favouritesModeIsOn, defined with the page in module 22).
   function syncViewSwitch() {
     const select = document.querySelector('#viewSwitch');
     if (!select) return;
+    if (favouritesModeIsOn()) { select.value = 'favourites'; return; }
     select.value = state.mediaLibraryMode ? 'media' : state.reportsMode ? 'reports' : state.pedigreeMode ? 'pedigree' : state.mapMode ? 'map' : 'tree';
   }
 
@@ -8822,9 +9192,17 @@
 
   function existingRelativeCandidates(query) {
     const words = normalizeDirectoryName(query).split(/\s+/).filter(Boolean);
-    return [...state.people.values()].filter((person) => person.id !== state.selectedId
-      && words.every((word) => normalizeDirectoryName(`${person.name} ${person.id}`).includes(word)))
-      .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    const matches = (person) => words.every((word) => normalizeDirectoryName(person.name).includes(word));
+    // When adding a parent, the selected person's recorded partners come first:
+    // they are the likely other parent, so they top the suggestion list.
+    const partnerIds = elements.relativeType.value === 'PARENT'
+      ? partnersOf(state.selectedId).map((partner) => partner.id) : [];
+    const partners = [...state.people.values()].filter((person) => partnerIds.includes(person.id)
+      && person.id !== state.selectedId && matches(person));
+    const others = [...state.people.values()].filter((person) => !partnerIds.includes(person.id)
+      && person.id !== state.selectedId && matches(person));
+    const byName = (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
+    return [...partners.sort(byName), ...others.sort(byName)];
   }
 
   function syncExistingRelativeChoices() {
@@ -8839,7 +9217,9 @@
     for (const person of people.slice(0, 100)) {
       const option = document.createElement('option');
       option.value = person.id;
-      option.textContent = `${person.name} · ${lifespan(person)} · @${person.id}@`;
+      const isPartner = elements.relativeType.value === 'PARENT'
+        && partnersOf(state.selectedId).some((partner) => partner.id === person.id);
+      option.textContent = isPartner ? `${person.name} · ${lifespan(person)} — spouse of this person` : `${person.name} · ${lifespan(person)}`;
       select.append(option);
     }
     select.value = [...select.options].some((option) => option.value === selectedId) ? selectedId : '';
@@ -8862,6 +9242,9 @@
     document.querySelector('#relativeModeField').hidden = !supportsExisting;
     const existing = supportsExisting && document.querySelector('#relativeMode').value === 'EXISTING';
     document.querySelector('#relativeExistingFields').hidden = !existing;
+    // The other-parent field is shown for PARENT and CHILD; it must stay
+    // enabled in the create-new-person flow too, where `existing` is false.
+    document.querySelector('#relativeSpouse').disabled = !['PARENT', 'CHILD'].includes(elements.relativeType.value);
     for (const id of ['relativeGivenName', 'relativeSurname', 'relativeSex', 'relativeBirthDate',
       'relativeBirthPlace', 'relativeDeathDate', 'relativeDeathPlace']) {
       const field = document.getElementById(id).closest('label');
@@ -8873,17 +9256,50 @@
     document.querySelector('#relativeDuplicateConfirmationLabel').hidden = true;
     document.querySelector('#relativeError').hidden = true;
     document.querySelector('#relativeFamilyField').hidden = elements.relativeType.value !== 'PARENT';
+    // The other-parent field shows whenever a parent is being added: the
+    // candidates come from the existing parent of the chosen family (its
+    // spouse), falling back to the selected person's own partners.
+    document.querySelector('#relativeSpouseField').hidden = !['PARENT', 'CHILD'].includes(elements.relativeType.value);
+    const spouseSelect = document.querySelector('#relativeSpouse');
+    const selectedSpouseId = spouseSelect.value;
+    spouseSelect.replaceChildren();
+    const spousePlaceholder = document.createElement('option');
+    spousePlaceholder.value = '';
+    spousePlaceholder.textContent = 'None - record this parent only';
+    spouseSelect.append(spousePlaceholder);
+    // Partners of the selected person…
+    const spouseCandidates = new Map(partnersOf(state.selectedId).map((partner) => [partner.id, 'spouse of this person']));
+    // …plus the spouse of the existing parent in each vacant-role family, which
+    // is who the new parent would be joining.
+    const role = elements.relativeParentRole.value;
+    for (const family of [...state.families.values()].filter((entry) => entry.childIds.includes(state.selectedId))) {
+      const existingParentId = role === 'HUSB' ? family.wifeId : family.husbandId;
+      if (existingParentId && state.people.has(existingParentId)) {
+        for (const partner of partnersOf(existingParentId)) {
+          if (partner.id !== state.selectedId) spouseCandidates.set(partner.id, `spouse of ${state.people.get(existingParentId)?.name || 'the other parent'}`);
+        }
+      }
+    }
+    for (const [partnerId, relationNote] of spouseCandidates) {
+      const person = state.people.get(partnerId);
+      if (!person) continue;
+      const option = document.createElement('option');
+      option.value = partnerId;
+      option.textContent = `${person.name} · ${lifespan(person)} — ${relationNote}`;
+      spouseSelect.append(option);
+    }
+    spouseSelect.value = [...spouseSelect.options].some((option) => option.value === selectedSpouseId)
+      ? selectedSpouseId : '';
     const familySelect = document.querySelector('#relativeFamily');
     const selectedFamilyId = familySelect.value;
     familySelect.replaceChildren();
-    const role = elements.relativeParentRole.value;
     const families = [...state.families.values()].filter((family) => family.childIds.includes(state.selectedId)
       && !(role === 'HUSB' ? family.husbandId : family.wifeId));
     for (const family of families) {
       const option = document.createElement('option');
       option.value = family.id;
       const other = state.people.get(role === 'HUSB' ? family.wifeId : family.husbandId);
-      option.textContent = `@${family.id}@ · ${other?.name || 'No other parent recorded'}`;
+      option.textContent = other?.name || 'No other parent recorded';
       familySelect.append(option);
     }
     const newFamily = document.createElement('option');
@@ -8898,10 +9314,10 @@
     if (existing) syncExistingRelativeChoices();
   }
 
-  function linkExistingRelative(personId, relation, parentRole, parentFamilyId) {
+  function linkExistingRelative(personId, relation, parentRole, parentFamilyId, spouseId = '') {
     const selectedId = state.selectedId;
     if (!['PARENT', 'PARTNER'].includes(relation) || !state.people.has(personId) || personId === selectedId) {
-      throw new Error('Select a different existing person for this relationship.');
+      throw new Error('Pick someone in the “Select person” list first, and make sure it is not the person you are adding to.');
     }
     const selected = state.people.get(selectedId);
     const person = state.people.get(personId);
@@ -8955,6 +9371,15 @@
     } else {
       familyId = nextGedcomXref('F', 'FAM');
       familyRecord = { xref: familyId, tag: 'FAM', lines: [`0 @${familyId}@ FAM`] };
+      // Optional spouse recorded as the other parent of this new parent family.
+      if (relation === 'PARENT' && state.people.has(spouseId) && spouseId !== personId && spouseId !== selectedId) {
+        const spouseRole = role === 'HUSB' ? 'WIFE' : 'HUSB';
+        const spouseRecord = record(spouseId, 'INDI');
+        if (spouseRecord) {
+          appendRecordLine(familyRecord, `1 ${spouseRole} @${spouseId}@`);
+          appendRecordLine(spouseRecord, `1 FAMS @${familyId}@`);
+        }
+      }
     }
     appendRecordLine(familyRecord, `1 ${role} @${personId}@`);
     appendRecordLine(familyRecord, relation === 'PARENT'
@@ -8972,8 +9397,15 @@
       && document.querySelector('#relativeMode').value === 'EXISTING') {
       const errorBox = document.querySelector('#relativeError');
       try {
-        const personId = linkExistingRelative(document.querySelector('#relativeExistingPerson').value,
-          elements.relativeType.value, elements.relativeParentRole.value, document.querySelector('#relativeFamily').value);
+        // If the user picked someone only in the other-parent dropdown, treat
+        // that person as the one being added (the common "add my father's
+        // wife as my mother" flow).
+        let chosenId = document.querySelector('#relativeExistingPerson').value;
+        const spouseChoice = cleanGedcomValue(document.querySelector('#relativeSpouse').value);
+        if (!chosenId && spouseChoice && state.people.has(spouseChoice)) chosenId = spouseChoice;
+        const personId = linkExistingRelative(chosenId,
+          elements.relativeType.value, elements.relativeParentRole.value, document.querySelector('#relativeFamily').value,
+          cleanGedcomValue(document.querySelector('#relativeSpouse').value));
         refreshAfterGedcomMutation(personId);
         elements.addRelativeDialog.close();
         elements.addRelativeForm.reset();
@@ -9051,12 +9483,28 @@
         addFamilyRecord = false;
       } else {
         familyLines.push(`1 ${parentRole} @${personId}@`, `1 CHIL @${selected.id}@`);
+        // Optional spouse picked as the other parent of this separate family.
+        const spouseId = cleanGedcomValue(document.querySelector('#relativeSpouse').value);
+        if (state.people.has(spouseId) && spouseId !== personId && spouseId !== selected.id) {
+          const spouseRole = parentRole === 'HUSB' ? 'WIFE' : 'HUSB';
+          familyLines.push(`1 ${spouseRole} @${spouseId}@`);
+          const spouseRecord = state.gedcomRecords.find((record) => record.tag === 'INDI' && record.xref === spouseId);
+          if (spouseRecord) spouseRecord.lines.push(`1 FAMS @${familyId}@`);
+        }
         newPersonLines.push(`1 FAMS @${familyId}@`);
         selectedRecord.lines.push(`1 FAMC @${familyId}@`);
       }
     } else if (relation === 'CHILD') {
       const selectedRole = selected.sex === 'F' ? 'WIFE' : 'HUSB';
+      const otherRole = selectedRole === 'HUSB' ? 'WIFE' : 'HUSB';
       familyLines.push(`1 ${selectedRole} @${selected.id}@`, `1 CHIL @${personId}@`);
+      // Optional spouse picked as the child's other parent.
+      const spouseId = cleanGedcomValue(document.querySelector('#relativeSpouse').value);
+      if (state.people.has(spouseId) && spouseId !== selected.id) {
+        familyLines.push(`1 ${otherRole} @${spouseId}@`);
+        const spouseRecord = state.gedcomRecords.find((record) => record.tag === 'INDI' && record.xref === spouseId);
+        if (spouseRecord) spouseRecord.lines.push(`1 FAMS @${familyId}@`);
+      }
       newPersonLines.push(`1 FAMC @${familyId}@`);
       selectedRecord.lines.push(`1 FAMS @${familyId}@`);
     } else if (relation === 'SIBLING') {
@@ -9719,9 +10167,6 @@
     elements.mediaLibraryButton.disabled = false;
     const menuButton = document.querySelector('#mediaLibraryMenuButton');
     if (menuButton) menuButton.disabled = false;
-    // Picking the folder also lets entries be checked for duplicates.
-    const duplicateButton = document.querySelector('#duplicateMediaMenuButton');
-    if (duplicateButton) duplicateButton.disabled = false;
   }
 
   elements.mediaButton.addEventListener('click', showMediaFolderDialog);
@@ -9752,8 +10197,12 @@
     openLibraryOnMediaImport();
     const byName = new Map();
     // Files picked from the folder are Media Library entries in their own right,
-    // even when no GEDCOM person references them.
+    // even when no GEDCOM person references them. Every supported attachment
+    // type is kept here - images, PDFs and documents - so a folder pick indexes
+    // a .txt or .docx exactly as it indexes a .jpg.
     const folderFiles = new Map();
+    // Files the app cannot show at all are counted, not silently dropped.
+    let unsupportedFiles = 0;
     for (const file of files) {
       // Index by bare name and, when the picker supplies it, the relative path.
       for (const key of new Set([file.name, file.webkitRelativePath])) {
@@ -9761,8 +10210,9 @@
         if (!name) continue;
         if (!byName.has(name)) byName.set(name, []);
         byName.get(name).push(file);
-        if (typeof isImageFile === 'function' ? isImageFile(file) : /^image\//.test(file.type || '')) folderFiles.set(name, file);
+        if (isSupportedMediaFile(file)) folderFiles.set(name, file);
       }
+      if (!isSupportedMediaFile(file)) unsupportedFiles += 1;
     }
     state.folderMediaFiles = folderFiles;
     state.mediaIndex = { byName };
@@ -9778,24 +10228,25 @@
       }
     }
     render();
-    showToast(`Matched ${matched.toLocaleString()} of ${references.toLocaleString()} media references. This browser cannot write to folders, so media is view-only here. Use Edge or Chrome to add files.`);
+    const attachments = folderFiles.size;
+    showToast(unsupportedFiles
+      ? `Indexed ${attachments.toLocaleString()} attachment${attachments === 1 ? '' : 's'} and matched ${matched.toLocaleString()} of ${references.toLocaleString()} references. ${unsupportedFiles.toLocaleString()} file${unsupportedFiles === 1 ? ' is' : 's are'} not a supported type and were skipped.`
+      : `Indexed ${attachments.toLocaleString()} attachment${attachments === 1 ? '' : 's'} and matched ${matched.toLocaleString()} of ${references.toLocaleString()} references. This browser cannot write to folders, so media is view-only here. Use Edge or Chrome to add files.`);
   });
 
   elements.clear.addEventListener('click', () => {
     if (state.mediaLibraryMode) setMediaLibraryMode(false);
     if (state.mapMode) setMapMode(false);
     if (state.reportsMode) setReportsMode(false);
+    if (state.treeMaintenanceMode) setTreeMaintenanceMode(false);
+    if (favouritesModeIsOn()) setFavouritesMode(false);
     elements.mapViewButton.disabled = true;
     elements.reportsButton.disabled = true;
     elements.mediaLibraryButton.disabled = true;
     const viewSwitch = document.querySelector('#viewSwitch');
     if (viewSwitch) { viewSwitch.disabled = true; viewSwitch.value = 'tree'; }
     document.querySelector('#mediaLibraryMenuButton').disabled = true;
-    document.querySelector('#birthCountryMenuButton').disabled = true;
-    document.querySelector('#duplicateFinderMenuButton').disabled = true;
-    document.querySelector('#mediaOrganiseMenuButton').disabled = true;
-    document.querySelector('#duplicateMediaMenuButton').disabled = true;
-    document.querySelector('#orphanRecordsMenuButton').disabled = true;
+    document.querySelector('#treeMaintenanceMenuButton').disabled = true;
     releaseMediaUrls(); state.mediaIndex = null; state.mediaFolderPicked = false;
     state.mediaRelativePaths = new WeakMap(); state.folderMediaFiles = new Map(); state.mediaDirectoryHandle = null; state.pendingUploadPersonId = null; state.pendingPortraitReplacement = null;
     syncMediaButton();
@@ -9846,6 +10297,9 @@
   }
   document.querySelector('#viewSwitch').addEventListener('change', (event) => {
     const mode = event.target.value;
+    // Leaving the Favourites page is what restores the app shell, so it comes
+    // first whatever the chosen view is.
+    if (favouritesModeIsOn()) setFavouritesMode(false);
     if (mode === 'tree') {
       if (state.pedigreeMode) setPedigreeMode(false);
       if (state.mediaLibraryMode) setMediaLibraryMode(false);
@@ -9871,6 +10325,12 @@
       if (state.pedigreeMode) setPedigreeMode(false);
       if (state.reportsMode) setReportsMode(false);
       setMediaLibraryMode(true);
+    } else if (mode === 'favourites') {
+      if (state.mapMode) setMapMode(false);
+      if (state.pedigreeMode) setPedigreeMode(false);
+      if (state.reportsMode) setReportsMode(false);
+      if (state.mediaLibraryMode) setMediaLibraryMode(false);
+      setFavouritesMode(true);
     }
   });
   elements.mapViewButton.addEventListener('click', () => {
@@ -9881,7 +10341,6 @@
   elements.reportsButton.addEventListener('click', () => setReportsMode(!state.reportsMode));
   elements.mediaLibraryButton.addEventListener('click', () => setMediaLibraryMode(!state.mediaLibraryMode));
   document.querySelector('#mediaLibraryMenuButton').addEventListener('click', () => setMediaLibraryMode(true));
-  document.querySelector('#birthCountryMenuButton').addEventListener('click', openBirthCountryDialog);
   document.querySelector('#birthCountrySearch').addEventListener('input', renderBirthCountryList);
   document.querySelector('#birthCountryList').addEventListener('input', (event) => {
     const input = event.target.closest('input[data-birth-country-person]');
@@ -9909,7 +10368,6 @@
     saveBirthCountries();
   });
   document.querySelector('#closeBirthCountries').addEventListener('click', closeBirthCountryDialog);
-  document.querySelector('#duplicateFinderMenuButton').addEventListener('click', openDuplicateFinder);
   document.querySelector('#duplicateThreshold').addEventListener('input', (event) => {
     document.querySelector('#duplicateThresholdLabel').textContent = event.target.value;
     renderDuplicateFinder();
@@ -10040,45 +10498,97 @@
     });
   }
 
-  const treeManagementMenuButton = document.querySelector('#treeManagementMenuButton');
-  const treeManagementPanel = document.querySelector('#treeManagementPanel');
-  function setTreeManagementSubmenuOpen(open) {
-    treeManagementPanel.hidden = !open;
-    treeManagementMenuButton.setAttribute('aria-expanded', String(open));
+  // ---------- Custom theme (colour pickers + top banner image) ----------
+  // Each picker sets one CSS custom property on :root; the banner image is read
+  // with FileReader into a data URL so it survives without server storage.
+  // Everything is remembered in localStorage and re-applied on startup.
+  const customThemeStorageKey = 'kinship-atlas:custom-theme';
+  const customThemeVariables = {
+    customThemeInk: '--ink', customThemePaper: '--paper', customThemeGreen: '--green',
+    customThemeCoral: '--coral', customThemeBlue: '--blue', customThemeGold: '--gold'
+  };
+  const customThemeMenuButton = document.querySelector('#customThemeMenuButton');
+  const customThemePanel = document.querySelector('#customThemePanel');
+  function setCustomThemeSubmenuOpen(open) {
+    customThemePanel.hidden = !open;
+    customThemeMenuButton.setAttribute('aria-expanded', String(open));
   }
-  treeManagementMenuButton.addEventListener('click', () => setTreeManagementSubmenuOpen(treeManagementPanel.hidden));
+  customThemeMenuButton.addEventListener('click', () => setCustomThemeSubmenuOpen(customThemePanel.hidden));
   document.addEventListener('click', (event) => {
-    if (!event.target.closest('#treeManagementSubmenu')) setTreeManagementSubmenuOpen(false);
+    if (!event.target.closest('#customThemePanel') && event.target !== customThemeMenuButton
+      && !event.target.closest('#customThemeMenuButton')) setCustomThemeSubmenuOpen(false);
   });
-  // Map provider preference: choosing one stores it and keeps the menu open
-  // (it is a control, not a command, so it must not close the menu).
-  const mapProviderSelect = document.querySelector('#mapProviderSelect');
-  if (mapProviderSelect && typeof setPreferredMapProvider === 'function' && typeof preferredMapProvider === 'function') {
-    mapProviderSelect.value = preferredMapProvider();
-    mapProviderSelect.addEventListener('change', () => {
-      setPreferredMapProvider(mapProviderSelect.value);
-      showToast(`Place links now open in ${mapProviderSelect.selectedOptions[0].textContent}.`);
-    });
-  }
-  // Choosing an item closes the submenu and then the whole settings menu, the
-  // same way a top-level menu item does. The map-provider select is a control
-  // rather than a command, so it keeps the menu open.
-  for (const item of treeManagementPanel.querySelectorAll('.menu-item:not(.menu-submenu-toggle):not(.menu-select-item)')) {
-    if (item.id === 'gazetteerMenuButton') {
-      item.addEventListener('click', () => {
-        setTreeManagementSubmenuOpen(false);
-        setSettingsOpen(false);
-        window.KinshipHistoricalGazetteer?.openDialog?.();
-      });
-      continue;
+  function applyCustomTheme(custom, { remember = true } = {}) {
+    if (!custom || typeof custom !== 'object') return;
+    for (const [inputId, variable] of Object.entries(customThemeVariables)) {
+      const value = typeof custom[inputId] === 'string' && /^#[0-9a-f]{6}$/i.test(custom[inputId]) ? custom[inputId] : '';
+      document.getElementById(inputId).value = value || document.getElementById(inputId).defaultValue;
+      document.documentElement.style.setProperty(variable, value || '');
     }
-    item.addEventListener('click', () => {
-      setTreeManagementSubmenuOpen(false);
-      window.setTimeout(() => setSettingsOpen(false), 0);
+    const banner = typeof custom.banner === 'string' && custom.banner.startsWith('data:image/') ? custom.banner : '';
+    const topbar = document.querySelector('.topbar');
+    if (banner) {
+      document.documentElement.style.setProperty('--topbar-banner', `url("${banner}")`);
+      topbar?.classList.add('custom-banner');
+    } else {
+      document.documentElement.style.removeProperty('--topbar-banner');
+      topbar?.classList.remove('custom-banner');
+    }
+    if (remember) {
+      try { localStorage.setItem(customThemeStorageKey, JSON.stringify(custom)); } catch { }
+    }
+  }
+  function currentCustomTheme() {
+    const custom = {};
+    for (const inputId of Object.keys(customThemeVariables)) custom[inputId] = document.getElementById(inputId).value;
+    const banner = document.documentElement.style.getPropertyValue('--topbar-banner').trim();
+    const match = banner.match(/^url\("(.+)"\)$/);
+    if (match) custom.banner = match[1];
+    return custom;
+  }
+  for (const inputId of Object.keys(customThemeVariables)) {
+    document.getElementById(inputId).addEventListener('input', (event) => {
+      const custom = currentCustomTheme();
+      custom[inputId] = event.target.value;
+      applyCustomTheme(custom);
     });
   }
+  document.querySelector('#customThemeBannerInput').addEventListener('change', (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const custom = currentCustomTheme();
+      custom.banner = String(reader.result || '');
+      applyCustomTheme(custom);
+    };
+    reader.readAsDataURL(file);
+  });
+  document.querySelector('#customThemeBannerClear').addEventListener('click', () => {
+    const custom = currentCustomTheme();
+    delete custom.banner;
+    applyCustomTheme(custom);
+  });
+  document.querySelector('#customThemeReset').addEventListener('click', () => {
+    try { localStorage.removeItem(customThemeStorageKey); } catch { }
+    for (const inputId of Object.keys(customThemeVariables)) {
+      document.getElementById(inputId).value = document.getElementById(inputId).defaultValue;
+      document.documentElement.style.removeProperty(customThemeVariables[inputId]);
+    }
+    document.documentElement.style.removeProperty('--topbar-banner');
+    document.querySelector('.topbar')?.classList.remove('custom-banner');
+    applyTheme('heritage');
+  });
+  try {
+    const savedCustom = JSON.parse(localStorage.getItem(customThemeStorageKey) || 'null');
+    if (savedCustom) applyCustomTheme(savedCustom, { remember: false });
+  } catch { }
 
-  document.querySelector('#duplicateRelationMenuButton').addEventListener('click', openDuplicateRelationFinder);
+  // Tree Maintenance opens through its own delegated handler in module 19, which
+  // closes the menu itself; a second listener here would close it twice.
+  document.querySelector('#gazetteerTopMenuButton').addEventListener('click', () => setSettingsOpen(false));
+
   document.querySelector('#duplicateRelationSelectAll').addEventListener('change', (event) => {
     const checked = event.target.checked;
     for (const box of document.querySelectorAll('#duplicateRelationList input[data-relation-delete]')) box.checked = checked;
@@ -10137,6 +10647,13 @@
     state.mediaLibraryPage = 0;
     renderMediaLibrary();
   });
+  const mediaFileKindFilter = document.querySelector('#mediaLibraryFileKindFilter');
+  if (mediaFileKindFilter) {
+    mediaFileKindFilter.addEventListener('change', () => {
+      state.mediaLibraryPage = 0;
+      renderMediaLibrary();
+    });
+  }
   document.querySelector('#mediaLibrarySort').addEventListener('change', (event) => {
     state.mediaLibrarySort = event.target.value || 'name-asc';
     state.mediaLibraryPage = 0;
@@ -10393,6 +10910,13 @@
   elements.primaryHomeButton.addEventListener('click', () => {
     showPrimaryPersonRelationshipMap();
   });
+  // The brand mark / heading in the top-left navigates back to the welcome
+  // screen: no person selected, showing the tree welcome (or start screen when
+  // no tree is open).
+  document.querySelector('.brand').addEventListener('click', (event) => {
+    event.preventDefault();
+    if (state.fileName) showTreeWelcome();
+  });
   elements.addGedcomField.addEventListener('click', () => appendGedcomFieldRow());
   elements.personFieldsEditor.addEventListener('click', (event) => {
     const removeButton = event.target.closest('.gedcom-field-remove');
@@ -10640,6 +11164,7 @@
   });
   document.querySelector('#relativeMode').addEventListener('change', syncRelativeEntryMode);
   elements.relativeParentRole.addEventListener('change', syncRelativeEntryMode);
+  document.querySelector('#relativeFamily').addEventListener('change', syncRelativeEntryMode);
   document.querySelector('#relativeSearch').addEventListener('input', syncExistingRelativeChoices);
   document.querySelector('#relationshipForm').addEventListener('submit', (event) => {
     event.preventDefault();
@@ -10926,7 +11451,10 @@
   });
 
   function updateDefaultsButton() {
-    setButtonContent(document.querySelector('#defaultsButton'), 'sliders', 'Update defaults');
+    // Update defaults now lives on the Tree Maintenance page, so the button is
+    // optional; the tree label in the top bar opens the same dialog.
+    const button = document.querySelector('#defaultsButton');
+    if (button) setButtonContent(button, 'sliders', 'Update defaults');
   }
 
   function syncDefaultsDialog() {
@@ -11251,9 +11779,12 @@
   for (const item of topMenus) {
     item.button.addEventListener('click', () => setMenuOpen(item, item.panel.hidden));
     // Any click inside the panel closes it, except interactions with the
-    // submenus (their toggles and items), which manage their own opening state.
+    // submenus (their toggles and items), which manage their own opening state,
+    // and with a select control such as Select Map Provider: opening a dropdown
+    // is not a command, and closing the menu would take the dropdown with it.
     item.panel.addEventListener('click', (event) => {
-      if (event.target.closest('#themeSubmenu') || event.target.closest('#treeManagementSubmenu')) return;
+      if (event.target.closest('#themeSubmenu')) return;
+      if (event.target.closest('select, .menu-select-item')) return;
       window.setTimeout(() => setMenuOpen(item, false), 0);
     });
   }
@@ -11302,9 +11833,8 @@
     if (button) showHelpTopic(button.dataset.helpNav);
   });
 
-  document.querySelector('#defaultsButton').addEventListener('click', openDefaultsDialog);
+  document.querySelector('#treeLabel').addEventListener('click', openDefaultsDialog);
   elements.updateAppButton.addEventListener('click', checkApplicationUpdates);
-  elements.treeLabel.addEventListener('click', openDefaultsDialog);
 
   const gedcomImport = {
     button: document.querySelector('#importGedcomButton'), input: document.querySelector('#importGedcomInput'),
@@ -11527,11 +12057,9 @@
   setButtonContent(elements.reportsButton, 'chart', 'Reports');
   setButtonContent(elements.mediaLibraryButton, 'media', 'Media');
   setButtonContent(document.querySelector('#mediaLibraryMenuButton'), 'media', 'Media library');
-  setButtonContent(document.querySelector('#birthCountryMenuButton'), 'map', 'People without a birth country');
-  setButtonContent(document.querySelector('#duplicateFinderMenuButton'), 'search', 'Find duplicate people');
   setButtonContent(document.querySelector('#exitButton'), 'exit', 'Exit Kinship Atlas');
   setButtonContent(document.querySelector('#aboutMenuButton'), 'info', 'About Kinship Atlas');
-  setButtonContent(document.querySelector('#defaultsButton'), 'sliders', 'Update defaults');
+  updateDefaultsButton();
   setButtonContent(elements.updateAppButton, 'update', 'Check for application updates');
   syncMediaButton();
   setButtonContent(elements.clear, 'restart', 'Start Again');
@@ -12316,9 +12844,8 @@ This cannot be undone.`)) return;
     return changed;
   }
 
-  const mediaOrganiseButton = document.querySelector('#mediaOrganiseMenuButton');
+  // Opened from the Tree Maintenance page (Settings > Tree Maintenance).
   const mediaOrganiseDialog = mediaOrganiseDialogElement();
-  if (mediaOrganiseButton) mediaOrganiseButton.addEventListener('click', openMediaOrganiseDialog);
   if (mediaOrganiseDialog) {
     mediaOrganiseDialog.querySelector('#closeMediaOrganise').addEventListener('click', () => mediaOrganiseDialog.close());
     mediaOrganiseDialog.querySelector('#mediaOrganiseCheck').addEventListener('click', checkMediaOrganise);
@@ -12461,7 +12988,11 @@ This cannot be undone.`)) return;
       return {
         mediaPath: '',
         mediaFolder: state.mediaDirectoryHandle.name,
-        groups: core.groupDuplicates(files.map((file) => ({ ...file, personIds: organised.owners.get(file.key) || [] })), { heroKeys: [...heroKeys], eventKeys: [...eventKeys] }).map((group) => ({
+        groups: core.groupDuplicates(files.map((file) => ({ ...file, personIds: organised.owners.get(file.key) || [] })), {
+          heroKeys: [...heroKeys],
+          eventKeys: [...eventKeys],
+          archiveFolder: organised.archiveFolder
+        }).map((group) => ({
           hash: group.hash,
           bytes: group.bytes,
           protected: group.protected,
@@ -12695,18 +13226,19 @@ This cannot be undone.`)) return;
     const ui = duplicateElements();
     ui.list.replaceChildren();
     if (!groups.length) {
-      ui.summary.textContent = 'Scan complete: no duplicate images or PDFs found. Every file in the media folder differs from all the others.';
+      ui.summary.textContent = 'Scan complete: no duplicate images or PDFs found. No folder holds more than one copy of the same file.';
       showToast('Scan complete: no duplicate images or PDFs found.');
       return;
     }
     const extraCopies = groups.reduce((total, group) => total + group.files.length - 1, 0);
     const protectedGroups = groups.filter((group) => group.protected).length;
-    ui.summary.textContent = `${groups.length} group${groups.length === 1 ? '' : 's'} of identical files, ${extraCopies} extra cop${extraCopies === 1 ? 'y' : 'ies'}${protectedGroups ? `, ${protectedGroups} in use by a card image or life event so left alone` : ''}.`;
+    ui.summary.textContent = `${groups.length} group${groups.length === 1 ? '' : 's'} of identical files in the same folder, ${extraCopies} extra cop${extraCopies === 1 ? 'y' : 'ies'}${protectedGroups ? `, ${protectedGroups} in use by a card image or life event so left alone` : ''}.`;
     for (const group of groups) {
       const section = document.createElement('section');
       section.className = `duplicate-media-group${group.protected ? ' is-protected' : ''}`;
       const heading = document.createElement('h4');
-      heading.textContent = `${duplicateSize(group.bytes)} · ${group.files.length} copies${group.protected ? ' · in use, so it is left alone' : ''}`;
+      const where = duplicateFolderLabel(group.folder || group.keeper.folder || '');
+      heading.textContent = `${duplicateSize(group.bytes)} · ${group.files.length} copies in ${where}${group.protected ? ' · in use, so it is left alone' : ''}`;
       section.append(heading);
       for (const file of group.files) {
         const row = document.createElement('label');
@@ -12848,7 +13380,7 @@ This cannot be undone.`)) return;
     duplicateSelected.clear();
     ui.list.replaceChildren();
     ui.archive.value = 'Archive';
-    ui.summary.textContent = 'Looks for exact copies (the same bytes, any file name) among the images and PDFs in the media folder.';
+    ui.summary.textContent = 'Looks for exact copies (the same bytes, any file name) sitting in the same folder: duplicate copies in a person\'s own folder, in the media folder root and in the archive folder are reported.';
     ui.status.replaceChildren();
     ui.applyDelete.disabled = true;
     ui.applyArchive.disabled = true;
@@ -12863,9 +13395,8 @@ This cannot be undone.`)) return;
     showModalFocused(ui.dialog);
   }
 
-  const duplicateMenuButton = document.querySelector('#duplicateMediaMenuButton');
+  // Opened from the Tree Maintenance page (Settings > Tree Maintenance).
   const duplicateDialog = document.querySelector('#duplicateMediaDialog');
-  if (duplicateMenuButton) duplicateMenuButton.addEventListener('click', openDuplicateMediaDialog);
   if (duplicateDialog) {
     duplicateDialog.querySelector('#closeDuplicateMedia').addEventListener('click', () => duplicateDialog.close());
     duplicateDialog.querySelector('#duplicateMediaScanButton').addEventListener('click', scanDuplicateMedia);
@@ -13123,15 +13654,1753 @@ function openOrphanRecordsDialog() {
   showModalFocused(ui.dialog);
 }
 
-const orphanMenuButton = document.querySelector('#orphanRecordsMenuButton');
+// Opened from the Tree Maintenance page (Settings > Tree Maintenance).
 const orphanDialog = document.querySelector('#orphanRecordsDialog');
-if (orphanMenuButton) orphanMenuButton.addEventListener('click', openOrphanRecordsDialog);
 if (orphanDialog) {
   orphanDialog.querySelector('#closeOrphanRecords').addEventListener('click', () => orphanDialog.close());
   orphanDialog.querySelector('#orphanRecordsScanButton').addEventListener('click', scanOrphanRecords);
   orphanDialog.querySelector('#orphanRecordsDeleteButton').addEventListener('click', deleteSelectedOrphanRecords);
   orphanDialog.querySelector('#orphanRecordsSelectAll').addEventListener('change', (event) => toggleOrphanSelectAll(event.target.checked));
 }
+// ---------------------------------------------------------------------------
+// 19. Tree Maintenance: the Settings > Tree Maintenance dashboard
+// ---------------------------------------------------------------------------
+// One workspace for every cleanup, repair and verification tool. The page
+// replaces the contents of the main panel (see setTreeMaintenanceMode in
+// module 10) and groups the tools into Data Quality, Media Maintenance, Tree
+// Repair, Optimisation and Statistics.
+//
+// Every card is one tool: icon, title, description, its latest result and a
+// single action button that opens that tool's dialog. Nothing here edits
+// GEDCOM data itself; each dialog owns its own edits and saves.
+
+const treeMaintenanceStats = { orphans: null, duplicates: null, relations: null, countries: null, mediaValidation: null };
+// Per-card result line for the media tools, which report folder-level counts.
+const treeMaintenanceMediaNotes = { organise: '', duplicates: '' };
+const treeMaintenanceActionLabels = new Map();
+let treeMaintenanceScanRunning = false;
+
+// The checks stay in the order the workspace presents them. Each one pairs a
+// label and wording with the dialog that resolves its findings, so a result row
+// can open the tool that fixes what it counted.
+const treeMaintenanceScans = {
+  orphans: { label: 'Orphan records', result: (n) => `${n.toLocaleString()} orphan record${n === 1 ? '' : 's'}`, run: () => findOrphanRecords().length, open: openOrphanRecordsDialog, action: 'Review records' },
+  countries: { label: 'Missing birth countries', result: (n) => `${n.toLocaleString()} ${n === 1 ? 'person' : 'people'} missing a country`, run: () => peopleWithoutBirthCountry().length, open: openBirthCountryDialog, action: 'Review people' },
+  duplicates: { label: 'Duplicate people', result: (n) => `${n.toLocaleString()} possible duplicate pair${n === 1 ? '' : 's'}`, run: () => findDuplicates(treeMaintenanceDuplicateThreshold()).length, open: openDuplicateFinder, action: 'Review matches' },
+  relations: { label: 'Duplicate relationships', result: (n) => `${n.toLocaleString()} duplicated link${n === 1 ? '' : 's'}`, run: () => findDuplicateRelationships().length, open: openDuplicateRelationFinder, action: 'Review links' }
+};
+
+// The threshold the duplicate-people dialog opens with; a scan uses the same
+// value so the card's count matches what the dialog will list.
+const treeMaintenanceDuplicateThreshold = () => Number(document.querySelector('#duplicateThreshold')?.value) || 60;
+
+function treeMaintenanceElements() {
+  return {
+    view: document.querySelector('#treeMaintenanceView'),
+    overviewGrid: document.querySelector('#maintenanceOverviewGrid'),
+    overviewStatus: document.querySelector('#maintenanceOverviewStatus'),
+    dataQuality: document.querySelector('#maintenanceDataQualityCards'),
+    media: document.querySelector('#maintenanceMediaCards'),
+    repair: document.querySelector('#maintenanceRepairCards'),
+    optimise: document.querySelector('#maintenanceOptimiseCards'),
+    statistics: document.querySelector('#maintenanceStatistics'),
+    fileName: document.querySelector('#treeMaintenanceFileName')
+  };
+}
+
+// ---------- Counting (reuses the dialogs' own finders) ----------
+
+// Every distinct media path any person or family event points at. The linked
+// folder contributes the files themselves: the folder handle's index when the
+// folder is open in this tab, else the files picked through the browser's
+// media input (which only records images).
+function treeMaintenanceMediaEntries() {
+  const entries = new Set();
+  // The folder index maps both a bare name and a relative path to the same
+  // File, so files themselves are counted, not index keys.
+  const files = new Set();
+  for (const [key, matches] of state.mediaIndex?.byName || []) {
+    if (!matches?.length) { entries.add(key); continue; }
+    for (const file of matches) files.add(file);
+  }
+  for (const file of files) entries.add(state.mediaRelativePaths.get(file) || file.name);
+  for (const relativePath of state.folderMediaFiles?.keys() || []) entries.add(relativePath);
+  return entries;
+}
+
+function treeMaintenanceMediaStatistics() {
+  const entries = treeMaintenanceMediaEntries();
+  let images = 0;
+  for (const relativePath of entries) {
+    if (/\.(avif|bmp|gif|jpe?g|png|webp)$/i.test(relativePath)) images += 1;
+  }
+  return { total: entries.size, images };
+}
+
+function treeMaintenanceIsMediaLinked() {
+  return Boolean(state.mediaDirectoryHandle || state.rememberedMediaDirectoryHandle || state.mediaFolderPicked
+    || (state.folderMediaFiles && state.folderMediaFiles.size) || state.mediaIndex);
+}
+
+// Distinct recorded place names (birth, death and every other life event plus
+// marriage and divorce places), case-folded so spellings differing only in
+// case still count once.
+function treeMaintenanceLocationCount() {
+  const places = new Set();
+  const add = (place) => {
+    const clean = (place || '').trim().toLocaleLowerCase();
+    if (clean) places.add(clean);
+  };
+  for (const person of state.people.values()) {
+    for (const event of person.events) add(event.place);
+  }
+  for (const family of state.families.values()) {
+    add(family.marriage?.place);
+    add(family.divorce?.place);
+  }
+  return places.size;
+}
+
+function treeMaintenanceSnapshot() {
+  const media = treeMaintenanceMediaStatistics();
+  let attachments = 0;
+  for (const person of state.people.values()) attachments += person.mediaPaths.length;
+  return {
+    people: state.people.size,
+    families: state.families.size,
+    mediaFiles: media.total,
+    images: media.images,
+    attachments,
+    locations: treeMaintenanceLocationCount(),
+    sources: state.sources.size
+  };
+}
+
+// ---------- Rendering ----------
+
+function treeMaintenanceResultText(key) {
+  const value = treeMaintenanceStats[key];
+  if (value === null || value === undefined) return 'Not scanned yet.';
+  return `Last scan: ${treeMaintenanceScans[key].result(value)}`;
+}
+
+// The Media Validation card's result line: one number, or the three kinds.
+function treeMaintenanceValidationStatus() {
+  const value = treeMaintenanceStats.mediaValidation;
+  if (value === null || value === undefined) return 'Not scanned yet.';
+  if (!value) return 'Last scan: no problems found';
+  return `Last scan: ${value.toLocaleString()} problem${value === 1 ? '' : 's'} found`;
+}
+
+// One tool card: icon, title, description, latest result and one action.
+// `open` receives the card's action button so it can show progress on it.
+function treeMaintenanceCard({ icon, title, description, status = '', open, actionLabel = 'Run scan', enabled = true }) {
+  const card = document.createElement('article');
+  card.className = 'maintenance-card';
+  const head = document.createElement('div');
+  head.className = 'maintenance-card-head';
+  const badge = document.createElement('span');
+  badge.className = 'maintenance-card-icon';
+  badge.setAttribute('aria-hidden', 'true');
+  badge.append(createButtonIcon(icon));
+  const heading = document.createElement('h3');
+  heading.className = 'maintenance-card-title';
+  heading.textContent = title;
+  head.append(badge, heading);
+  const body = document.createElement('p');
+  body.className = 'maintenance-card-description';
+  body.textContent = description;
+  const statusLine = document.createElement('p');
+  statusLine.className = 'maintenance-card-status';
+  statusLine.textContent = status;
+  statusLine.dataset.maintenanceStatus = icon;
+  card.append(head, body, statusLine);
+  if (open) {
+    const button = document.createElement('button');
+    button.className = 'button button-secondary maintenance-card-action';
+    button.type = 'button';
+    button.disabled = !enabled;
+    setButtonContent(button, 'scanFace', actionLabel);
+    treeMaintenanceActionLabels.set(button, actionLabel);
+    button.addEventListener('click', () => open(button));
+    card.append(button);
+  } else {
+    const note = document.createElement('span');
+    note.className = 'maintenance-card-future';
+    note.textContent = 'Coming soon';
+    card.append(note);
+  }
+  return card;
+}
+
+// Opens a tool's dialog, shows progress on the card's own button while it is
+// open, then refreshes the affected counts once the user closes it. The whole
+// workspace is re-rendered on close, so a card's button and result line can
+// never keep the progress label or a stale count.
+function treeMaintenanceOpenTool(button, open, rescans = []) {
+  if (button.disabled) return;
+  const label = treeMaintenanceActionLabels.get(button) || 'Run scan';
+  const before = new Set([...document.querySelectorAll('dialog')].filter((item) => item.open));
+  open();
+  const dialog = [...document.querySelectorAll('dialog')].find((item) => item.open && !before.has(item));
+  if (!dialog) {
+    treeMaintenanceRefresh(rescans);
+    return;
+  }
+  setButtonContent(button, 'scanFace', 'Open…');
+  button.disabled = true;
+  dialog.addEventListener('close', () => {
+    if (state.treeMaintenanceMode) {
+      treeMaintenanceRefresh(rescans);
+    } else {
+      button.disabled = false;
+      setButtonContent(button, 'scanFace', label);
+    }
+  }, { once: true });
+}
+
+async function treeMaintenanceRefresh(keys = []) {
+  if (!state.people.size) return;
+  for (const key of keys) {
+    const scan = treeMaintenanceScans[key];
+    if (!scan) continue;
+    try { treeMaintenanceStats[key] = scan.run(); } catch { treeMaintenanceStats[key] = null; }
+  }
+  if (state.treeMaintenanceMode) renderTreeMaintenance();
+}
+
+function renderTreeMaintenanceOverview(snapshot, hasMedia) {
+  const ui = treeMaintenanceElements();
+  const unknown = 'Not scanned yet. Run a scan to fill this in.';
+  const tiles = [
+    { label: 'People', value: snapshot.people, hint: 'People recorded in this tree.' },
+    { label: 'Families', value: snapshot.families, hint: 'Family records linking parents, spouses and children.' },
+    { label: 'Locations', value: snapshot.locations, hint: 'Distinct places named by life events.' },
+    { label: 'Media', value: hasMedia ? snapshot.mediaFiles : null, hint: hasMedia ? 'Files found in the linked media folder.' : 'Link a media folder to count its files.' },
+    { label: 'Potential duplicates', value: treeMaintenanceStats.duplicates, hint: treeMaintenanceStats.duplicates === null ? unknown : 'Pairs at or above the duplicate score threshold.' },
+    { label: 'Orphan records', value: treeMaintenanceStats.orphans, hint: treeMaintenanceStats.orphans === null ? unknown : 'People with no parent, child, spouse or sibling link.' }
+  ];
+  ui.overviewGrid.replaceChildren();
+  for (const tile of tiles) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'maintenance-overview-tile';
+    wrapper.title = tile.hint;
+    const term = document.createElement('dt');
+    term.textContent = tile.label;
+    const value = document.createElement('dd');
+    const known = tile.value !== null && tile.value !== undefined;
+    value.textContent = known ? tile.value.toLocaleString() : '—';
+    if (!known) value.classList.add('is-unknown');
+    wrapper.append(term, value);
+    ui.overviewGrid.append(wrapper);
+  }
+  const scanned = treeMaintenanceStats.orphans !== null;
+  ui.overviewStatus.textContent = treeMaintenanceScanRunning
+    ? 'Running checks…'
+    : scanned ? `Checked · ${treeMaintenanceStats.orphans.toLocaleString()} orphan${treeMaintenanceStats.orphans === 1 ? '' : 's'} · ${treeMaintenanceStats.duplicates.toLocaleString()} possible duplicate pair${treeMaintenanceStats.duplicates === 1 ? '' : 's'}`
+      : 'Checks have not run yet. Use Smart Cleanup to scan everything at once.';
+  ui.fileName.textContent = state.fileName || 'No tree loaded';
+}
+
+function renderTreeMaintenanceStatistics(snapshot, hasMedia) {
+  const ui = treeMaintenanceElements();
+  const tiles = [
+    { label: 'Total people', value: snapshot.people },
+    { label: 'Families', value: snapshot.families },
+    { label: 'Media records', value: hasMedia ? snapshot.mediaFiles : null },
+    { label: 'Locations', value: snapshot.locations },
+    { label: 'Sources', value: snapshot.sources },
+    { label: 'Orphans', value: treeMaintenanceStats.orphans },
+    { label: 'Possible duplicates', value: treeMaintenanceStats.duplicates }
+  ];
+  ui.statistics.replaceChildren();
+  for (const tile of tiles) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'maintenance-statistic';
+    const term = document.createElement('dt');
+    term.textContent = tile.label;
+    const value = document.createElement('dd');
+    value.textContent = tile.value === null || tile.value === undefined ? '—' : tile.value.toLocaleString();
+    wrapper.append(term, value);
+    ui.statistics.append(wrapper);
+  }
+}
+
+function renderTreeMaintenance() {
+  const ui = treeMaintenanceElements();
+  if (!ui.view) return;
+  const hasTree = state.people.size > 0;
+  const mediaLinked = treeMaintenanceIsMediaLinked();
+  const snapshot = treeMaintenanceSnapshot();
+
+  renderTreeMaintenanceOverview(snapshot, mediaLinked);
+
+  ui.dataQuality.replaceChildren(
+    treeMaintenanceCard({
+      icon: 'orphan',
+      title: 'Orphan Records',
+      description: 'Records not connected to the family tree. Lists people with no parent, child, spouse or sibling link so they can be reviewed or removed.',
+      status: treeMaintenanceResultText('orphans'),
+      open: (button) => treeMaintenanceOpenTool(button, openOrphanRecordsDialog, ['orphans', 'relations']),
+      enabled: hasTree
+    }),
+    treeMaintenanceCard({
+      icon: 'map',
+      title: 'Missing Birth Country',
+      description: 'People lacking a birth country. Correct the birth location so flags, maps and reports can place each person.',
+      status: treeMaintenanceResultText('countries'),
+      open: (button) => treeMaintenanceOpenTool(button, openBirthCountryDialog, ['countries']),
+      actionLabel: 'Review people',
+      enabled: hasTree
+    }),
+    treeMaintenanceCard({
+      icon: 'search',
+      title: 'Duplicate People',
+      description: 'Finds individuals that may refer to the same person and offers to merge or delete the extra record.',
+      status: treeMaintenanceResultText('duplicates'),
+      open: (button) => treeMaintenanceOpenTool(button, openDuplicateFinder, ['duplicates']),
+      actionLabel: 'Review matches',
+      enabled: hasTree
+    }),
+    treeMaintenanceCard({
+      icon: 'duplicateRelation',
+      title: 'Duplicate Relationships',
+      description: 'Locates duplicate parent-child or spouse links, including redundant back references and twin family records.',
+      status: treeMaintenanceResultText('relations'),
+      open: (button) => treeMaintenanceOpenTool(button, openDuplicateRelationFinder, ['relations']),
+      actionLabel: 'Review links',
+      enabled: hasTree
+    })
+  );
+
+  ui.media.replaceChildren(
+    treeMaintenanceCard({
+      icon: 'organise',
+      title: 'Organise Media Files',
+      description: 'Move media into the preferred folder structure, one folder per person, copy files shared by several people and archive files nobody uses.',
+      status: !mediaLinked ? 'No media folder linked yet. Choose one under Update Defaults or with Select Media Folder.'
+        : treeMaintenanceMediaNotes.organise || `${snapshot.images.toLocaleString()} image${snapshot.images === 1 ? '' : 's'} · ${snapshot.attachments.toLocaleString()} person attachment${snapshot.attachments === 1 ? '' : 's'}`,
+      open: (button) => treeMaintenanceOpenTool(button, openMediaOrganiseDialog),
+      actionLabel: 'Open organiser',
+      enabled: mediaLinked
+    }),
+    treeMaintenanceCard({
+      icon: 'media',
+      title: 'Find Duplicate Images',
+      description: 'Detect duplicate images: two or more copies of one file inside the same folder, whether a person\'s own folder, the media folder root or the archive folder.',
+      status: !mediaLinked ? 'No media folder linked yet.' : treeMaintenanceMediaNotes.duplicates || 'Compares the contents of every image and PDF.',
+      open: (button) => treeMaintenanceOpenTool(button, openDuplicateMediaDialog),
+      actionLabel: 'Open finder',
+      enabled: mediaLinked
+    }),
+    treeMaintenanceCard({
+      icon: 'checkFolder',
+      title: 'Media Validation',
+      description: 'Check every file path recorded in the GEDCOM and report the ones that are missing, invalid or point at nothing in the media folder.',
+      status: treeMaintenanceValidationStatus(),
+      open: (button) => treeMaintenanceOpenTool(button, openMediaValidationDialog, ['mediaValidation']),
+      actionLabel: 'Scan media',
+      enabled: hasTree
+    })
+  );
+
+  ui.repair.replaceChildren(
+    treeMaintenanceCard({
+      icon: 'sliders',
+      title: 'Update Defaults',
+      description: 'Apply current default settings to existing records: choose the GEDCOM file and media folder that open automatically.',
+      status: state.defaultRecord ? 'Defaults are set.' : 'No defaults saved yet.',
+      open: (button) => treeMaintenanceOpenTool(button, openDefaultsDialog),
+      actionLabel: 'Open defaults'
+    }),
+    treeMaintenanceCard({
+      icon: 'media',
+      title: 'Media Library',
+      description: 'Review every attached image and document, reclassify files in bulk and update profile images.',
+      status: `${snapshot.attachments.toLocaleString()} attachment${snapshot.attachments === 1 ? '' : 's'} across ${snapshot.people.toLocaleString()} people.`,
+      open: () => { setTreeMaintenanceMode(false); setMediaLibraryMode(true); },
+      actionLabel: 'Open library',
+      enabled: hasTree || mediaLinked
+    })
+  );
+
+  ui.optimise.replaceChildren(treeMaintenanceSmartCleanupCard(hasTree));
+  renderTreeMaintenanceStatistics(snapshot, mediaLinked);
+}
+
+// Smart Cleanup: one button instead of four, running every check and showing a
+// summary that can be expanded into the individual results. Each result's count
+// is a button that opens the tool which resolves that finding.
+const treeMaintenanceSmartState = { summary: '', results: [], open: false };
+
+function treeMaintenanceSmartCleanupCard(hasTree) {
+  const card = document.createElement('article');
+  card.className = 'maintenance-card maintenance-card-wide';
+  const head = document.createElement('div');
+  head.className = 'maintenance-card-head';
+  const badge = document.createElement('span');
+  badge.className = 'maintenance-card-icon';
+  badge.setAttribute('aria-hidden', 'true');
+  badge.append(createButtonIcon('dna'));
+  const heading = document.createElement('h3');
+  heading.className = 'maintenance-card-title';
+  heading.textContent = 'Smart Cleanup';
+  head.append(badge, heading);
+  const body = document.createElement('p');
+  body.className = 'maintenance-card-description';
+  body.textContent = 'Runs every check in one pass: orphan records, duplicate people, duplicate relationships and missing birth countries. Choose a count to open the tool that fixes those findings.';
+  const actions = document.createElement('div');
+  actions.className = 'maintenance-card-actions';
+  const run = document.createElement('button');
+  run.className = 'button button-secondary maintenance-smart-run';
+  run.type = 'button';
+  run.disabled = !hasTree || treeMaintenanceScanRunning;
+  setButtonContent(run, 'scanFace', 'Run Scan');
+  const summary = document.createElement('p');
+  summary.className = 'maintenance-smart-summary';
+  summary.setAttribute('role', 'status');
+  summary.textContent = treeMaintenanceSmartState.summary
+    || (!hasTree ? 'Open a GEDCOM first.' : treeMaintenanceStats.orphans !== null ? treeMaintenanceSmartSummary(hasTree) : 'Choose Run Scan to check everything at once.');
+  const results = document.createElement('div');
+  results.className = 'maintenance-smart-results';
+  results.hidden = !treeMaintenanceSmartState.results.length;
+  results.append(...treeMaintenanceSmartState.results);
+
+  run.addEventListener('click', async () => {
+    if (!hasTree || treeMaintenanceScanRunning) return;
+    treeMaintenanceScanRunning = true;
+    run.disabled = true;
+    setButtonContent(run, 'scanFace', 'Scanning…');
+    summary.textContent = 'Checking the tree…';
+    treeMaintenanceSmartState.results = [];
+    // Paint the running state before the synchronous scans begin.
+    await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+    for (const [key, scan] of Object.entries(treeMaintenanceScans)) {
+      try { treeMaintenanceStats[key] = scan.run(); } catch { treeMaintenanceStats[key] = null; }
+    }
+    treeMaintenanceScanRunning = false;
+    treeMaintenanceSmartState.summary = treeMaintenanceSmartSummary(hasTree);
+    treeMaintenanceSmartState.results = treeMaintenanceSmartRows();
+    // Re-render the whole workspace with the new counts and results in place.
+    renderTreeMaintenance();
+  });
+
+  actions.append(run);
+  card.append(head, body, actions, summary, results);
+  return card;
+}
+
+function treeMaintenanceSmartSummary(hasTree) {
+  const rows = Object.entries(treeMaintenanceScans)
+    .map(([key, scan]) => ({ key, scan, value: treeMaintenanceStats[key] }))
+    .filter((row) => row.value !== null && row.value !== undefined);
+  if (!rows.length) return 'Choose Run Scan to check everything at once.';
+  if (!hasTree) return 'Open a GEDCOM first.';
+  const found = rows.reduce((total, row) => total + row.value, 0);
+  return found
+    ? `Scan complete: ${found.toLocaleString()} finding${found === 1 ? '' : 's'} to review across ${rows.filter((row) => row.value).length} check${rows.filter((row) => row.value).length === 1 ? '' : 's'}.`
+    : 'Scan complete: no problems found.';
+}
+
+function treeMaintenanceSmartRows() {
+  return Object.entries(treeMaintenanceScans).map(([key, scan]) => {
+    const value = treeMaintenanceStats[key];
+    const hasFindings = Boolean(value);
+    const row = document.createElement('div');
+    row.className = `maintenance-smart-result${hasFindings ? ' is-flagged' : ''}`;
+    const label = document.createElement('span');
+    label.className = 'maintenance-smart-result-label';
+    label.textContent = scan.label;
+    const count = document.createElement('span');
+    count.className = `maintenance-smart-result-count${hasFindings ? ' is-flagged' : ''}`;
+    count.textContent = value === null || value === undefined ? 'Not run' : `${value.toLocaleString()} found`;
+    const detail = document.createElement('span');
+    detail.className = 'maintenance-smart-result-detail';
+    detail.textContent = value === null || value === undefined
+      ? 'This check could not run on the open tree.'
+      : value === 0 ? 'Nothing to fix here.' : `${scan.result(value)} to review.`;
+    row.append(label, count, detail);
+    // The count opens the tool that fixes what it counted.
+    if (hasFindings) {
+      const open = document.createElement('button');
+      open.className = 'button button-secondary maintenance-smart-result-open';
+      open.type = 'button';
+      open.dataset.maintenanceOpen = key;
+      setButtonContent(open, 'edit', scan.action);
+      open.addEventListener('click', () => treeMaintenanceOpenTool(open, scan.open, [key]));
+      row.append(open);
+    } else {
+      const spacer = document.createElement('span');
+      row.append(spacer);
+    }
+    return row;
+  });
+}
+
+// ---------- Wiring ----------
+
+window.KinshipTreeMaintenance = {
+  open: () => {
+    setSettingsOpen(false);
+    setTreeMaintenanceMode(true);
+    if (state.treeMaintenanceMode) renderTreeMaintenance();
+  },
+  close: () => setTreeMaintenanceMode(false),
+  refresh: () => treeMaintenanceRefresh(Object.keys(treeMaintenanceScans)),
+  stats: treeMaintenanceStats
+};
+
+// Settings > Tree Maintenance is the only place these tools live now: the
+// legacy Tree Management submenu was retired once the workspace covered every
+// tool it held.
+//
+// The click is handled once, by delegation from the Settings panel, so a menu
+// that is ever rebuilt cannot leave the entry dead, and a second listener can
+// never toggle the dashboard twice. window.KinshipTreeMaintenance.open() is the
+// same entry point for anything that opens the page another way.
+function openTreeMaintenanceFromMenu() {
+  setSettingsOpen(false);
+  setTreeMaintenanceMode(true);
+  if (!state.treeMaintenanceMode) return;
+  // Re-render once the menu has closed, so the page is drawn on screen rather
+  // than built while its panel is still being shuffled.
+  window.requestAnimationFrame(() => {
+    if (state.treeMaintenanceMode) renderTreeMaintenance();
+  });
+}
+
+const treeMaintenanceMenuButton = document.querySelector('#treeMaintenanceMenuButton');
+if (treeMaintenanceMenuButton) {
+  treeMaintenanceMenuButton.dataset.treeMaintenance = 'entry';
+}
+const settingsPanelElement = document.querySelector('#settingsPanel');
+if (settingsPanelElement) {
+  settingsPanelElement.addEventListener('click', (event) => {
+    if (!event.target.closest?.('#treeMaintenanceMenuButton')) return;
+    // The menu's own close-on-click handler runs on a timeout; opening here
+    // first means the order is always "close menu, then show page".
+    event.stopPropagation();
+    window.setTimeout(openTreeMaintenanceFromMenu, 0);
+  });
+}
+const treeMaintenanceBackButton = document.querySelector('#treeMaintenanceBackButton');
+if (treeMaintenanceBackButton) {
+  treeMaintenanceBackButton.addEventListener('click', () => setTreeMaintenanceMode(false));
+  setButtonContent(treeMaintenanceBackButton, 'tree', 'Back to tree');
+}
+
+// Historic City Names List and Select Map Provider sit directly under Settings;
+// both drive exactly the state the legacy items use, so switching provider here
+// changes every place link in the app.
+const gazetteerTopMenuButton = document.querySelector('#gazetteerTopMenuButton');
+if (gazetteerTopMenuButton) {
+  gazetteerTopMenuButton.addEventListener('click', () => {
+    setSettingsOpen(false);
+    window.KinshipHistoricalGazetteer?.openDialog?.();
+  });
+}
+if (typeof setPreferredMapProvider === 'function' && typeof preferredMapProvider === 'function') {
+  const providerSelect = document.querySelector('#mapProviderTopSelect');
+  const syncProvider = () => { if (providerSelect) providerSelect.value = preferredMapProvider(); };
+  syncProvider();
+  if (providerSelect) {
+    providerSelect.addEventListener('change', () => {
+      setPreferredMapProvider(providerSelect.value);
+      syncProvider();
+      refreshMapProviderLabels();
+      showToast(`Place links now open in ${providerSelect.selectedOptions[0].textContent}.`);
+    });
+  }
+}
+
+// The media tools report their own folder-level results when they close.
+const duplicateMediaToolDialog = document.querySelector('#duplicateMediaDialog');
+if (duplicateMediaToolDialog) {
+  duplicateMediaToolDialog.addEventListener('close', () => {
+    const summary = document.querySelector('#duplicateMediaSummary')?.textContent || '';
+    if (summary) treeMaintenanceMediaNotes.duplicates = summary;
+    if (state.treeMaintenanceMode) renderTreeMaintenance();
+  });
+}
+const mediaOrganiseToolDialog = document.querySelector('#mediaOrganiseDialog');
+if (mediaOrganiseToolDialog) {
+  mediaOrganiseToolDialog.addEventListener('close', () => {
+    const status = document.querySelector('#mediaOrganiseStatus')?.textContent || '';
+    if (status) treeMaintenanceMediaNotes.organise = status;
+    if (state.treeMaintenanceMode) renderTreeMaintenance();
+  });
+}
+// ---------------------------------------------------------------------------
+// 20. Media validation (missing files, invalid paths, broken links)
+// ---------------------------------------------------------------------------
+// Checks every media path recorded in the GEDCOM against the files in the
+// linked media folder and sorts the findings into three kinds:
+//
+//   missing  a path that points at a file the media folder does not contain
+//   invalid  a path the app cannot safely link to the folder: empty, a web or
+//            network address, or an absolute path outside the media folder
+//   broken   a reference that resolves to no file in the folder (a FILE line
+//            the app's own media resolver cannot open)
+//
+// The scan only reads. Nothing here edits the tree, so the same report can be
+// produced from the maintenance workspace and from anywhere else that calls
+// window.KinshipMediaValidation.scan().
+
+const mediaValidationKinds = {
+  missing: { label: 'Missing files', description: 'Recorded in the GEDCOM and a supported attachment type, but not found in the media folder.', icon: 'folder' },
+  invalid: { label: 'Invalid paths', description: 'A path the app cannot link to a file in the media folder.', icon: 'info' },
+  unsupported: { label: 'Unsupported types', description: 'A file type Kinship Atlas does not handle yet. These are listed for reference and are never counted as missing files.', icon: 'document' },
+  broken: { label: 'Unchecked links', description: 'No media folder is linked, so nothing can confirm these files exist.', icon: 'duplicateRelation' }
+};
+
+let mediaValidationFindings = [];
+let mediaValidationBusy = false;
+let mediaValidationSummaryText = '';
+
+function mediaValidationElements() {
+  const dialog = document.querySelector('#mediaValidationDialog');
+  return {
+    dialog,
+    summary: dialog.querySelector('#mediaValidationSummary'),
+    summaryBox: dialog.querySelector('#mediaValidationSummaryBox'),
+    search: dialog.querySelector('#mediaValidationSearch'),
+    list: dialog.querySelector('#mediaValidationList'),
+    status: dialog.querySelector('#mediaValidationStatus'),
+    count: dialog.querySelector('#mediaValidationCount'),
+    scan: dialog.querySelector('#mediaValidationScanButton')
+  };
+}
+
+// True for a path that cannot be a file in the media folder, with the reason.
+// A web address is recognised by its scheme. A rooted path ("C:\...",
+// "\\server\share", "/home/...") still works when its last part names a file
+// the media folder holds, which is what repointGedcomFiles and
+// resolveMediaFile do; only a rooted path that names nothing in the folder is
+// invalid.
+function mediaValidationPathProblem(path, knownNames) {
+  const raw = String(path || '').trim().replace(/^"(.*)"$/, '$1').trim();
+  if (!raw) return 'The path is empty, so no file can be opened.';
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) || /^www\./i.test(raw)) return 'The path is a web address, not a file in the media folder.';
+  const windowsRooted = /^[a-z]:[\\/]/i.test(raw);
+  const uncRooted = /^\\\\[^\\]+\\/.test(raw);
+  const posixRooted = /^\/(?!\/)/.test(raw) && !/^\/media\//i.test(raw);
+  if (!windowsRooted && !uncRooted && !posixRooted) return '';
+  const segments = raw.replace(/\\/g, '/').split('/').filter(Boolean);
+  const fileName = segments.at(-1) || '';
+  if (!fileName) return 'The path names a folder, not a file.';
+  if (knownNames.has(fileName.toLocaleLowerCase())) return '';
+  return 'The path points outside the media folder and no file with that name is in it.';
+}
+
+// The last path segment, used as a finding's file name. A recorded path may be
+// quoted or use backslashes, so it is split the same way the resolver does.
+function mediaValidationFileName(path) {
+  const segments = String(path || '').trim().replace(/^"|"$/g, '').replace(/\\/g, '/').split('/');
+  return segments[segments.length - 1] || '';
+}
+
+// Every file name the media folder holds, lower-cased: the folder handle's
+// index when the folder is open in this tab, otherwise the helper's listing.
+function mediaValidationKnownNames() {
+  const names = new Set();
+  for (const [name, files] of state.mediaIndex?.byName || []) {
+    if (files?.length) names.add(String(name).toLocaleLowerCase());
+  }
+  for (const relativePath of state.folderMediaFiles?.keys() || []) {
+    const name = relativePath.split('/').at(-1);
+    if (name) names.add(name.toLocaleLowerCase());
+  }
+  return names;
+}
+
+// Every media path the tree references: person attachments, life event media
+// on people and families, and paths held by "0 @X@ OBJE" records that a
+// pointer refers to. Each finding names the person (or family) it affects and
+// the life event it sits in, so it can be opened.
+function mediaValidationReferences() {
+  const references = [];
+  // The same path is often reached twice: once as a person's attachment and
+  // once as the FILE line inside their life event. The event is the more useful
+  // label, so it replaces the plain attachment rather than doubling the row.
+  const byKey = new Map();
+  const push = (path, owner, recordId, event) => {
+    if (!path) return;
+    const key = `${recordId}\u0000${normalizeMediaPath(path)}`;
+    const existing = byKey.get(key);
+    if (existing && !(event && !existing.event)) return;
+    byKey.set(key, { path, recordId, owner, event: event || '' });
+  };
+  for (const person of state.people.values()) {
+    for (const path of mediaPathsForPerson(person.id)) push(path, person.name, person.id, '');
+  }
+  // FILE lines inside a life event, which mediaPathsForPerson may not carry
+  // (a census scan, a wedding photo) and which name their event.
+  for (const record of state.gedcomRecords) {
+    if (record.tag !== 'INDI' && record.tag !== 'FAM') continue;
+    const person = record.tag === 'INDI' ? state.people.get(record.xref) : null;
+    const family = record.tag === 'FAM' ? state.families.get(record.xref) : null;
+    const owner = person ? person.name : family ? `Family ${[family.husbandId, family.wifeId].filter(Boolean).map((id) => state.people.get(id)?.name || `@${id}@`).join(' & ') || `@${record.xref}@`}` : `@${record.xref}@`;
+    const recordId = record.tag === 'INDI' ? record.xref : family?.husbandId || family?.wifeId || '';
+    let event = '';
+    for (const line of record.lines || []) {
+      const field = parseGedcomField(line);
+      if (!field) continue;
+      if (field.level === 1) event = eventTags.has(field.tag) ? field.tag : '';
+      if (field.tag !== 'FILE' || !field.value.trim()) continue;
+      push(field.value.trim(), owner, recordId, event);
+    }
+  }
+  // A top-level OBJE record holds the FILE paths its pointers stand for.
+  const objectFiles = mediaRecordFiles(state.gedcomRecords);
+  if (objectFiles.size) {
+    for (const record of state.gedcomRecords) {
+      if (record.tag !== 'INDI') continue;
+      const person = state.people.get(record.xref);
+      if (!person) continue;
+      for (const line of record.lines || []) {
+        const field = parseGedcomField(line);
+        if (field?.tag !== 'OBJE') continue;
+        const pointer = splitXref(field.value);
+        if (!pointer) continue;
+        for (const path of objectFiles.get(pointer) || []) push(path, person.name, person.id, '');
+      }
+    }
+  }
+  return [...byKey.values()];
+}
+
+// The scan itself: read-only, and usable without the dialog. A recorded path is
+// judged once, in this order:
+//   invalid  the path itself cannot be a file in the media folder
+//   missing  the path is usable but the linked folder holds no such file
+//   broken   no media folder is linked, so nothing can confirm the file exists;
+//            the path is reported as a link that cannot be checked
+function scanMediaValidation() {
+  if (!state.people.size) throw new Error('Open a GEDCOM first.');
+  const linked = treeMaintenanceIsMediaLinked();
+  const knownNames = mediaValidationKnownNames();
+  const byPath = new Map();
+  for (const reference of mediaValidationReferences()) {
+    const key = normalizeMediaPath(reference.path);
+    const mapKey = key || `\u0000empty:${reference.recordId}:${reference.event}`;
+    if (!byPath.has(mapKey)) byPath.set(mapKey, { reference, references: [] });
+    byPath.get(mapKey).references.push(reference);
+  }
+  const findings = [];
+  for (const entry of byPath.values()) {
+    const path = entry.reference.path;
+    const problem = mediaValidationPathProblem(path, knownNames);
+    let kind = '';
+    let detail = '';
+    if (problem) { kind = 'invalid'; detail = problem; }
+    else if (resolveMediaFile(path)) { continue; }
+    // An unsupported type is never a missing file: the app simply does not
+    // handle it, so it is reported separately and only for reference.
+    else if (!isSupportedAttachment(path)) { kind = 'unsupported'; detail = 'This file type is not supported yet, so it is not counted as missing.'; }
+    else if (linked) { kind = 'missing'; detail = 'The media folder has no file at this path.'; }
+    else { kind = 'broken'; detail = 'No media folder is linked, so this reference cannot be checked.'; }
+    // One row per reference, so every person affected is named.
+    for (const reference of entry.references) {
+      findings.push({
+        kind,
+        detail,
+        reference,
+        path: reference.path,
+        fileName: mediaValidationFileName(reference.path) || reference.path,
+        typeLabel: attachmentKindLabel(reference.path),
+        owner: reference.owner,
+        event: reference.event
+      });
+    }
+  }
+  findings.sort((left, right) => (left.fileName + left.path).localeCompare(right.fileName + right.path));
+  const counts = { missing: 0, invalid: 0, unsupported: 0, broken: 0 };
+  for (const finding of findings) counts[finding.kind] += 1;
+  return {
+    linked,
+    findings,
+    counts: {
+      ...counts,
+      records: new Set(findings.map((finding) => finding.reference.recordId)).size,
+      distinctPaths: byPath.size,
+      total: findings.length
+    }
+  };
+}
+
+function renderMediaValidation() {
+  const ui = mediaValidationElements();
+  const filter = normalizeDirectoryName(ui.search.value.trim());
+  const counts = { missing: 0, invalid: 0, unsupported: 0, broken: 0 };
+  for (const finding of mediaValidationFindings) counts[finding.kind] += 1;
+  const findings = filter
+    ? mediaValidationFindings.filter((finding) => normalizeDirectoryName(`${finding.path} ${finding.owner}`).includes(filter))
+    : mediaValidationFindings;
+  ui.summaryBox.hidden = false;
+  ui.summaryBox.replaceChildren();
+  for (const [kind, meta] of Object.entries(mediaValidationKinds)) {
+    const tile = document.createElement('div');
+    tile.className = `media-validation-tile${counts[kind] ? ' is-flagged' : ''}`;
+    const label = document.createElement('span');
+    label.className = 'media-validation-tile-label';
+    label.textContent = meta.label;
+    const value = document.createElement('strong');
+    value.className = 'media-validation-tile-value';
+    value.textContent = counts[kind].toLocaleString();
+    tile.append(label, value);
+    tile.title = meta.description;
+    ui.summaryBox.append(tile);
+  }
+  ui.count.textContent = mediaValidationFindings.length
+    ? `${findings.length.toLocaleString()} of ${mediaValidationFindings.length.toLocaleString()} shown`
+    : '';
+  ui.list.replaceChildren();
+  if (!mediaValidationFindings.length) {
+    const empty = document.createElement('div');
+    empty.className = 'duplicate-finder-empty';
+    empty.textContent = 'No problems found: every recorded media path points at a file in the media folder.';
+    ui.list.append(empty);
+    return;
+  }
+  if (!findings.length) {
+    const empty = document.createElement('div');
+    empty.className = 'duplicate-finder-empty';
+    empty.textContent = 'No finding matches this filter.';
+    ui.list.append(empty);
+    return;
+  }
+  for (const kind of Object.keys(mediaValidationKinds)) {
+    const group = findings.filter((finding) => finding.kind === kind);
+    if (!group.length) continue;
+    const section = document.createElement('section');
+    const heading = document.createElement('h4');
+    heading.className = 'media-validation-heading';
+    heading.textContent = `${mediaValidationKinds[kind].label} · ${group.length}`;
+    section.append(heading);
+    for (const finding of group) section.append(mediaValidationRow(finding));
+    ui.list.append(section);
+  }
+}
+
+function mediaValidationRow(finding) {
+  const row = document.createElement('div');
+  row.className = 'media-validation-row';
+  const file = document.createElement('span');
+  file.className = 'media-validation-file';
+  file.textContent = finding.fileName;
+  file.title = finding.path;
+  const where = document.createElement('span');
+  where.className = 'media-validation-where';
+  const event = finding.event ? eventNames[finding.event] || finding.event : '';
+  where.textContent = `${finding.owner}${event ? ` · ${event}` : ''}`;
+  const path = document.createElement('code');
+  path.className = 'media-validation-path';
+  path.textContent = finding.path || '(empty path)';
+  const detail = document.createElement('span');
+  detail.className = 'media-validation-detail';
+  detail.textContent = `${finding.typeLabel} · ${finding.detail}`;
+  const open = document.createElement('button');
+  open.className = 'dialog-button dialog-button-quiet media-validation-open';
+  open.type = 'button';
+  open.textContent = 'Open person';
+  open.disabled = !state.people.has(finding.reference.recordId);
+  open.addEventListener('click', () => {
+    const id = finding.reference.recordId;
+    mediaValidationElements().dialog.close();
+    setTreeMaintenanceMode(false);
+    setFocus(id, true);
+  });
+  row.append(file, where, path, detail, open);
+  return row;
+}
+
+function setMediaValidationBusy(on, text = 'Checking media paths…') {
+  const ui = mediaValidationElements();
+  ui.scan.disabled = Boolean(on);
+  ui.dialog.setAttribute('aria-busy', on ? 'true' : 'false');
+  ui.list.classList.toggle('is-busy', Boolean(on));
+  if (!on) {
+    ui.status.replaceChildren();
+    return;
+  }
+  const spinner = document.createElement('span');
+  spinner.className = 'media-scan-spinner media-organise-spinner';
+  spinner.setAttribute('aria-hidden', 'true');
+  ui.status.replaceChildren(spinner, document.createTextNode(text));
+}
+
+async function runMediaValidation() {
+  const ui = mediaValidationElements();
+  if (mediaValidationBusy) return;
+  mediaValidationBusy = true;
+  setButtonContent(ui.scan, 'scanFace', 'Scanning…');
+  setMediaValidationBusy(true);
+  try {
+    // Let the spinner paint before the synchronous scan runs.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const result = scanMediaValidation();
+    mediaValidationFindings = result.findings;
+    const total = result.counts.total;
+    ui.summary.textContent = !result.linked
+    const parts = [
+      result.counts.missing ? `${result.counts.missing.toLocaleString()} missing file${result.counts.missing === 1 ? '' : 's'}` : '',
+      result.counts.invalid ? `${result.counts.invalid.toLocaleString()} invalid path${result.counts.invalid === 1 ? '' : 's'}` : '',
+      result.counts.broken ? `${result.counts.broken.toLocaleString()} unchecked link${result.counts.broken === 1 ? '' : 's'}` : '',
+      result.counts.unsupported ? `${result.counts.unsupported.toLocaleString()} unsupported type${result.counts.unsupported === 1 ? '' : 's'} (not counted as missing)` : ''
+    ].filter(Boolean);
+    ui.summary.textContent = !result.linked
+      ? 'No media folder is linked, so the recorded paths are only checked for validity. Link a media folder to find missing files.'
+      : parts.length
+        ? `${total.toLocaleString()} finding${total === 1 ? '' : 's'}: ${parts.join(', ')}.`
+        : 'No problems found: every recorded path is a supported type and every file is in the media folder.';
+    ui.status.textContent = result.linked
+      ? `Checked against ${treeMaintenanceMediaEntries().size.toLocaleString()} file${treeMaintenanceMediaEntries().size === 1 ? '' : 's'} in the media folder.`
+      : '';
+    mediaValidationSummaryText = ui.status.textContent;
+    renderMediaValidation();
+    // Only real problems feed the workspace card: an unsupported type is not
+    // something the user can fix here.
+    treeMaintenanceStats.mediaValidation = result.counts.missing + result.counts.invalid + result.counts.broken;
+  } catch (error) {
+    mediaValidationFindings = [];
+    ui.summary.textContent = error?.message || 'The media paths could not be checked.';
+    ui.list.replaceChildren();
+    ui.summaryBox.hidden = true;
+    treeMaintenanceStats.mediaValidation = null;
+  } finally {
+    mediaValidationBusy = false;
+    setMediaValidationBusy(false);
+    // The busy state clears the status line, so the checked-file count is put
+    // back afterwards.
+    if (mediaValidationSummaryText) ui.status.textContent = mediaValidationSummaryText;
+    setButtonContent(ui.scan, 'scanFace', 'Scan media');
+    if (state.treeMaintenanceMode) renderTreeMaintenance();
+  }
+}
+
+function openMediaValidationDialog() {
+  const ui = mediaValidationElements();
+  if (!ui.dialog) return;
+  mediaValidationFindings = [];
+  mediaValidationSummaryText = '';
+  ui.search.value = '';
+  ui.list.replaceChildren();
+  ui.summaryBox.hidden = true;
+  ui.summaryBox.replaceChildren();
+  ui.count.textContent = '';
+  ui.status.replaceChildren();
+  ui.summary.textContent = 'Checks every media path recorded in the GEDCOM against the files in the linked media folder.';
+  if (!state.people.size) ui.summary.textContent = 'Open a GEDCOM first.';
+  setButtonContent(ui.scan, 'scanFace', 'Scan media');
+  ui.scan.disabled = false;
+  showModalFocused(ui.dialog);
+}
+
+window.KinshipMediaValidation = {
+  scan: scanMediaValidation,
+  open: openMediaValidationDialog,
+  findings: () => mediaValidationFindings
+};
+
+const mediaValidationDialog = document.querySelector('#mediaValidationDialog');
+if (mediaValidationDialog) {
+  mediaValidationDialog.querySelector('#closeMediaValidation').addEventListener('click', () => mediaValidationDialog.close());
+  mediaValidationDialog.querySelector('#mediaValidationScanButton').addEventListener('click', runMediaValidation);
+  mediaValidationDialog.querySelector('#mediaValidationSearch').addEventListener('input', renderMediaValidation);
+}
+// ---------------------------------------------------------------------------
+// 21. Attachment preview (text, safe HTML, and documents opened externally)
+// ---------------------------------------------------------------------------
+// One viewer for every attachment type the Media Library and the person record
+// can show:
+//
+//   image        the existing image view, unchanged
+//   pdf          the browser's own PDF viewer, unchanged
+//   text         the file's text inside a <pre>: never parsed as markup
+//   html         a sanitised, script-free rendering of the page
+//   word / rtf   no in-app renderer, so the file is opened in its default app
+//   tif / tiff   an image the browser cannot draw: shown with a type icon
+//
+// Sanitising is deliberately conservative: everything that can run or fetch is
+// removed, and the result is rendered inside a sandboxed iframe with no script
+// permission, so a hostile attachment cannot touch the tree.
+
+const attachmentPreviewMaxText = 2 * 1024 * 1024;
+const attachmentPreviewAllowedTags = new Set([
+  'a', 'abbr', 'b', 'blockquote', 'br', 'caption', 'center', 'cite', 'code', 'col', 'colgroup', 'dd', 'div', 'dl', 'dt',
+  'em', 'figcaption', 'figure', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img', 'li', 'ol', 'p', 'pre', 's',
+  'small', 'span', 'strike', 'strong', 'sub', 'sup', 'table', 'tbody', 'td', 'tfoot', 'th', 'thead', 'tr', 'u', 'ul'
+]);
+const attachmentPreviewDroppedTags = new Set([
+  'script', 'style', 'iframe', 'frame', 'frameset', 'object', 'embed', 'applet', 'form', 'input', 'button', 'select',
+  'textarea', 'option', 'link', 'meta', 'base', 'svg', 'math', 'audio', 'video', 'source', 'track', 'canvas', 'noscript',
+  'template', 'portal'
+]);
+const attachmentPreviewAllowedAttributes = new Set(['href', 'src', 'alt', 'title', 'colspan', 'rowspan', 'width', 'height', 'align']);
+
+// Removes everything that can execute or reach the network, keeping readable
+// structure. Unknown tags are unwrapped (their text is kept) so a document is
+// never blank because of one stray element.
+function sanitizeAttachmentHtml(source) {
+  const parsed = new DOMParser().parseFromString(String(source || ''), 'text/html');
+  const walk = (node) => {
+    for (const child of [...node.childNodes]) {
+      if (child.nodeType === Node.COMMENT_NODE) { child.remove(); continue; }
+      if (child.nodeType !== Node.ELEMENT_NODE) continue;
+      const tag = child.tagName.toLocaleLowerCase();
+      walk(child);
+      if (attachmentPreviewDroppedTags.has(tag)) { child.remove(); continue; }
+      if (!attachmentPreviewAllowedTags.has(tag)) {
+        child.replaceWith(...child.childNodes);
+        continue;
+      }
+      for (const attribute of [...child.attributes]) {
+        const name = attribute.name.toLocaleLowerCase();
+        const value = attribute.value || '';
+        if (!attachmentPreviewAllowedAttributes.has(name)) { child.removeAttribute(attribute.name); continue; }
+        if (name === 'href' || name === 'src') {
+          // Only same-folder relative paths and ordinary web links survive; a
+          // javascript:, data: or vbscript: address never reaches the viewer.
+          const safe = /^(https?:|mailto:|#)/i.test(value) || (!/^[a-z][a-z0-9+.-]*:/i.test(value) && !/^\s*javascript:/i.test(value));
+          if (!safe) child.removeAttribute(attribute.name);
+        }
+      }
+      if (tag === 'a' && child.getAttribute('href')) {
+        child.setAttribute('target', '_blank');
+        child.setAttribute('rel', 'noopener noreferrer');
+      }
+      if (tag === 'img') {
+        // A remote image is a network fetch the user did not ask for.
+        const src = child.getAttribute('src') || '';
+        if (!src || /^(data|javascript|vbscript):/i.test(src)) child.remove();
+      }
+    }
+  };
+  walk(parsed.body);
+  return parsed.body.innerHTML;
+}
+
+// The viewer's elements, all optional so the module works before the dialog
+// markup exists (tests load app.js against a bare page).
+function attachmentPreviewElements() {
+  const dialog = document.querySelector('#attachmentPreviewDialog');
+  if (!dialog) return null;
+  return {
+    dialog,
+    title: dialog.querySelector('#attachmentPreviewTitle'),
+    meta: dialog.querySelector('#attachmentPreviewMeta'),
+    body: dialog.querySelector('#attachmentPreviewBody'),
+    external: dialog.querySelector('#attachmentPreviewOpenExternal'),
+    locate: dialog.querySelector('#attachmentPreviewLocate')
+  };
+}
+
+let attachmentPreviewCurrent = null;
+
+// Reads a resolved file as text, with a size guard so a huge log cannot lock
+// the tab.
+async function attachmentPreviewText(file) {
+  if (!file) return '';
+  if (file.size > attachmentPreviewMaxText) {
+    const slice = file.slice(0, attachmentPreviewMaxText);
+    return `${await slice.text()}\n\n[Preview truncated at 2 MB. Open the file to read the rest.]`;
+  }
+  return file.text();
+}
+
+// Shows one attachment. `file` may be null for a recorded path whose file is
+// missing, which still gets a card explaining the situation.
+async function openAttachmentPreview({ file, path, name, people = [], event = '' }) {
+  const ui = attachmentPreviewElements();
+  if (!ui) return;
+  attachmentPreviewCurrent = { file, path, name };
+  const displayName = name || file?.name || String(path || '').split(/[\\/]/).pop() || 'Attachment';
+  const kind = attachmentKind(displayName);
+  ui.title.textContent = displayName;
+  ui.meta.textContent = [
+    attachmentKindLabel(displayName),
+    people.length ? `Linked to ${people.join(', ')}` : '',
+    event
+  ].filter(Boolean).join(' · ');
+  ui.body.replaceChildren();
+  ui.body.dataset.kind = kind || 'unsupported';
+  ui.locate.hidden = !path;
+  ui.locate.dataset.attachmentPath = path || '';
+  ui.external.hidden = !file;
+  ui.external.dataset.attachmentExternal = '';
+
+  if (!file) {
+    ui.body.append(attachmentPreviewMessage(
+      `This file is recorded in the GEDCOM but was not found in the media folder. Link the folder that holds "${displayName}", or run Media Validation to see where it is expected.`
+    ));
+  } else if (kind === 'text') {
+    const text = await attachmentPreviewText(file);
+    const pre = document.createElement('pre');
+    pre.className = 'attachment-preview-text';
+    // textContent, never innerHTML: a .txt file is data, not markup.
+    pre.textContent = text || '(This file is empty.)';
+    ui.body.append(pre);
+  } else if (kind === 'html') {
+    const source = await attachmentPreviewText(file);
+    const frame = document.createElement('iframe');
+    frame.className = 'attachment-preview-html';
+    frame.setAttribute('title', `Preview of ${displayName}`);
+    // No allow-scripts: even a script that survived sanitising cannot run.
+    frame.setAttribute('sandbox', '');
+    frame.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"></head><body>${sanitizeAttachmentHtml(source)}</body></html>`;
+    ui.body.append(frame);
+    const note = document.createElement('p');
+    note.className = 'attachment-preview-note';
+    note.textContent = 'Shown as text and layout only: scripts, frames and embedded objects are removed.';
+    ui.body.append(note);
+  } else if (kind === 'image' && !isRenderableImage(displayName)) {
+    ui.body.append(attachmentPreviewCard(displayName, 'This image format (TIF/TIFF) cannot be shown in the browser. Open it in its default application to view it.'));
+  } else if (kind === 'image') {
+    const image = document.createElement('img');
+    image.className = 'attachment-preview-image';
+    image.alt = displayName;
+    image.src = mediaUrl(file);
+    ui.body.append(image);
+  } else if (kind === 'pdf') {
+    const frame = document.createElement('iframe');
+    frame.className = 'attachment-preview-pdf';
+    frame.title = `Preview of ${displayName}`;
+    frame.src = mediaUrl(file);
+    ui.body.append(frame);
+  } else if (kind === 'word' || kind === 'document') {
+    ui.body.append(attachmentPreviewCard(displayName, 'Word and rich text documents are opened in their default application. Kinship Atlas does not convert them.'));
+  } else {
+    ui.body.append(attachmentPreviewCard(displayName, 'This file type is not supported yet, so it cannot be previewed here.'));
+  }
+
+  ui.external.onclick = () => {
+    if (!file) return;
+    const opened = window.open(mediaUrl(file), '_blank', 'noopener');
+    if (!opened) showToast('The browser blocked the new tab. Allow pop-ups for this page and try again.');
+  };
+  ui.locate.onclick = () => {
+    if (path) openMediaFolderInTab(path);
+  };
+  if (!ui.dialog.open) showModalFocused(ui.dialog);
+}
+
+function attachmentPreviewMessage(text) {
+  const note = document.createElement('p');
+  note.className = 'attachment-preview-note is-warning';
+  note.textContent = text;
+  return note;
+}
+
+// An icon card, used for types with no in-app renderer and for TIF/TIFF.
+function attachmentPreviewCard(name, explanation) {
+  const card = document.createElement('div');
+  card.className = 'attachment-preview-card';
+  const icon = document.createElement('span');
+  icon.className = 'attachment-type-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.append(createButtonIcon(attachmentKindIcon(name)));
+  const text = document.createElement('div');
+  const title = document.createElement('strong');
+  title.textContent = name;
+  const type = document.createElement('span');
+  type.className = 'attachment-type-label';
+  type.textContent = attachmentKindLabel(name);
+  const note = document.createElement('p');
+  note.className = 'attachment-preview-note';
+  note.textContent = explanation;
+  text.append(title, type, note);
+  card.append(icon, text);
+  return card;
+}
+
+// A compact icon tile for lists: the type icon plus a short extension badge.
+function attachmentTypeBadge(name, extraClass = '') {
+  const badge = document.createElement('span');
+  badge.className = `attachment-type-icon${extraClass ? ` ${extraClass}` : ''}`;
+  badge.setAttribute('aria-hidden', 'true');
+  badge.append(createButtonIcon(attachmentKindIcon(name)));
+  const text = document.createElement('span');
+  text.className = 'attachment-type-badge-text';
+  text.textContent = attachmentBadge(name);
+  badge.append(text);
+  return badge;
+}
+
+const attachmentPreviewDialog = document.querySelector('#attachmentPreviewDialog');
+if (attachmentPreviewDialog) {
+  attachmentPreviewDialog.querySelector('#closeAttachmentPreview').addEventListener('click', () => attachmentPreviewDialog.close());
+}
+
+window.KinshipAttachmentPreview = {
+  open: openAttachmentPreview,
+  sanitizeHtml: sanitizeAttachmentHtml,
+  kinds: () => kinshipAttachmentTypeConfig
+};
+// ---------------------------------------------------------------------------
+// 22. Smart file matching (suggest a person for an unlinked attachment)
+// ---------------------------------------------------------------------------
+// When a media folder is scanned, files that no GEDCOM record names are listed
+// in the Media Library with no person link. Many of them plainly belong to
+// someone: "Alfred Pasley Bell.txt", "Ada Allnutt [I455] - biography.docx".
+//
+// This module scores each unlinked file against the people in the tree and
+// returns the best few suggestions. It is a suggestion only: nothing is linked
+// until the user presses the button, which then uses the same person.mediaPaths
+// link the rest of the app uses.
+//
+// Cost: names are normalised once per tree (indexed by every name word), and a
+// file is only compared against the people who share a word with it, so a
+// 100,000-person tree costs a few lookups per file rather than a full pass.
+
+let smartMatchNameIndexCache = null;
+
+// Lower-case, accent-folded words: "Alfred Pasley Bell.txt" -> ['alfred','pasley','bell'].
+function smartMatchWords(text) {
+  return String(text || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase()
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(' ')
+    .filter((word) => word.length > 1 && !/^\d+$/.test(word));
+}
+
+// People indexed by every word of their name and id, built once per tree.
+function smartMatchNameIndex() {
+  const cacheKey = `${state.people.size}:${state.families.size}:${state.gedcomDirty ? 'dirty' : 'clean'}`;
+  if (smartMatchNameIndexCache?.key === cacheKey) return smartMatchNameIndexCache.index;
+  const index = new Map();
+  const add = (word, person) => {
+    if (!word) return;
+    if (!index.has(word)) index.set(word, new Set());
+    index.get(word).add(person);
+  };
+  for (const person of state.people.values()) {
+    const words = new Set([
+      ...smartMatchWords(person.givenName),
+      ...smartMatchWords(person.surname),
+      ...smartMatchWords(person.name)
+    ]);
+    for (const word of words) add(word, person);
+    add(String(person.id || '').toLocaleLowerCase(), person);
+  }
+  smartMatchNameIndexCache = { key: cacheKey, index };
+  return index;
+}
+
+// How strongly one file name points at one person, 0 when it does not.
+//   full name in the file name   strongest
+//   surname + any given name     strong
+//   surname only                 moderate
+//   one name word only           weak
+//   GEDCOM id in the file name   strong on its own
+function smartMatchScore(fileName, person) {
+  const fileText = ` ${smartMatchWords(fileName).join(' ')} `;
+  const id = String(person.id || '').toLocaleLowerCase();
+  let score = 0;
+  if (id && fileText.includes(` ${id} `)) score += 60;
+  const fullName = smartMatchWords(person.name).join(' ');
+  if (fullName && fullName.length > 3 && fileText.includes(` ${fullName} `)) score += 70;
+  const given = smartMatchWords(person.givenName);
+  const surname = smartMatchWords(person.surname);
+  if (surname.length && surname.every((word) => fileText.includes(` ${word} `))) {
+    score += 35;
+    if (given.length && given.some((word) => fileText.includes(` ${word} `))) score += 30;
+  }
+  // A file that merely shares a word ("Bell") is only worth mentioning when the
+  // word is distinctive: the index tells us how many people carry it.
+  if (!score) {
+    const shared = [...new Set(smartMatchWords(fileName))].filter((word) => smartMatchNameIndex().get(word)?.has(person));
+    if (shared.length) score += 8 * shared.length;
+  }
+  return score;
+}
+
+// The best suggestions for one file: [{ person, score }], strongest first.
+function smartMatchSuggestions(fileName, limit = 3) {
+  if (!state.people.size) return [];
+  const index = smartMatchNameIndex();
+  const candidates = new Set();
+  for (const word of new Set(smartMatchWords(fileName))) {
+    for (const person of index.get(word) || []) candidates.add(person);
+  }
+  const scored = [];
+  for (const person of candidates) {
+    const score = smartMatchScore(fileName, person);
+    if (score >= 30) scored.push({ person, score });
+  }
+  scored.sort((left, right) => right.score - left.score || left.person.name.localeCompare(right.person.name));
+  // A tie at the top is not a suggestion worth making: two John Smiths are not
+  // a better guess than none.
+  if (scored.length > 1 && scored[0].score === scored[1].score) return [];
+  return scored.slice(0, limit);
+}
+
+// Links a file to a person through the app's normal attachment link (shown on
+// the person record and saved with the tree's selections). Returns true when
+// the person now holds the file.
+function linkAttachmentToPerson(personId, relativePath) {
+  const person = state.people.get(personId);
+  if (!person || !relativePath) return false;
+  if (!person.mediaPaths.includes(relativePath)) person.mediaPaths.push(relativePath);
+  const additional = state.additionalMedia.get(personId) || [];
+  if (!additional.includes(relativePath)) {
+    additional.push(relativePath);
+    state.additionalMedia.set(personId, additional);
+    saveAdditionalMedia();
+  }
+  state.mediaLibraryCache = null;
+  state.mediaLibraryCacheKey = '';
+  if (state.treeMaintenanceMode) renderTreeMaintenance();
+  render();
+  renderMediaLibrary();
+  return true;
+}
+
+window.KinshipSmartMatch = {
+  suggestions: smartMatchSuggestions,
+  link: linkAttachmentToPerson,
+  words: smartMatchWords
+};
+// ---------------------------------------------------------------------------
+// 22. Favourites (bookmarked people, and the Favourites page)
+// ---------------------------------------------------------------------------
+// A favourite is one person id plus the date it was added. Nothing is copied
+// from the person record: the page reads names, dates and places from the tree
+// as it stands, so an edit shows up here immediately and a GEDCOM reload keeps
+// every favourite that still exists.
+//
+// Storage reuses the app's selections framework (readSelection/storeSelection),
+// so favourites survive a refresh, a restart, the local helper and the
+// selections file. Two shapes are accepted on read:
+//
+//   { favourites: [{ personId, addedDate }, ...] }   current
+//   { favourites: ['I123', 'I456'] }                 older builds
+//
+// and both are migrated to the current shape on the next save, with no ids
+// dropped. The sort choice rides in the same record, so it survives too.
+
+const favouritesStorageKey = 'kinship-atlas:favourites:v1';
+const favouritesSortOptions = new Set(['added-desc', 'added-asc', 'surname-asc', 'surname-desc', 'given-asc', 'given-desc', 'year-asc', 'year-desc']);
+const favouritesDefaultSort = 'added-desc';
+
+// personId -> addedDate (ISO string, or '' when the record predates dates).
+let favouriteEntries = new Map();
+let favouritesSort = favouritesDefaultSort;
+let favouritesMode = false;
+let favouritesLoaded = false;
+
+// Accepts every shape a favourites record has ever had and returns
+// [{ personId, addedDate }]. Unknown or malformed entries are skipped, never
+// allowed to throw: a corrupt record must not stop the tree loading.
+function normalizeFavouriteEntries(record) {
+  const raw = record && typeof record === 'object' && !Array.isArray(record) ? record.favourites : record;
+  if (!Array.isArray(raw)) return [];
+  const entries = [];
+  const seen = new Set();
+  for (const item of raw) {
+    let personId = '';
+    let addedDate = '';
+    if (typeof item === 'string' || typeof item === 'number') {
+      personId = String(item).trim();
+    } else if (item && typeof item === 'object') {
+      personId = String(item.personId ?? item.id ?? '').trim();
+      addedDate = typeof item.addedDate === 'string' ? item.addedDate : '';
+    }
+    // GEDCOM ids are stored without the @ signs, matching state.people keys.
+    personId = personId.replace(/^@|@$/g, '');
+    if (!personId || seen.has(personId)) continue;
+    seen.add(personId);
+    entries.push({ personId, addedDate });
+  }
+  return entries;
+}
+
+function loadFavourites() {
+  let record = null;
+  try { record = readSelection(favouritesStorageKey); } catch { record = null; }
+  const entries = normalizeFavouriteEntries(record);
+  favouriteEntries = new Map(entries.map((entry) => [entry.personId, entry.addedDate]));
+  const savedSort = record && typeof record === 'object' && !Array.isArray(record) ? record.sort : '';
+  favouritesSort = favouritesSortOptions.has(savedSort) ? savedSort : favouritesDefaultSort;
+  favouritesLoaded = true;
+  syncFavouritesControls();
+}
+
+function saveFavourites() {
+  const record = {
+    // Oldest first in storage; the page sorts for display.
+    favourites: [...favouriteEntries.entries()].map(([personId, addedDate]) => ({ personId, addedDate: addedDate || null })),
+    sort: favouritesSort
+  };
+  let saved = false;
+  try { saved = storeSelection(favouritesStorageKey, record) !== false; } catch { saved = false; }
+  return saved;
+}
+
+// Every favourites reader goes through here, so the record is always loaded
+// before it is used (and only once per session).
+function favouritesMap() {
+  if (!favouritesLoaded) loadFavourites();
+  return favouriteEntries;
+}
+
+function isFavourite(personId) {
+  return favouritesMap().has(personId);
+}
+
+function favouriteCount() {
+  return favouritesMap().size;
+}
+
+function favouritesCountText(count) {
+  if (!count) return 'No favourite people';
+  return `${count.toLocaleString()} favourite ${count === 1 ? 'person' : 'people'}`;
+}
+
+// Favourite people that still exist in the open tree, in tree order.
+function favouritePeople() {
+  const people = [];
+  for (const personId of favouritesMap().keys()) {
+    const person = state.people.get(personId);
+    if (person) people.push(person);
+  }
+  return people;
+}
+
+function toggleFavourite(personId) {
+  const person = state.people.get(personId);
+  if (!person) return false;
+  const favourites = favouritesMap();
+  const removing = favourites.has(personId);
+  if (removing) favourites.delete(personId);
+  else favourites.set(personId, new Date().toISOString());
+  const saved = saveFavourites();
+  syncFavouritesControls();
+  renderDetails();
+  renderRoster();
+  // The Favourites page is only rebuilt when it is the page on screen.
+  if (favouritesMode) renderFavourites();
+  const suffix = saved ? '' : ' This browser could not remember it after closing.';
+  showToast(removing
+    ? `${person.name} removed from favourites.${suffix}`
+    : `${person.name} added to favourites.${suffix}`);
+  return !removing;
+}
+
+// The heart on the person record, and any other control that shows state.
+function syncFavouritesControls() {
+  const selected = state.people.get(state.selectedId);
+  for (const button of document.querySelectorAll('[data-favourite-toggle]')) {
+    const personId = button.dataset.favouriteToggle;
+    const on = isFavourite(personId);
+    button.setAttribute('aria-pressed', String(on));
+    button.classList.toggle('is-favourite', on);
+    button.title = on ? 'Remove this person from favourites' : 'Add this person to favourites';
+    const label = button.querySelector('.favourite-toggle-label');
+    if (label) label.textContent = on ? 'Remove Favourite' : 'Add to Favourites';
+  }
+  const count = document.querySelector('#favouritesCount');
+  if (count) count.textContent = favouritesCountText(favouritePeople().length);
+  const viewOption = document.querySelector('#viewSwitch option[value="favourites"]');
+  if (viewOption) viewOption.textContent = favouriteCount() ? `Favourites (${favouriteCount().toLocaleString()})` : 'Favourites';
+  if (selected && !document.querySelector('[data-favourite-toggle]')) renderDetails();
+}
+
+// ---------- Sorting ----------
+
+function favouriteSurname(person) {
+  return (person.surname || '').trim();
+}
+
+function favouriteGiven(person) {
+  return (person.givenName || person.name || '').trim();
+}
+
+// The birth year as a number, or null when it is not recorded.
+function favouriteBirthYear(person) {
+  const birth = person.events?.find((event) => event.type === 'BIRT');
+  const year = /(\d{4})/.exec(birth?.date || '')?.[1];
+  return year ? Number(year) : null;
+}
+
+function compareFavourites(left, right, sort) {
+  const direction = sort.endsWith('desc') ? -1 : 1;
+  const byName = (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' });
+  if (sort.startsWith('added')) {
+    // Missing dates (older records) sort as the oldest, so they gather at the
+    // end of "newest first" rather than jumping to the top.
+    const a = left.addedDate ? Date.parse(left.addedDate) || 0 : 0;
+    const b = right.addedDate ? Date.parse(right.addedDate) || 0 : 0;
+    if (a !== b) return (a - b) * direction;
+    return byName(left.person.name, right.person.name);
+  }
+  if (sort.startsWith('surname')) {
+    const primary = byName(favouriteSurname(left.person), favouriteSurname(right.person));
+    if (primary) return primary * direction;
+    const secondary = byName(favouriteGiven(left.person), favouriteGiven(right.person));
+    if (secondary) return secondary * direction;
+    return (favouriteBirthYear(left.person) ?? 9999) - (favouriteBirthYear(right.person) ?? 9999);
+  }
+  if (sort.startsWith('given')) {
+    const primary = byName(favouriteGiven(left.person), favouriteGiven(right.person));
+    if (primary) return primary * direction;
+    return byName(favouriteSurname(left.person), favouriteSurname(right.person)) * direction;
+  }
+  if (sort.startsWith('year')) {
+    const a = favouriteBirthYear(left.person);
+    const b = favouriteBirthYear(right.person);
+    // Unknown years always sit at the end, whichever direction is chosen.
+    if (a === null && b === null) return byName(left.person.name, right.person.name);
+    if (a === null) return 1;
+    if (b === null) return -1;
+    if (a !== b) return (a - b) * direction;
+    return byName(left.person.name, right.person.name);
+  }
+  return byName(left.person.name, right.person.name);
+}
+
+// ---------- Rendering ----------
+
+function favouritesElements() {
+  return {
+    view: document.querySelector('#favouritesView'),
+    content: document.querySelector('#favouritesContent'),
+    search: document.querySelector('#favouritesSearch'),
+    sort: document.querySelector('#favouritesSort'),
+    count: document.querySelector('#favouritesCount'),
+    fileName: document.querySelector('#favouritesFileName')
+  };
+}
+
+function renderFavourites() {
+  const ui = favouritesElements();
+  if (!ui.view || !ui.content) return;
+  if (ui.sort && ui.sort.value !== favouritesSort) ui.sort.value = favouritesSort;
+  if (ui.fileName) ui.fileName.textContent = state.fileName || '';
+  if (!state.people.size) {
+    if (ui.count) ui.count.textContent = favouritesCountText(0);
+    ui.content.replaceChildren(favouritesEmptyState('Open a GEDCOM first: favourites are saved per tree.'));
+    return;
+  }
+  const all = favouritePeople()
+    .map((person) => ({ person, addedDate: favouritesMap().get(person.id) || '' }))
+    .sort((left, right) => compareFavourites(left, right, favouritesSort));
+  const query = normalizeDirectoryName((ui.search?.value || '').trim());
+  const shown = query
+    ? all.filter((entry) => normalizeDirectoryName(`${entry.person.name} ${entry.person.givenName} ${entry.person.surname} ${entry.person.id}`).includes(query))
+    : all;
+  if (ui.count) ui.count.textContent = all.length ? favouritesCountText(all.length) : favouritesCountText(0);
+
+  ui.content.replaceChildren();
+  if (!all.length) {
+    ui.content.append(favouritesEmptyState());
+    return;
+  }
+  if (!shown.length) {
+    const empty = document.createElement('p');
+    empty.className = 'favourites-empty-note';
+    empty.textContent = 'No favourite matches this search.';
+    ui.content.append(empty);
+    return;
+  }
+  const grid = document.createElement('div');
+  grid.className = 'favourites-grid';
+  for (const entry of shown) grid.append(favouritesCard(entry));
+  ui.content.append(grid);
+}
+
+function favouritesEmptyState(noteText = 'Add people using the Add to Favourites button on any person record.') {
+  const box = document.createElement('div');
+  box.className = 'favourites-empty';
+  const heart = document.createElement('span');
+  heart.className = 'favourites-empty-icon';
+  heart.setAttribute('aria-hidden', 'true');
+  heart.append(createButtonIcon('heart'));
+  const heading = document.createElement('h2');
+  heading.textContent = 'No favourites yet';
+  const note = document.createElement('p');
+  note.textContent = noteText;
+  box.append(heart, heading, note);
+  return box;
+}
+
+// One favourite card. The image, initials and lifespan come from the same
+// helpers the directory and person record use, so a card never disagrees with
+// the rest of the app.
+function favouritesCard({ person, addedDate }) {
+  const card = document.createElement('article');
+  card.className = 'favourites-card';
+  card.dataset.favouritePerson = person.id;
+  card.tabIndex = 0;
+  card.setAttribute('role', 'button');
+  card.setAttribute('aria-label', `Open ${person.name}`);
+  if (person.id === state.selectedId) card.classList.add('is-selected');
+
+  const media = document.createElement('div');
+  media.className = 'favourites-card-media';
+  const image = primaryImageFor(person);
+  if (image) {
+    const img = document.createElement('img');
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.alt = '';
+    img.src = mediaThumbnailUrl(image.file) || mediaUrl(image.file);
+    media.append(img);
+  } else {
+    const monogram = document.createElement('span');
+    monogram.className = 'favourites-card-initials';
+    // initials() is the app's own initials helper; the element is named
+    // separately so it cannot shadow the function.
+    monogram.textContent = initials(person.name);
+    media.append(monogram);
+  }
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'favourites-card-remove';
+  remove.dataset.favouriteRemove = person.id;
+  remove.title = `Remove ${person.name} from favourites`;
+  remove.setAttribute('aria-label', `Remove ${person.name} from favourites`);
+  remove.append(createButtonIcon('heart'));
+  remove.addEventListener('click', (event) => {
+    // Removing must not also open the person.
+    event.stopPropagation();
+    toggleFavourite(person.id);
+  });
+  media.append(remove);
+
+  const body = document.createElement('div');
+  body.className = 'favourites-card-body';
+  const name = document.createElement('h2');
+  name.className = 'favourites-card-name';
+  name.textContent = person.name;
+  name.title = person.name;
+  body.append(name);
+
+  const life = document.createElement('p');
+  life.className = 'favourites-card-life';
+  life.textContent = lifespan(person) || 'Dates not recorded';
+  body.append(life);
+
+  const birth = person.events?.find((event) => event.type === 'BIRT')?.place || '';
+  if (birth) {
+    const place = document.createElement('p');
+    place.className = 'favourites-card-place';
+    place.textContent = birth;
+    place.title = birth;
+    body.append(place);
+  }
+
+  const meta = document.createElement('p');
+  meta.className = 'favourites-card-meta';
+  const id = document.createElement('span');
+  id.className = 'favourites-card-id';
+  id.textContent = `@${person.id}@`;
+  meta.append(id);
+  if (addedDate) {
+    const added = document.createElement('span');
+    added.className = 'favourites-card-added';
+    added.textContent = `Added ${favouritesDateLabel(addedDate)}`;
+    meta.append(added);
+  }
+  body.append(meta);
+
+  card.append(media, body);
+  card.addEventListener('click', () => openFavouritePerson(person.id));
+  card.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    openFavouritePerson(person.id);
+  });
+  return card;
+}
+
+function favouritesDateLabel(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+// Selecting a card behaves exactly like choosing that person anywhere else:
+// the tree view comes back with them focused and the person record filled in.
+function openFavouritePerson(personId) {
+  if (!state.people.has(personId)) return;
+  setFavouritesMode(false);
+  if (state.mapMode) setMapMode(false);
+  setFocus(personId, true);
+  renderDetails();
+}
+
+// ---------- Page mode ----------
+
+function setFavouritesMode(on) {
+  const ui = favouritesElements();
+  if (!ui.view) return;
+  if (on && !state.people.size) {
+    showToast('Open a GEDCOM first: favourites are saved per tree.');
+    return;
+  }
+  // The other full-page views must stand down first: each of them owns the
+  // shell's visibility, so closing them is what makes leaving Favourites
+  // restore the tree cleanly.
+  if (on) {
+    if (state.reportsMode) setReportsMode(false);
+    if (state.mediaLibraryMode) setMediaLibraryMode(false);
+    if (state.mapMode) setMapMode(false);
+    if (state.treeMaintenanceMode) setTreeMaintenanceMode(false);
+  }
+  favouritesMode = Boolean(on);
+  ui.view.hidden = !on;
+  elements.appShell.hidden = Boolean(on);
+  if (on) {
+    renderFavourites();
+    ui.view.scrollTop = 0;
+    syncFavouritesControls();
+  }
+  syncViewSwitch();
+}
+
+function favouritesModeIsOn() {
+  return favouritesMode;
+}
+
+// ---------- Wiring ----------
+
+window.KinshipFavourites = {
+  open: () => setFavouritesMode(true),
+  close: () => setFavouritesMode(false),
+  toggle: toggleFavourite,
+  isFavourite,
+  count: favouriteCount,
+  refresh: renderFavourites,
+  normalize: normalizeFavouriteEntries
+};
+
+const favouritesViewElement = document.querySelector('#favouritesView');
+if (favouritesViewElement) {
+  favouritesViewElement.querySelector('#favouritesBackButton')?.addEventListener('click', () => setFavouritesMode(false));
+  favouritesViewElement.querySelector('#favouritesSearch')?.addEventListener('input', renderFavourites);
+  favouritesViewElement.querySelector('#favouritesSort')?.addEventListener('change', (event) => {
+    const value = event.target.value;
+    favouritesSort = favouritesSortOptions.has(value) ? value : favouritesDefaultSort;
+    saveFavourites();
+    renderFavourites();
+  });
+}
+
+// The record's heart, delegated from the details panel so a re-render cannot
+// leave a stale listener behind.
+document.addEventListener('click', (event) => {
+  const button = event.target.closest?.('[data-favourite-toggle]');
+  if (!button) return;
+  event.preventDefault();
+  event.stopPropagation();
+  toggleFavourite(button.dataset.favouriteToggle);
+});
+
+// The favourites record is read as soon as the tree is known to the page.
+loadFavourites();
   // ---------------------------------------------------------------------------
   // 18. Historical Gazetteer: offline resolution of historic place names
   // ---------------------------------------------------------------------------
@@ -13374,7 +15643,7 @@ if (orphanDialog) {
     dialog.className = 'app-dialog gazetteer-dialog';
     dialog.innerHTML = `
       <header class="gazetteer-header">
-        <h2>Historical Gazetteer</h2>
+        <h2>Historic City Names List</h2>
         <button type="button" class="dialog-close" aria-label="Close">&times;</button>
       </header>
       <p class="gazetteer-hint">Resolves historic place names (1700-1970) — former Prussian, Austro-Hungarian, Russian and British-isles spellings — onto modern map coordinates. Everything is stored and resolved on this device.</p>

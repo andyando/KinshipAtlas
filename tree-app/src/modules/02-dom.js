@@ -40,6 +40,7 @@
     createGedcomForm: document.querySelector('#createGedcomForm'),
     clear: document.querySelector('#clearButton'), mapViewButton: document.querySelector('#mapViewButton'),
     reportsButton: document.querySelector('#reportsButton'), reportsView: document.querySelector('#reportsView'),
+    treeMaintenanceView: document.querySelector('#treeMaintenanceView'),
     mediaLibraryButton: document.querySelector('#mediaLibraryButton'), mediaLibraryView: document.querySelector('#mediaLibraryView'),
     mediaLibraryContent: document.querySelector('#mediaLibraryContent'),
     mediaLibraryCardsButton: document.querySelector('#mediaLibraryCardsButton'), mediaLibraryTableButton: document.querySelector('#mediaLibraryTableButton'),

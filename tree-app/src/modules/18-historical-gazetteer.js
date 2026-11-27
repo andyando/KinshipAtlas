@@ -240,7 +240,7 @@
     dialog.className = 'app-dialog gazetteer-dialog';
     dialog.innerHTML = `
       <header class="gazetteer-header">
-        <h2>Historical Gazetteer</h2>
+        <h2>Historic City Names List</h2>
         <button type="button" class="dialog-close" aria-label="Close">&times;</button>
       </header>
       <p class="gazetteer-hint">Resolves historic place names (1700-1970) — former Prussian, Austro-Hungarian, Russian and British-isles spellings — onto modern map coordinates. Everything is stored and resolved on this device.</p>

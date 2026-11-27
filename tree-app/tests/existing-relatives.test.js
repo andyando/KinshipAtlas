@@ -14,6 +14,8 @@ function harness() {
   };
   const context = vm.createContext({
     state, normalizeDirectoryName: (text) => text.toLowerCase(),
+    elements: { relativeType: { value: 'PARENT' } },
+    partnersOf: () => [],
     nextGedcomXref: () => 'FNEW',
     appendRecordLine: (record, line) => { if (!record.lines.includes(line)) record.lines.push(line); },
     addRecordBeforeTrailer: (record) => state.gedcomRecords.push(record)
@@ -52,7 +54,7 @@ test('existing spouse creates reciprocal family links without a new person', () 
 test('invalid, duplicate, occupied and cyclic links fail before mutation', () => {
   const h = harness();
   const before = JSON.stringify(h.state.gedcomRecords);
-  assert.throws(() => h.link('A', 'PARENT', 'HUSB', ''), /different/);
+  assert.throws(() => h.link('A', 'PARENT', 'HUSB', ''), /Pick someone/);
   h.state.families.set('F1', { id: 'F1', childIds: ['B'], husbandId: 'A' });
   assert.throws(() => h.link('B', 'PARENT', 'HUSB', ''), /cycle/);
   assert.throws(() => h.link('B', 'PARTNER', '', ''), /ancestor/i);

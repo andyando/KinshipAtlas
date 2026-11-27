@@ -4,6 +4,12 @@
 
   function setLoaded(fileName, data, storageKey, gedcomText = '') {
     releaseMediaUrls();
+    // Counts on the Tree Maintenance page belong to the tree that was open.
+    for (const key of Object.keys(treeMaintenanceStats)) treeMaintenanceStats[key] = null;
+    treeMaintenanceMediaNotes.organise = '';
+    treeMaintenanceMediaNotes.duplicates = '';
+    treeMaintenanceSmartState.summary = '';
+    treeMaintenanceSmartState.results = [];
     state.mediaIndex = null;
     state.mediaFolderPicked = false;
     state.mediaRelativePaths = new WeakMap();
@@ -50,12 +56,10 @@
     elements.mediaLibraryButton.disabled = false;
     document.querySelector('#viewSwitch').disabled = false;
     document.querySelector('#mediaLibraryMenuButton').disabled = false;
-    document.querySelector('#birthCountryMenuButton').disabled = false;
-    document.querySelector('#duplicateFinderMenuButton').disabled = false;
-    document.querySelector('#duplicateRelationMenuButton').disabled = false;
-    document.querySelector('#mediaOrganiseMenuButton').disabled = false;
-    document.querySelector('#duplicateMediaMenuButton').disabled = false;
-    document.querySelector('#orphanRecordsMenuButton').disabled = false;
+    document.querySelector('#treeMaintenanceMenuButton').disabled = false;
+    // A different tree may have different favourites, so the page and its count
+    // are rebuilt from the saved record for this file name.
+    if (typeof loadFavourites === 'function') loadFavourites();
     elements.printMapButton.disabled = false;
     elements.showSiblings.disabled = false;
     document.querySelector('#openGedcomLabel').hidden = true;
@@ -535,6 +539,15 @@
     requestAnimationFrame(() => drawConnectors(svg, nodeKeys, selected.id, partners));
   }
 
+  // Parent-link colours are keyed by the parent couple, not the FAM record, so
+  // children sharing the same two parents keep the same line colour even when
+  // separate family records exist for them.
+  function familyColorKey(familyId) {
+    const family = state.families.get(familyId);
+    const parents = family ? [family.husbandId, family.wifeId].filter(Boolean).sort().join('+') : '';
+    return parents || `family:${familyId}`;
+  }
+
   function drawConnectors(svg, nodeKeys, selectedId, partners) {
     const canvas = elements.canvas;
     const canvasRect = canvas.getBoundingClientRect();
@@ -565,7 +578,9 @@
       path.setAttribute('d', d);
       path.setAttribute('class', className);
       if (className === 'parent-link') {
-        const groupKey = `${generation}:${familyId}`;
+        // Same couple, same colour: colour follows the parent pair, not the
+        // individual FAM record, so children of the same parents match.
+        const groupKey = `${generation}:${familyColorKey(familyId)}`;
         if (!familyColors.has(groupKey)) {
           const hue = (familyColors.size * 137.508) % 360;
           familyColors.set(groupKey, `hsl(${hue.toFixed(1)} 62% 42%)`);
@@ -725,6 +740,15 @@
         const name = document.createElement('span');
         name.className = 'roster-name';
         name.textContent = person.name;
+        if (isFavourite(person.id)) {
+          button.classList.add('is-favourite');
+          const heart = document.createElement('span');
+          heart.className = 'roster-favourite';
+          heart.setAttribute('aria-label', 'Favourite');
+          heart.title = 'Favourite';
+          heart.append(createButtonIcon('heart'));
+          name.append(heart);
+        }
         const dates = document.createElement('span');
         dates.className = 'roster-years';
         dates.textContent = lifespan(person).replace(' — ', '–');
@@ -1047,6 +1071,14 @@
       label: 'OpenStreetMap',
       url: (place) => `https://www.openstreetmap.org/search?query=${encodeURIComponent(place)}`,
     },
+    bing: {
+      label: 'Bing Maps',
+      url: (place) => `https://www.bing.com/maps?q=${encodeURIComponent(place)}`,
+    },
+    mapquest: {
+      label: 'MapQuest',
+      url: (place) => `https://www.mapquest.com/search/results?query=${encodeURIComponent(place)}`,
+    }
   };
   const mapProviderStorageKey = 'kinship-atlas:map-provider';
 
@@ -1061,6 +1093,15 @@
   function setPreferredMapProvider(provider) {
     if (!mapProviders[provider]) return;
     try { localStorage.setItem(mapProviderStorageKey, provider); } catch { }
+  }
+
+  // After the provider changes, every rendered place button names the new site.
+  function refreshMapProviderLabels() {
+    const label = mapProviders[preferredMapProvider()].label;
+    for (const button of document.querySelectorAll('.event-place-map[data-map-place]')) {
+      button.title = `Show "${button.dataset.mapPlace}" on ${label}${button.dataset.mapNote || ''}`;
+      button.setAttribute('aria-label', button.title);
+    }
   }
 
   // Opens a place on the map site. A right-click / long-press (contextmenu) or
@@ -1099,6 +1140,10 @@
       : '';
     button.title = `Show "${mapPlace}" on ${mapProviders[preferredMapProvider()].label}${historicalNote}`;
     button.setAttribute('aria-label', button.title);
+    // Kept so changing Select Map Provider can refresh the tooltip without
+    // re-rendering the person.
+    button.dataset.mapPlace = mapPlace;
+    button.dataset.mapNote = historicalNote;
     setButtonContent(button, 'mapPin', '');
     button.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -1781,6 +1826,20 @@
       ? 'Stop using this person as the primary person'
       : state.primaryPersonId ? `Replace ${personName(state.primaryPersonId)} as the primary person` : 'Show relationships to this person and add a Home Person button';
     personActions.append(primaryPersonButton);
+    // Add to / Remove from favourites, beside the primary-person button and in
+    // the same button style. The label changes with the person's state.
+    const favourite = isFavourite(person.id);
+    const favouriteButton = makeButton('', `research-button favourite-toggle${favourite ? ' is-favourite' : ''}`);
+    favouriteButton.type = 'button';
+    favouriteButton.dataset.favouriteToggle = person.id;
+    favouriteButton.setAttribute('aria-pressed', String(favourite));
+    favouriteButton.title = favourite ? 'Remove this person from favourites' : 'Add this person to favourites';
+    favouriteButton.append(createButtonIcon('heart'));
+    const favouriteLabel = document.createElement('span');
+    favouriteLabel.className = 'favourite-toggle-label';
+    favouriteLabel.textContent = favourite ? 'Remove Favourite' : 'Add to Favourites';
+    favouriteButton.append(favouriteLabel);
+    personActions.append(favouriteButton);
     const printButton = iconButton('print', 'Print record');
     printButton.dataset.printPerson = person.id;
     printButton.title = 'Print this person record on A4 (attached media is left out)';
@@ -1841,7 +1900,7 @@
     chevron.append(chevronPath);
     const headingLabel = document.createElement('span');
     headingLabel.className = 'detail-section-label';
-    headingLabel.textContent = `Attached media (${person.mediaPaths.length})`;
+    headingLabel.textContent = `Attached files (${person.mediaPaths.length})`;
     heading.append(chevron, headingLabel);
     const mediaBody = document.createElement('div');
     mediaBody.className = 'detail-section-body';
@@ -1856,13 +1915,13 @@
     actions.className = 'media-actions';
     const saveMode = mediaSaveMode();
     if (saveMode !== 'unsupported') {
-      const addButton = makeButton('Add photo or PDF', 'media-add-button');
+      const addButton = makeButton('Add file', 'media-add-button');
       addButton.dataset.addMediaFor = person.id;
       addButton.disabled = saveMode === 'none';
       addButton.title = saveMode === 'folder'
-        ? 'Add photo or PDF to the selected folder'
+        ? 'Add a photo, PDF or document to the selected folder'
         : saveMode === 'helper'
-          ? `Add photo or PDF; saved by the local helper to ${state.mediaHelper.folder}`
+          ? `Add a photo, PDF or document; saved by the local helper to ${state.mediaHelper.folder}`
           : 'Select a media folder before adding files';
       actions.append(addButton);
     }
@@ -1880,7 +1939,7 @@
     if (!person.mediaPaths.length) {
       const note = document.createElement('div');
       note.className = 'event-detail';
-      note.textContent = 'No media attached yet.';
+      note.textContent = 'No files attached yet.';
       mediaBody.append(note);
       return mediaSection;
     }
@@ -1961,21 +2020,32 @@
         mediaItems.push(item);
         grid.append(item);
       } else {
+        // A document, a PDF or a TIF: an icon tile that opens the attachment
+        // viewer (text and HTML inline, PDF in the browser, Word externally).
         const item = document.createElement('div');
-        item.className = 'media-file-item';
-        const link = document.createElement('a');
-        link.className = 'media-file-link';
-        link.href = mediaUrl(file);
-        link.target = '_blank';
-        link.rel = 'noopener';
-        link.textContent = file.name;
-        link.title = mediaTitle(file, path);
+        item.className = 'media-document-item';
+        item.dataset.documentItem = path;
+        const open = document.createElement('button');
+        open.type = 'button';
+        open.className = 'media-document-open';
+        open.title = mediaTitle(file, path);
+        open.append(attachmentTypeBadge(file.name, 'attachment-type-icon-small'));
+        const label = document.createElement('span');
+        label.className = 'media-document-name';
+        label.textContent = file.name;
+        const type = document.createElement('span');
+        type.className = 'media-document-type';
+        type.textContent = attachmentKindLabel(file.name);
+        open.append(label, type);
+        open.addEventListener('click', () => {
+          openAttachmentPreview({ file, path, name: file.name, people: [person.name], event: [...(linkedEvents.get(path) || [])].join(', ') });
+        });
         const unlinkButton = makeButton('🗑', 'media-remove-button');
         unlinkButton.dataset.personId = person.id;
         unlinkButton.dataset.unlinkMedia = path;
-        unlinkButton.setAttribute('aria-label', 'Unlink media from this person; file will remain in the media folder');
+        unlinkButton.setAttribute('aria-label', 'Unlink this file from this person; the file remains in the media folder');
         unlinkButton.title = 'Unlink from person (file remains in folder)';
-        item.append(link, unlinkButton);
+        item.append(open, unlinkButton);
         item.append(mediaClassifyControl(path, file.name));
         markJustAdded(item, path);
         item.hidden = mediaItems.length >= 4;
@@ -2126,7 +2196,10 @@
     const result = [...entries.values()].sort((a, b) => (a.file?.name || a.path).localeCompare(b.file?.name || b.path, undefined, { sensitivity: 'base' }));
     for (const entry of result) {
       const names = [...entry.people.values()].map(({ person }) => person.name).join(' ');
-      entry.searchText = `${entry.file?.name || entry.path} ${names}`.toLocaleLowerCase();
+      // The type wording is searchable too, so "word" finds a .docx and "html"
+      // finds a page without typing its extension.
+      const name = entry.file?.name || entry.path;
+      entry.searchText = `${name} ${names} ${attachmentKindLabel(name)} ${attachmentBadge(name)}`.toLocaleLowerCase();
     }
     state.mediaLibraryCache = result;
     state.mediaLibraryCacheKey = cacheKey;
@@ -2491,6 +2564,8 @@
     const search = (searchInput?.value || '').trim().toLocaleLowerCase();
     const typeInput = document.querySelector('#mediaLibraryTypeFilter');
     const selectedType = typeInput?.value || '';
+    const kindInput = document.querySelector('#mediaLibraryFileKindFilter');
+    const selectedKind = kindInput?.value || '';
     const sortInput = document.querySelector('#mediaLibrarySort');
     // The dropdown is the only source of truth while the page is shown; the copy
     // in state merely keeps the choice across re-renders and tree switches.
@@ -2498,6 +2573,12 @@
     const entries = allEntries.filter((entry) => {
       const type = state.mediaTypes.get(entry.key) || 'unclassified';
       if (selectedType && type !== selectedType) return false;
+      // The file-kind filter is by attachment type (image, PDF, Word, text…),
+      // separate from the classification filter above.
+      if (selectedKind) {
+        const kind = attachmentKind(entry.file?.name || entry.path || '');
+        if (kind !== selectedKind) return false;
+      }
       return !search || entry.searchText.includes(search);
     });
     const nameOf = (entry) => (entry.file?.name || entry.path || '').toLocaleLowerCase();
@@ -2634,11 +2715,13 @@
       link.append(image);
       return link;
     }
-    const placeholder = document.createElement('span');
-    placeholder.className = 'media-library-row-thumb is-document';
-    placeholder.textContent = entry.file ? 'PDF' : '—';
-    placeholder.title = entry.file ? 'Document' : 'File not found';
-    return placeholder;
+    // Every non-image type gets its icon and extension in the thumbnail column,
+    // so a table row reads as a document at a glance.
+    const name = entry.file?.name || entry.path || '';
+    const badge = attachmentTypeBadge(name, 'media-library-row-badge');
+    badge.title = entry.file ? attachmentKindLabel(name) : 'File not found';
+    if (!entry.file) badge.classList.add('is-missing');
+    return badge;
   }
 
   function createMediaLibraryTable() {
@@ -2814,6 +2897,74 @@
     target.scrollIntoView({ block: 'nearest' });
   }
 
+  // A document's preview tile: the type icon, a short extension badge, the file
+  // name and who it belongs to, with Open (the viewer) and Locate File. It uses
+  // the same card shell as images, so it inherits every theme.
+  function mediaLibraryDocumentTile(entry, kind, missing = false) {
+    const name = entry.file?.name || entry.path.split(/[\\/]/).pop() || entry.path;
+    const tile = document.createElement('div');
+    tile.className = `media-library-document-tile${missing ? ' is-missing' : ''}`;
+    tile.append(attachmentTypeBadge(name, 'attachment-type-icon-large'));
+    const copy = document.createElement('div');
+    copy.className = 'media-library-document-copy';
+    // The card heading already names the file, so the tile shows what the
+    // heading cannot: the type and who it belongs to.
+    const type = document.createElement('span');
+    type.className = 'media-library-document-type';
+    type.textContent = attachmentKindLabel(name);
+    copy.append(type);
+    const owners = [...entry.people.values()].map(({ person }) => person.name);
+    if (owners.length) {
+      const linked = document.createElement('span');
+      linked.className = 'media-library-document-linked';
+      linked.textContent = `Linked to: ${owners.join(', ')}`;
+      copy.append(linked);
+    }
+    tile.append(copy);
+    const actions = document.createElement('div');
+    actions.className = 'media-library-document-actions';
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'button button-secondary';
+    open.textContent = missing ? 'Reveal expected file' : 'Open';
+    open.title = missing ? 'Check where this file is expected in the media folder' : `Open ${name}`;
+    open.addEventListener('click', (event) => {
+      event.preventDefault();
+      if (missing) { openMediaFolderInTab(entry.path); return; }
+      openPersonFilePreview(entry, name, kind);
+    });
+    actions.append(open);
+    if (!missing) {
+      const locate = document.createElement('button');
+      locate.type = 'button';
+      locate.className = 'button button-quiet';
+      locate.textContent = 'Locate File';
+      locate.title = 'Open the media folder in a new tab at this file\'s place';
+      locate.addEventListener('click', (event) => {
+        event.preventDefault();
+        openMediaFolderInTab(entry.path);
+      });
+      actions.append(locate);
+    }
+    tile.append(actions);
+    return tile;
+  }
+
+  // Opens the shared attachment viewer for one Media Library entry.
+  function openPersonFilePreview(entry, name, kind) {
+    const people = [...entry.people.values()].map(({ person }) => person.name);
+    // HTML and text preview inline; anything with no inline renderer opens in
+    // its default application directly, which is what "Open" promises there.
+    if (kind === 'word' || kind === 'document') {
+      if (entry.file) {
+        const opened = window.open(mediaUrl(entry.file), '_blank', 'noopener');
+        if (!opened) showToast('The browser blocked the new tab. Allow pop-ups for this page and try again.');
+        return;
+      }
+    }
+    openAttachmentPreview({ file: entry.file, path: entry.path, name, people });
+  }
+
   function createMediaLibraryCard(entry) {
     const card = document.createElement('article');
     card.className = 'media-library-card';
@@ -2831,6 +2982,8 @@
     card.classList.toggle('is-selected', selectBox.checked);
     const preview = document.createElement('div');
     preview.className = 'media-library-preview';
+    const entryName = entry.file?.name || entry.path || '';
+    const entryKind = attachmentKind(entryName);
     if (entry.file && isImageFile(entry.file)) {
       const link = document.createElement('a');
       link.href = mediaUrl(entry.file);
@@ -2847,13 +3000,11 @@
       link.append(image);
       preview.append(link);
     } else if (entry.file) {
-      const link = document.createElement('a');
-      link.className = 'media-library-document';
-      link.href = mediaUrl(entry.file);
-      link.target = '_blank';
-      link.rel = 'noopener';
-      link.textContent = 'Open document';
-      preview.append(link);
+      // Documents and TIF/TIFF: an icon tile naming the type, which opens the
+      // attachment viewer (text and HTML preview inline; Word opens externally).
+      preview.append(mediaLibraryDocumentTile(entry, entryKind));
+    } else if (entryKind) {
+      preview.append(mediaLibraryDocumentTile(entry, entryKind, true));
     } else {
       const missing = document.createElement('span');
       missing.className = 'media-library-missing';
@@ -2861,14 +3012,16 @@
       preview.append(missing);
     }
     // Face-scan and person-link state, both visible at a glance on the image.
+    // A document tile already names its people, so the badge would repeat it.
     const badges = document.createElement('div');
     badges.className = 'media-library-badges';
+    const isDocumentTile = !(entry.file && isImageFile(entry.file));
     if (entry.people.size) {
       const linkedBadge = document.createElement('span');
       linkedBadge.className = 'media-library-badge is-linked';
       linkedBadge.textContent = entry.people.size === 1 ? 'Linked to 1 person' : `Linked to ${entry.people.size} people`;
       linkedBadge.title = [...entry.people.values()].map(({ person }) => person.name).join(', ');
-      badges.append(linkedBadge);
+      if (!isDocumentTile) badges.append(linkedBadge);
     } else {
       const unlinkedBadge = document.createElement('span');
       unlinkedBadge.className = 'media-library-badge is-unlinked';
@@ -2965,6 +3118,29 @@
       none.className = 'media-library-unlinked';
       none.textContent = 'No person link recorded';
       peopleList.append(none);
+      // A filename that plainly names one person is offered as a suggestion.
+      // Nothing is linked until the user presses the button.
+      const suggestions = smartMatchSuggestions(entry.file?.name || entry.path || '', 1);
+      const best = suggestions[0];
+      if (best) {
+        const suggestion = document.createElement('div');
+        suggestion.className = 'media-library-suggestion';
+        const text = document.createElement('span');
+        text.textContent = `Suggested match: ${best.person.name}`;
+        const link = document.createElement('button');
+        link.type = 'button';
+        link.className = 'button button-secondary media-library-suggestion-link';
+        link.textContent = 'Link';
+        link.title = `Attach ${entry.file?.name || entry.path} to ${best.person.name}`;
+        link.addEventListener('click', (event) => {
+          event.preventDefault();
+          if (!window.confirm(`Link “${entry.file?.name || entry.path}” to ${best.person.name}?`)) return;
+          linkAttachmentToPerson(best.person.id, entry.path);
+          showToast(`Linked ${entry.file?.name || entry.path} to ${best.person.name}.`);
+        });
+        suggestion.append(text, link);
+        peopleList.append(suggestion);
+      }
     }
     linked.append(peopleList);
     details.append(linked);
@@ -3161,6 +3337,10 @@
     // Check media folder: a magnifier over a folder.
     checkFolder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="11" cy="12" r="2.5"/><path d="M13 14l3 3"/>',
     book: '<path d="M4 5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2z"/><path d="M4 20a2 2 0 0 0 2 1h13v-3"/><path d="M9 8h6"/>',
+    // Attachment type icons: a word processing page with a W, a browser window
+    // with its address bar, and a generic document page.
+    wordDoc: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/><path d="M9.5 17l1.2-4.5 1.1 3.2 1.2-3.2 1.2 4.5"/>',
+    webPage: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M6 6.5h.01M8.5 6.5h.01"/><path d="M8 13h8M8 16h5"/>',
     // Birth: a baby — round head with a hair curl, smile, and a swaddled body below.
     birth: '<circle cx="12" cy="8" r="4"/><path d="M12 4c.3-1.3 1.9-1.3 2-.1"/><path d="M10.8 9.4c.7.6 1.7.6 2.4 0"/><path d="M8 21v-2a4 4 0 0 1 8 0v2"/>',
     death: '<path d="M8 8a4 4 0 1 1 8 0v10H8V8z"/><path d="M12 8v4"/><path d="M10 10h4"/><path d="M6 21h12"/>',
@@ -3188,7 +3368,12 @@
     mapPin: '<path d="M12 21c4-4.5 7-7.9 7-11a7 7 0 1 0-14 0c0 3.1 3 6.5 7 11z"/><circle cx="12" cy="10" r="2.6"/>',
     // Triangular carets for the generation-shift buttons on tree cards.
     caretUp: '<path d="M12 5l8 12H4z" fill="currentColor" stroke="none"/>',
-    caretDown: '<path d="M12 19L4 7h16z" fill="currentColor" stroke="none"/>'
+    caretDown: '<path d="M12 19L4 7h16z" fill="currentColor" stroke="none"/>',
+    // Tree Maintenance cards: an unlinked record and a doubled link.
+    orphan: '<circle cx="9" cy="9" r="3.2"/><path d="M4 20v-1.2a5 5 0 0 1 10 0V20"/><path d="M16 6h5M16 6l3-3M16 6l3 3" stroke-dasharray="2 2"/>',
+    duplicateRelation: '<path d="M21 3 12 12"/><path d="M12 12 8 16"/><path d="M8 16 3.5 20.5"/><path d="M3.5 20.5c-1.4 1.4-1.4 3 0 3.9 1.4.9 3 .4 3.9-1l1.8-2.7-3-3z"/><path d="M6.2 17.7l3 3"/><path d="M9.2 14.7l3 3"/>',
+    // A heart. Outline by default; a favourite fills it from currentColor.
+    heart: '<path d="M12 20s-7-4.3-7-9.3A4.2 4.2 0 0 1 12 7.6 4.2 4.2 0 0 1 19 10.7c0 5-7 9.3-7 9.3z"/>'
   };
 
   function createButtonIcon(icon) {
@@ -3209,6 +3394,15 @@
   function setMapMode(on) {
     const map = on ? getMapInstance() : mapInstance;
     if (on && !map) { showToast('The map component could not be loaded.'); return; }
+    if (on) {
+      setTreeMaintenanceMode(false);
+      if (favouritesModeIsOn()) setFavouritesMode(false);
+      // Coming from Reports or the Media library, the hidden main panel
+      // reappears with its tree layout.
+      elements.viewport.hidden = false;
+      document.querySelector('.main-panel .main-heading').hidden = false;
+      document.querySelector('.graph-footer').hidden = false;
+    }
     state.mapMode = on;
     setButtonContent(elements.mapViewButton, on ? 'tree' : 'map', on ? 'Relationship View' : 'Map View');
     elements.mapViewButton.setAttribute('aria-pressed', String(on));
@@ -3229,6 +3423,8 @@
 
   function setReportsMode(on) {
     if (on && !state.people.size) return;
+    if (on) setTreeMaintenanceMode(false);
+    if (on && favouritesModeIsOn()) setFavouritesMode(false);
     state.reportsMode = on;
     if (on && state.mediaLibraryMode) {
       state.mediaLibraryMode = false;
@@ -3248,6 +3444,8 @@
 
   function setMediaLibraryMode(on) {
     if (on && !state.people.size && !(state.folderMediaFiles && state.folderMediaFiles.size)) return;
+    if (on) setTreeMaintenanceMode(false);
+    if (on && favouritesModeIsOn()) setFavouritesMode(false);
     if (!on) {
       clearTimeout(state.mediaLibrarySearchDebounce);
       state.mediaLibrarySearchDebounce = 0;
@@ -3267,6 +3465,39 @@
       state.mediaLibraryPage = 0;
       renderMediaLibrary();
       elements.mediaLibraryView.scrollTop = 0;
+    }
+  }
+
+  // Settings > Tree Maintenance: the dashboard replaces the main panel's contents
+  // (heading, graph and footer) rather than hiding the whole shell, so the roster
+  // and the person details stay usable beside it. It is not a View-switch
+  // destination, so syncViewSwitch() keeps reporting the underlying tree view.
+  //
+  // Opening it must also leave any other full-page view cleanly: Reports and the
+  // Media library hide the whole app shell, and opening the dashboard from them
+  // used to leave it hidden, so the dashboard was rendered but invisible. Those
+  // views are closed first, which restores the shell, and the shell is also
+  // forced visible here so a stale hidden flag can never blank the page again.
+  function setTreeMaintenanceMode(on) {
+    if (on && !state.people.size) {
+      showToast('Open a GEDCOM first: tree maintenance works on the tree that is open.');
+      return;
+    }
+    if (on) {
+      if (state.reportsMode) setReportsMode(false);
+      if (state.mediaLibraryMode) setMediaLibraryMode(false);
+      if (state.mapMode) setMapMode(false);
+      elements.appShell.hidden = false;
+    }
+    state.treeMaintenanceMode = Boolean(on);
+    elements.treeMaintenanceView.hidden = !on;
+    elements.viewport.hidden = Boolean(on);
+    document.querySelector('.main-panel .main-heading').hidden = Boolean(on);
+    document.querySelector('.graph-footer').hidden = Boolean(on);
+    document.querySelector('.main-panel').classList.toggle('maintenance-mode', Boolean(on));
+    if (on) {
+      setButtonContent(document.querySelector('#treeMaintenanceBackButton'), 'tree', 'Back to tree');
+      renderTreeMaintenance();
     }
   }
 
@@ -3342,6 +3573,15 @@
     const name = document.createElement('div');
     name.className = 'pedigree-card-name';
     name.textContent = person.name;
+    if (isFavourite(person.id)) {
+      // A small heart marks a favourited person wherever their card appears.
+      const heart = document.createElement('span');
+      heart.className = 'pedigree-card-favourite';
+      heart.setAttribute('aria-label', 'Favourite');
+      heart.title = 'Favourite';
+      heart.append(createButtonIcon('heart'));
+      name.append(heart);
+    }
     card.append(name);
     const birth = person.events.find((event) => event.type === 'BIRT');
     const death = person.events.find((event) => event.type === 'DEAT');
@@ -3520,6 +3760,14 @@
       if (state.mediaLibraryMode) setMediaLibraryMode(false);
       if (state.reportsMode) setReportsMode(false);
       if (state.mapMode) setMapMode(false);
+      // The pedigree is drawn inside the viewport, so the dashboard must stand down.
+      setTreeMaintenanceMode(false);
+      if (favouritesModeIsOn()) setFavouritesMode(false);
+      // Coming from Reports or the Media library, the hidden main panel
+      // reappears with its tree layout.
+      elements.viewport.hidden = false;
+      document.querySelector('.main-panel .main-heading').hidden = false;
+      document.querySelector('.graph-footer').hidden = false;
     }
     // The pedigree is drawn inside the relationship-map viewport, so the app
     // shell (topbar, directory, person record) stays visible around it.
@@ -3551,9 +3799,12 @@
   }
 
   // Keeps the top-bar dropdown matching whichever view is currently active.
+  // The Favourites page is its own full-page view, so it wins when it is open
+  // (see favouritesModeIsOn, defined with the page in module 22).
   function syncViewSwitch() {
     const select = document.querySelector('#viewSwitch');
     if (!select) return;
+    if (favouritesModeIsOn()) { select.value = 'favourites'; return; }
     select.value = state.mediaLibraryMode ? 'media' : state.reportsMode ? 'reports' : state.pedigreeMode ? 'pedigree' : state.mapMode ? 'map' : 'tree';
   }
 
