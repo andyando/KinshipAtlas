@@ -40,7 +40,7 @@ test('large Media Library renders only the current page and keeps matching selec
     mediaLibraryContent: { classList: { toggle() {} }, replaceChildren: (content) => { cards = content.children || []; } }
   };
   const context = vm.createContext({
-    state, elements, clearTimeout,
+    state, elements, clearTimeout, mediaThumbnailPending: new Map(),
     document: {
       querySelector: field,
       createElement: () => ({}),

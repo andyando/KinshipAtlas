@@ -67,7 +67,13 @@ function mapFixture({ clustered = false, primary = true } = {}) {
   }));
   const icon = icons.bloodline;
   const context = vm.createContext({
-    window: { addEventListener() {} },
+    window: {
+      addEventListener() {},
+      KINSHIP_GEO: {
+        countries: [{ n: 'Example', a2: 'EX', a3: 'EXA', al: [], p: [[0, 0, 1, 0, 1, 1]] }],
+        cities: [], admin1: {}
+      }
+    },
     document: {
       createElement: (tag) => new Element(tag),
       createElementNS: (namespace, tag) => new Element(tag),
@@ -98,6 +104,7 @@ function mapFixture({ clustered = false, primary = true } = {}) {
 
 test('map renders each lineage, preserves descendant precedence and labels the legend and switch', () => {
   const fixture = mapFixture();
+  assert.equal(find(fixture.container, hasClass('map-country')).length, 1);
   const categories = fixture.markers().map((marker) => marker.className);
   for (const category of ['paternal', 'maternal', 'both', 'descendants', 'other']) {
     assert.ok(categories.some((classes) => classes.includes(`map-lineage-${category}`)), category);
